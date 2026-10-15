@@ -62,6 +62,8 @@ Cloudflare's build image comes with an older pnpm than the pnpm 11 the site is b
 
 If the first build ran before you added it and failed, run it again from the deployments list.
 
+Do not set `NODE_VERSION` unless you need to: the default Node.js 24 works, and Cloudflare cannot install a Node.js release that came out only days ago (a build with `NODE_VERSION` = `24.22.0`, released the day before, failed at "Installing nodejs"). A version must also exist: check `npm view pnpm@<version> version` before you set `PNPM_VERSION`.
+
 Leave `DOCS_BASE_PATH` unset: the Worker serves the site from the root of its domain.
 
 Optional: under **Settings** → **Build** → **Build watch paths**, include only the paths the site is built from, so commits that touch only the Rust code do not rebuild it:
