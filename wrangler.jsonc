@@ -1,0 +1,13 @@
+// Cloudflare Workers configuration for the documentation site. The Worker has no script: it
+// serves the static export in website/out, which the build command set in the Cloudflare
+// dashboard produces (see website/README.md, "Deploying to Cloudflare").
+{
+  // Must match the Worker's name in the Cloudflare dashboard.
+  "name": "senzor-docs",
+  "compatibility_date": "2026-10-15",
+  "assets": {
+    "directory": "./website/out",
+    // Unknown paths get website/out/404.html with a 404 status.
+    "not_found_handling": "404-page"
+  }
+}

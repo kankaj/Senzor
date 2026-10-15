@@ -37,30 +37,32 @@ rm -rf /tmp/preview && mkdir /tmp/preview && cp -r out /tmp/preview/Senzor
 pnpm exec serve /tmp/preview   # then open http://localhost:3000/Senzor/
 ```
 
-## Deploying to Cloudflare Pages
+## Deploying to Cloudflare
 
-The site is published with Cloudflare Pages connected to the GitHub repository. Connecting the repository starts a production deployment of `main` right away, and every later push to `main` deploys again; each pull request gets its own preview URL.
+The site is published as a Cloudflare Worker that only serves files: [`wrangler.jsonc`](../wrangler.jsonc) at the repository root names the Worker (`senzor-docs`) and points it at `website/out`; unknown paths get `404.html`. Cloudflare's Git integration builds and deploys it: once the repository is connected, every push to `main` deploys, and with preview builds on, other branches get preview URLs.
 
-In the Cloudflare dashboard, **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**, pick the repository, and on **Set up builds and deployments** set:
+In the Cloudflare dashboard, **Workers & Pages** → **Create application**, connect the GitHub repository, and on **Set up your application** set:
 
-| Setting                | Value                                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| Production branch      | `main`                                                                             |
-| Framework preset       | None                                                                               |
-| Root directory         | leave empty (the repository root)                                                  |
-| Build command          | `cd website && pnpm install --frozen-lockfile && pnpm check:links && pnpm build`   |
-| Build output directory | `website/out`                                                                      |
+| Setting                        | Value                                                                            |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| Project name                   | `senzor-docs` (the same as `name` in `wrangler.jsonc`)                           |
+| Build command                  | `cd website && pnpm install --frozen-lockfile && pnpm check:links && pnpm build` |
+| Deploy command                 | `npx wrangler deploy` (the default)                                              |
+| Preview command                | `npx wrangler preview` (the default)                                             |
+| Enable Preview builds          | on                                                                               |
+| Protect with Cloudflare Access | off (the docs are public)                                                        |
 
-The root directory stays at the repository root because the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.
+The build runs from the repository root, where `wrangler.jsonc` is: the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.
 
-On the same page, under **Environment variables (optional)**, add these (later they are in the project's **Settings**). Cloudflare's build image defaults to Node.js 22 and pnpm 10, older than what the site is built with:
+Cloudflare's build image comes with pnpm 10, older than the pnpm 11 the site is built with. Add a build variable under **Settings** → **Build** → **Build Variables and Secrets** (Node.js is already 24 there):
 
-| Variable        | Value     |
-| --------------- | --------- |
-| `NODE_VERSION`  | `24`      |
-| `PNPM_VERSION`  | `11.28.4` |
+| Variable       | Value     |
+| -------------- | --------- |
+| `PNPM_VERSION` | `11.28.4` |
 
-Leave `DOCS_BASE_PATH` unset: Cloudflare serves the site from the root of its domain.
+If the first build ran before you added it and failed, run it again from the deployments list.
+
+Leave `DOCS_BASE_PATH` unset: the Worker serves the site from the root of its domain.
 
 Optional: under **Settings** → **Build** → **Build watch paths**, include only the paths the site is built from, so commits that touch only the Rust code do not rebuild it:
 
@@ -69,15 +71,14 @@ website/*
 examples/*
 crates/senzor-core/src/project/builtin.toml
 Cargo.toml
+wrangler.jsonc
 ```
+
+To check what the Worker would serve before deploying, build the site and run `npx wrangler dev` from the repository root; it serves `website/out` the way the Worker does.
 
 ### Custom domain
 
-In the Pages project, **Custom domains** → **Set up a domain**, and enter the domain, for example `senzor.kankaj.cz`. Add the domain here first; a DNS record that points to the project before that returns error 522.
-
-- If the domain's DNS is on Cloudflare, Cloudflare creates the record.
-- Otherwise, create a `CNAME` record at your DNS provider from the subdomain (`senzor`) to `<project>.pages.dev`.
-- An apex domain such as `kankaj.cz` only works when its DNS zone is on Cloudflare.
+The domain's DNS has to be on Cloudflare (`kankaj.cz` is). In the Worker, **Settings** → **Domains & Routes** → **Add** → **Custom Domain**, and enter the domain, for example `senzor.kankaj.cz`. Cloudflare creates the DNS record and the certificate. A hostname that already has a `CNAME` record cannot be used; delete that record first.
 
 ## Where things live
 
