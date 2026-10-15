@@ -1,0 +1,49 @@
+---
+title: Files
+description: Create, open and save project files from the GUI, and what Senzor does to the file when it saves.
+---
+
+A project is one TOML file. The GUI edits that file's contents in memory; nothing is written until you save. The top bar shows the file name, or **untitled** for a project without a file, with a `*` when there are unsaved changes. Undoing an edit by hand, so the project matches the file again, removes the `*`. See [The project file](/docs/concepts/project-file) for what the file holds.
+
+You can also open a file when you start the GUI:
+
+```bash
+senzor examples/showcase.toml
+```
+
+## New and Open
+
+**New** starts an empty, untitled project. **Open** shows a file dialog that lists TOML files (**Senzor project**) and opens the one you pick. Replacing the project this way stops every instance of the current one; the new project's autostart devices start once those instances are offline ([Running devices](/docs/gui/running-devices#autostart)).
+
+A file opens even when it has validation problems: they appear in the Problems tab, and you can fix them in the GUI. A file that is not valid TOML, or that does not match the project format (an unknown key, for example), does not open. Senzor then shows **Cannot open** with the file's path, the note **Fix the file in a text editor, then open it again.** and the errors with their line and column. The current project stays open; if you named the file on the command line, Senzor starts with an empty project instead. To check a file from the command line, run `senzor-cli validate` ([CLI reference](/docs/reference/cli)).
+
+## Save and Save as
+
+**Save** writes the project to its file. For a project without a file, it works like **Save as**.
+
+**Save as** asks where to save, suggesting the current file name, or `project.toml` for a new project. Senzor adds `.toml` to a name that does not end in it (in any letter case), so the file shows up in the Open dialog: `myproject` is saved as `myproject.toml`, and `notes.txt` as `notes.txt.toml`.
+
+The save dialog checks for an existing file only under the name you typed. If the name with `.toml` added already exists, Senzor asks before it overwrites that file: **Replace myproject.toml?** says the file already exists in its folder and that replacing it overwrites its contents. Click **Replace** to save over it, or **Cancel** to write nothing.
+
+After **Save as**, the project's file is the new one, and relative TLS paths in the [broker settings](/docs/gui/broker-settings#tls) are resolved against its folder.
+
+<Callout type="warn">
+Senzor writes the whole file from the project, so comments and your own formatting in the file are not kept. Keep notes you want to keep outside the project file.
+</Callout>
+
+## How Senzor saves
+
+- **No half-written files.** Senzor writes the project to a temporary file next to the original and then swaps it in, so a crash while saving leaves either the old file or the new one. Two cases are rewritten in place instead: a file with other hard links (so every name sees the change), and a file in a folder where Senzor cannot create the temporary file.
+- **Permissions are kept.** The saved file gets the old file's permissions, so a file you keep private because it holds a broker password stays private.
+- **Symlinks stay links.** Saving through a symbolic link writes the file it points to and keeps the link.
+- **Read-only files are not overwritten.** Saving to a read-only file fails, and Senzor shows **Something went wrong** with a message such as `cannot write /path/to/project.toml: the file is read-only`. The project keeps its unsaved changes.
+
+## Unsaved changes
+
+When the project has unsaved changes, **New**, **Open** and closing the window first ask **Unsaved changes**, for example **Save the changes to this project before opening another project?**
+
+- **Save** saves the project, then goes on. For a project without a file, Senzor asks where to save first; if you cancel that dialog, nothing else happens and the project stays as it is.
+- **Discard** drops the changes and goes on.
+- **Cancel** keeps the project open with its changes.
+
+A name you are still typing into an ID or name box counts as a change, so the question also comes up for a rename you have not confirmed yet.

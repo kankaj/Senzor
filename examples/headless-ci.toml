@@ -1,0 +1,15 @@
+# For CI: `senzor-cli run headless-ci.toml --duration 30s` next to a broker service named "mqtt".
+[broker]
+host = "mqtt"
+port = 1883
+username = "ci"
+password_env = "MQTT_PASSWORD"
+
+[simulation]
+seed = 1
+
+[[devices]]
+id = "ci-co2"
+template = "co2"
+count = 10
+autostart = true

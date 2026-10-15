@@ -385,6 +385,9 @@ impl eframe::App for SenzorApp {
             .resizable(true)
             .default_size(180.0)
             .show(ui, |ui| {
+                // A panel takes the height of what it shows, so a short tab ("No problems.")
+                // would shrink it for good; filling it keeps the height it has.
+                ui.take_available_height();
                 ui::bottom::show(ui, &self.doc, &self.state, &mut self.ui, &mut actions);
             });
         egui::Panel::left("left")

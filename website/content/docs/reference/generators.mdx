@@ -1,0 +1,143 @@
+---
+title: Generators
+description: The five value generators, their parameters and constraints, and the noise option.
+---
+
+Every field of a template has a generator that produces the field's value on each tick. A generator
+is a table with a `generator` key and that generator's parameters:
+
+```toml
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15 }
+```
+
+| Generator | Produces |
+| --- | --- |
+| [`constant`](#constant) | The same value on every tick. |
+| [`random_walk`](#random_walk) | A number that drifts up and down by a random step, within bounds. |
+| [`sine`](#sine) | A number that follows a sine wave over time. |
+| [`uniform`](#uniform) | A new random number in a range on every tick. |
+| [`sequence`](#sequence) | The values of a list, one per tick. |
+
+Every generator also accepts [`noise`](#noise). All numbers must be finite: TOML allows `nan` and
+`inf`, Senzor does not. An unknown parameter, a missing required parameter or an unknown generator
+name is an error.
+
+Random draws come from the instance's own random number generator. With a `[simulation]` seed, they
+repeat from run to run; see [Reproducible runs](/docs/concepts/reproducible-runs). For how values,
+pins and runs relate, see [Values and generators](/docs/concepts/values-and-generators).
+
+## constant
+
+Publishes `value` on every tick.
+
+| Parameter | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `value` | string, number or boolean | required | |
+| `noise` | number | none | Only when `value` is a number. |
+
+```toml
+fields.firmware = { generator = "constant", value = "1.4.2" }
+```
+
+## random_walk
+
+The first tick publishes `start`. Every later tick adds a random amount between `-step` and `+step`
+and keeps the result between `min` and `max`.
+
+| Parameter | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `start` | number | required | Between `min` and `max`, inclusive. |
+| `min` | number | required | Less than `max`. |
+| `max` | number | required | |
+| `step` | number | required | Greater than 0. The largest change per tick. |
+| `noise` | number | none | |
+
+```toml
+fields.humidity = { generator = "random_walk", start = 45, min = 30, max = 70, step = 0.5 }
+```
+
+## sine
+
+Follows `center + amplitude × sin(2π × (t + phase) / period)`, where `t` is the time since the
+instance started. The value moves between `center - amplitude` and `center + amplitude` and repeats
+every `period`.
+
+| Parameter | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `center` | number | required | |
+| `amplitude` | number | required | |
+| `period` | duration | required | Greater than 0. |
+| `phase` | duration | `"0s"` | Shifts the wave. A quarter of `period` starts at the peak. |
+| `noise` | number | none | |
+
+```toml
+fields.temperature = { generator = "sine", center = 21.5, amplitude = 1.5, period = "24h" }
+```
+
+The wave starts when the instance starts, not at a time of day. With `period = "24h"` and no
+`phase`, the peak comes 6 hours after the start.
+
+## uniform
+
+Draws a new random number on every tick, at least `min` and less than `max`. Consecutive values are
+unrelated; use `random_walk` for a value that changes gradually.
+
+| Parameter | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `min` | number | required | Less than `max`. |
+| `max` | number | required | |
+| `noise` | number | none | |
+
+```toml
+fields.rssi = { generator = "uniform", min = -90, max = -40 }
+```
+
+## sequence
+
+Publishes the values of `values` in order, one per tick.
+
+| Parameter | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `values` | array of strings, numbers or booleans | required | Not empty. The types can be mixed. |
+| `loop` | boolean | `true` | `true` starts again from the first value after the last one. `false` keeps publishing the last value. |
+| `noise` | number | none | Only when every value is a number. |
+
+```toml
+fields.state = { generator = "sequence", values = ["open", "closed"] }
+```
+
+## noise
+
+Any generator accepts `noise`. On every tick it adds a random amount between `-noise` and `+noise` to
+the generator's value.
+
+- `noise` must be greater than 0.
+- On `constant` and `sequence`, it needs numeric values.
+- Noise does not change the generator's own state: a `random_walk` continues from its value without
+  noise.
+- The result is not limited again, so a `random_walk` with noise can go up to `noise` beyond `min`
+  and `max`.
+
+```toml
+fields.temperature = { generator = "sine", center = 21.5, amplitude = 1.5, period = "24h", noise = 0.1 }
+```
+
+## Constraint messages
+
+When a generator breaks a rule, validation reports one of these messages, as
+`` field `<name>`: <message> `` for a template field or `` field `<name>` override: <message> `` for a
+device's [field override](/docs/reference/project-file#field-overrides).
+
+| Message | Cause |
+| --- | --- |
+| `numbers must be finite` | A parameter or value is `nan`, `inf` or `-inf`. |
+| `noise must be greater than 0` | `noise` is 0 or negative. |
+| `noise requires numeric values` | `noise` on a `constant` or `sequence` with a non-numeric value. |
+| `min must be less than max` | `random_walk` or `uniform` with `min` equal to or greater than `max`. |
+| `start must be between min and max` | `random_walk` with `start` outside the bounds. |
+| `step must be greater than 0` | `random_walk` with `step` 0 or negative. |
+| `period must be greater than 0` | `sine` with `period = "0s"`. |
+| `values must not be empty` | `sequence` with `values = []`. |
+
+Senzor checks the rules in the order of this table and reports only the first one each field breaks.
+For all validation messages, see [Validation errors](/docs/reference/validation-errors).

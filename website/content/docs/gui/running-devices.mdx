@@ -1,0 +1,62 @@
+---
+title: Running devices
+description: Start, stop, restart and kill devices and instances from the GUI.
+---
+
+Each instance of a device is its own MQTT client. While it runs, it publishes its messages on every tick of its interval. You control instances from the top bar, from the menus in the device tree and from the [instance view](/docs/gui/instance-view).
+
+## Autostart
+
+When a project opens, Senzor starts every device that has **Autostart** ticked in the [device editor](/docs/gui/editing-devices) (`autostart = true` in the file, the default). Other devices stay stopped until you start them. A device you add while the project is open does not start by itself.
+
+Opening another project, or starting a new one, stops every instance of the current project first. The new project's instances may use the same client IDs as the old ones, so Senzor waits until the old instances are offline before it starts the new autostart devices; meanwhile the top bar shows **starting devices…**. Commands you give with **Start all** or the menus during that wait are sent once the old instances are offline.
+
+## Start all and Stop all
+
+**Start all** starts every device, regardless of autostart. Devices with problems are skipped, and instances that already run are left alone.
+
+**Stop all** stops every running instance. With availability set up, each instance that is online publishes its `offline` message, then disconnects. If you click **Stop all** while new devices are waiting for the previous project's to go offline, those devices do not start.
+
+## The device tree
+
+The **Devices** tab lists each device as its ID and instance count, for example `office ×5`, with its instances under it. A coloured dot shows each instance's status (see [The window](/docs/gui/window#left-panel)).
+
+A device or instance can carry a note:
+
+- `office ×5 (has errors)`: the device has problems and cannot start. The Problems tab says why.
+- **restart to apply** next to an instance: the instance runs with settings that differ from the current project. Restart it to apply your edits.
+- **device has errors** or **removed** next to an instance: the instance is an orphan (see [Orphans](#orphans)).
+
+Devices with more than 50 instances start collapsed, because laying out thousands of rows makes the window slow. Click the arrow next to the device to expand it.
+
+## Device menu
+
+Right-click a device to act on all of its instances:
+
+- **Start** starts the device's stopped and failed instances. It is disabled for a device with problems; hover over it to read **Fix the problems in the Problems tab first**.
+- **Stop** stops every instance listed under the device: each one that is online publishes `offline` (if the template has availability) and disconnects.
+- **Restart** stops each running instance and starts it again with the project's current settings. Stopped instances stay stopped. When no instance runs, the item is disabled with the hint **No running instances to restart**. A device with problems has no **Restart**.
+- **Kill** drops the connection of every listed instance without publishing `offline`. If the template has availability, the broker then publishes the instance's Last Will, as it would for a device that lost power. See [Availability and Last Will](/docs/concepts/availability).
+
+## Instance menu
+
+Right-click an instance for **Start**, **Stop**, **Restart** and **Kill** for that one instance. Unlike the device menu, **Restart** here also starts a stopped instance.
+
+The [instance view](/docs/gui/instance-view) has the same actions as buttons.
+
+## Editing while devices run
+
+Edits do not change instances that are already running. An instance keeps the settings it started with and shows **restart to apply** until you restart it; this includes changes to the broker settings. See [Editing while running](/docs/concepts/editing-while-running).
+
+## Orphans
+
+An instance that leaves the project while it runs keeps running as an orphan. That happens when you delete its device, when the device gets problems, or when a change to the device's ID, **Count** or **Instance IDs** gives the device a set of instance IDs without this one (lowering **Count** from 5 to 3 while `office-3` runs, for example). An orphan carries a note:
+
+- **removed**: the instance is no longer part of the project. Instances of a deleted or renamed device are listed last, under the old device ID followed by `(removed)`. An instance dropped by a change to **Count** or **Instance IDs** stays under its device.
+- **device has errors**: the device has problems; the instance keeps running with its last valid settings.
+
+You can stop or kill an orphan, but not restart it, since there are no valid settings to start it with. Once an orphan stops, it disappears from the tree. For a `(removed)` entry, the device menu only offers **Stop** and **Kill**.
+
+## Closing the window
+
+When you close the window, Senzor stops every instance cleanly before it exits, waiting up to 2 seconds for them, so your devices publish `offline` instead of leaving through their Last Will. If the project has unsaved changes, Senzor asks first ([Files](/docs/gui/files#unsaved-changes)).

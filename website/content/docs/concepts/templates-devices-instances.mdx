@@ -1,0 +1,133 @@
+---
+title: Templates, devices and instances
+description: How one template and a count become many simulated devices, each with its own MQTT connection.
+---
+
+Senzor works on three levels. A **template** describes a kind of sensor. A **device** is an entry in the project that uses a template and says how many copies to run. An **instance** is one of those copies: one simulated sensor with its own connection to the broker.
+
+In the [showcase project](/docs/concepts/project-file), one template feeds two devices:
+
+```text
+template office-air ─┬─► device office  (count = 5) ─► instances office-0 … office-4
+                     └─► device meeting (count = 2) ─► instances meeting-0, meeting-1
+```
+
+## Templates
+
+A template is the definition of a sensor type. It has:
+
+- `messages`: one or more messages, each with a `topic` and a `payload`. Both are Jinja templates, rendered on every tick.
+- `fields`: the values the sensor reports, each produced by a generator. See [Values and generators](/docs/concepts/values-and-generators).
+- `interval`: how often to publish, `10s` by default.
+- `qos` (0, 1 or 2, default 0) and `retain` (default `false`) for its messages.
+- `availability`: an optional status topic with `online` and `offline` payloads, which also becomes the Last Will. See [Availability and Last Will](/docs/concepts/availability).
+
+On each tick, an instance computes every field and then renders and publishes every message. This is the message of the showcase's `office-air` template:
+
+```toml
+[[templates.messages]]
+topic = "b/{{ room }}/{{ device_id }}/state"
+payload = '{"co2": {{ co2 | round | int }}, "temp": {{ temp | round(1) }}, "ts": {{ now_ms }}}'
+```
+
+In the topic and payload, `room` is a param that each device sets, `device_id` is the instance's ID, `co2` and `temp` are the template's fields (a `random_walk` and a `sine`), and `now_ms` is the time of the tick. The whole template is in the showcase project on the [Project file](/docs/concepts/project-file#what-is-in-it) page. [Template variables](/docs/reference/template-variables) lists every variable and the filters you can use.
+
+Templates are strict: a variable that does not exist is an error, not an empty string. Senzor renders every device's templates once when it validates the project, so a misspelled param or field shows up as a problem before anything connects.
+
+### Built-in templates
+
+`co2`, `temperature` and `humidity` are available in every project without an entry. You cannot redefine them: a template of your own with one of these IDs is an error. To change one, copy it into the project under a new ID; in the GUI, select it on the **Templates** tab and click **Copy into project…**. [Built-in templates](/docs/reference/builtin-templates) shows what each one publishes.
+
+## Devices
+
+A device is a `[[devices]]` entry. It names a template and adds:
+
+- `count`: how many instances to run; 1 by default, at least 1.
+- `params`: values the template uses, such as the room name.
+- `fields`: overrides for the template's fields (see [Field overrides](#field-overrides)).
+- `interval`: a publish interval that replaces the template's.
+- `autostart`: whether the device starts when the project is opened; `true` by default. `senzor-cli run` starts these devices unless you name others with `--only`.
+- `instance_id`: a pattern for instance IDs (see [Instance IDs](#instance-ids)).
+
+This device from the showcase runs two meeting room sensors:
+
+```toml
+[[devices]]
+id = "meeting"
+template = "office-air"
+count = 2
+params = { room = "meeting" }
+fields.co2 = { start = 1100 }
+```
+
+Its instances publish on `b/meeting/meeting-0/state` and `b/meeting/meeting-1/state`. The showcase's `office` device uses the same template with `count = 5` and `params = { room = "office" }`, so its instances publish on `b/office/office-0/state` to `b/office/office-4/state`. Device IDs must be unique within a project.
+
+## Instances
+
+An instance is what your system sees as a device. Each instance:
+
+- opens its own MQTT connection. Its client ID is the broker's `client_id_prefix` followed by the instance ID; with the default prefix `senzor-`, instance `office-0` connects as `senzor-office-0`.
+- if the template has `availability`, renders its availability topic for itself, from its own ID and params. Senzor does not check that the topics of different instances differ: put `{{ device_id }}` in the topic, or every instance shares one status topic and one Last Will topic.
+- has its own random number generator, so its `random_walk`, `uniform` and `noise` values differ from those of the other instances. The exception is the first reading of a `random_walk` without `noise`, which is its `start` value in every instance; the walks differ from the second reading on. Fields without randomness are the same everywhere: a `constant` or a `sequence` publishes the same values in every instance, and a `sine` without noise follows the same wave.
+- is `device_id` in its templates. The name reflects how a consumer sees it: to whatever reads the messages, an instance is the device.
+
+<Callout type="warn" title="One connection per client ID">
+Brokers allow one connection per client ID and drop the older connection when a new one arrives. If you run the same project twice against one broker, for example in the GUI and in `senzor-cli` at the same time, the two runs keep disconnecting each other's instances. Give one of them another `client_id_prefix`.
+</Callout>
+
+### Instance IDs
+
+Instance IDs come from the device ID:
+
+- With `count = 1`, the instance takes the device ID: device `kitchen` has the instance `kitchen`.
+- With a higher count, Senzor appends the index, counting from 0: device `office` with `count = 5` has `office-0` to `office-4`.
+
+These are the default patterns `{{ id }}` and `{{ id }}-{{ index }}`. In an instance ID pattern, `id` is the device ID and `index` the instance's number. Set `instance_id` to use your own pattern; it can use `id`, `index` and the device's params:
+
+```toml
+[[devices]]
+id = "lab"
+template = "co2"
+count = 3
+instance_id = "lab-sensor-{{ index + 1 }}"
+```
+
+This device's instances are `lab-sensor-1`, `lab-sensor-2` and `lab-sensor-3`. Every instance ID must be unique within the project, across all devices. With `count` above 1, a pattern without `index` gives every instance the same ID, which is an error.
+
+Changing `count` between 1 and a higher number changes the default pattern, so `kitchen` becomes `kitchen-0`. To your consumer that is a new device. If the ID matters, set `instance_id`.
+
+## Params
+
+Params are values a device hands to its template: strings, numbers or booleans. The template uses them by name, like `{{ room }}` above, in topics, payloads, the availability topic and `instance_id`. Whole numbers render without a decimal point: `params = { floor = 3 }` renders as `3`.
+
+A param cannot use a reserved variable name (`device_id`, `index`, `id`, `template_id`, `now_ms`, `now_iso`, `seq`) or the name of one of the template's fields.
+
+If a template uses a param that a device does not set, that device has a problem, found when the project is validated:
+
+```text
+device `typo`: undefined value: `room` is undefined (in availability.topic:1)
+```
+
+## Field overrides
+
+A device can adjust a template's field without copying the template. Under `fields.<name>`, give only the keys to change; they are merged into the template's field:
+
+```toml
+fields.co2 = { start = 1100 }
+```
+
+This is how the meeting room sensors in the showcase start at 1100 instead of the template's 650, while keeping the template's `min`, `max` and `step`.
+
+With a `generator` key, the override replaces the whole field instead:
+
+```toml
+fields.co2 = { generator = "constant", value = 2500 }
+```
+
+An override must name a field the template has, and the merged result must be a valid generator.
+
+## Where to go next
+
+- [Editing templates](/docs/gui/editing-templates) and [Editing devices](/docs/gui/editing-devices) show the same settings in the GUI.
+- [A fleet of sensors](/docs/recipes/fleet) runs hundreds of instances from a few devices.
+- The [project file reference](/docs/reference/project-file) lists every key, its type and its default.

@@ -1,0 +1,117 @@
+---
+title: A fleet of sensors
+description: Run hundreds of sensors from one template, with instance ID patterns, a client ID prefix, a seed, and the limits to watch.
+---
+
+To load-test a dashboard or a backend, you need many sensors, not one. In Senzor you define the sensor once as a template and set `count` on a device. This recipe runs 200 room sensors on two floors.
+
+## The project
+
+<include lang="toml" meta='title="examples/fleet.toml"'>../../../../examples/fleet.toml</include>
+
+- The template `room-sensor` publishes CO2 and humidity every 30 seconds, with a `seq` counter, and has an availability topic.
+- Each device runs 100 instances of it: `count = 100` gives the indexes 0 to 99.
+- `instance_id = "f1-room-{{ index }}"` names the instances `f1-room-0` to `f1-room-99` on floor 1, and `f2-room-0` to `f2-room-99` on floor 2.
+- The param `floor` goes into the topics, so instance `f1-room-0` publishes on `building/1/f1-room-0/telemetry` and has the status topic `building/1/f1-room-0/status`.
+- `autostart = true` on both devices: opening the project, or running it with `senzor-cli run`, connects all 200 instances.
+
+Run it with the CLI and watch one floor:
+
+```bash
+senzor-cli run examples/fleet.toml
+```
+
+```bash
+docker exec mosquitto mosquitto_sub -v -t 'building/1/#'
+```
+
+```text
+building/1/f1-room-73/telemetry {"co2": 600, "humidity": 45, "seq": 0}
+building/1/f1-room-97/telemetry {"co2": 600, "humidity": 45, "seq": 0}
+building/1/f1-room-77/telemetry {"co2": 600, "humidity": 45, "seq": 0}
+building/1/f1-room-42/telemetry {"co2": 600, "humidity": 45, "seq": 0}
+```
+
+Each instance's first reading is its walk's `start` value. From the second reading on, every instance takes its own random steps.
+
+## Instance ID patterns
+
+The instance ID is how a consumer tells your sensors apart: it is `{{ device_id }}` in the topics, part of the MQTT client ID, and, with a seed, the key for the instance's random numbers. Without `instance_id`, a device with `count = 1` uses its device ID, and a larger count appends the index: `floor1-0`, `floor1-1`, and so on.
+
+`instance_id` can use the device's `id`, the `index` (from 0) and the device's params:
+
+| Pattern | Instance IDs |
+| --- | --- |
+| `f1-room-{{ index }}` | `f1-room-0` … `f1-room-99` |
+| `f{{ floor }}-room-{{ index }}` | the same, with the floor taken from the param |
+| `{{ id }}-{{ index }}` | `floor1-0` … `floor1-99` (the default) |
+| `room-{{ '%03d' \| format(index) }}` | `room-000` … `room-099` |
+
+Every instance ID must be unique in the project. For a device with `count` above 1, a pattern without `{{ index }}` is an error, and so are two devices whose patterns produce the same ID:
+
+```text
+device `floor1`: instance id `room` repeats; include {{ index }} in instance_id
+device `floor2`: instance id `room-0` is already used by device `floor1`
+```
+
+[Template variables](/docs/reference/template-variables) lists the variables, and [Validation errors](/docs/reference/validation-errors) the messages.
+
+## Client IDs
+
+Each instance connects with its own client ID: the broker's `client_id_prefix` followed by the instance ID. The default prefix is `senzor-`; this project sets `fleet-`, so the broker sees `fleet-f1-room-0`, `fleet-f1-room-1` and so on.
+
+A broker allows one connection per client ID and drops the older one when a new one connects. If two runs of the same project use one broker, for example yours and a colleague's, or the GUI and `senzor-cli` on your machine, they keep disconnecting each other. The log of each run shows the same instance going back and forth about once a second:
+
+```text
+2026-10-15T16:01:32.161810Z  INFO senzor_core::engine::state: Online instance=f1-room-0
+2026-10-15T16:01:34.166603Z  INFO senzor_core::engine::state: reconnecting: Mqtt state: Connection closed by peer abruptly instance=f1-room-0 attempt=1
+2026-10-15T16:01:35.169027Z  INFO senzor_core::engine::state: Online instance=f1-room-0
+2026-10-15T16:01:36.170229Z  INFO senzor_core::engine::state: reconnecting: Mqtt state: Connection closed by peer abruptly instance=f1-room-0 attempt=1
+2026-10-15T16:01:37.172019Z  INFO senzor_core::engine::state: Online instance=f1-room-0
+```
+
+Give each run its own `client_id_prefix`, for example `fleet-alice-`. In the GUI it is **Client ID prefix** in the [broker settings](/docs/gui/broker-settings). The prefix only changes the client IDs: both runs still publish on the same topics.
+
+## Seed
+
+`seed = 7` in `[simulation]` makes the run repeatable. Each instance's random numbers come from the seed combined with its instance ID, so:
+
+- every run of this project produces the same sequence of random values for `f1-room-0`;
+- different instances still produce different values;
+- the random delay before each instance's first reading is the same in every run.
+
+The times of the messages, and `now_ms` or `now_iso` in a payload, still follow the clock. Renaming instances changes their sequences, because the instance ID is part of the key. Without a seed, every run differs. See [Reproducible runs](/docs/concepts/reproducible-runs).
+
+## How the messages spread out
+
+An instance publishes its first reading at a random point within its first interval, then once per interval. So 200 instances with a 30-second interval do not publish 200 messages at once every 30 seconds; together they publish about 200 / 30 ≈ 7 messages per second, spread over the interval. In the first 8 seconds of a run, about a quarter of the instances have published.
+
+The rate your broker and consumer have to handle is the number of instances, times the messages per tick, divided by the interval. Raise `count` or shorten `interval` to increase it.
+
+## In the GUI
+
+```bash
+senzor examples/fleet.toml
+```
+
+The **Devices** tab lists `floor1 ×100` and `floor2 ×100`. Devices with more than 50 instances start collapsed, because laying out thousands of rows makes the window slow; click the arrow next to a device to expand it. Right-click a device to start, stop, restart or kill its instances together (see [Running devices](/docs/gui/running-devices)).
+
+The **Message log** keeps the last 1,000 messages of all instances, which for this project is about two and a half minutes. Type part of a topic into its filter, such as `f1-room-7/`, to follow one sensor.
+
+## Limits to watch
+
+**Open files on your machine.** Every instance holds one TCP connection, and each connection counts against the operating system's limit of open files for the Senzor process. When the limit is too low for the number of instances, the instances over it cannot connect and show **Reconnecting** with this error:
+
+```text
+reconnecting: I/O: Too many open files (os error 24)
+```
+
+On Linux and macOS, check the limit with `ulimit -n` and raise it in the shell before you start Senzor, for example `ulimit -n 4096`.
+
+**Connections on the broker.** Brokers can limit the number of connected clients, such as Mosquitto with [`max_connections`](https://mosquitto.org/man/mosquitto-conf-5.html), and hosted brokers often limit connections per plan. If the broker refuses an instance's connection with an error code, the instance shows **Failed** and does not retry. If the broker closes the connection instead, the instance shows **Reconnecting** and tries again after 1 s, 2 s, 4 s and so on, up to 30 s. The status and the error are in the [instance view](/docs/gui/instance-view), and in the log of `senzor-cli`.
+
+**Retained status messages.** Every instance with availability leaves a retained status message on the broker: 200 for this project, each `offline` after the run. New subscribers receive all of them first. To remove one, publish an empty retained message to its topic; with the broker from the Quick start:
+
+```bash
+docker exec mosquitto mosquitto_pub -r -n -t 'building/1/f1-room-0/status'
+```

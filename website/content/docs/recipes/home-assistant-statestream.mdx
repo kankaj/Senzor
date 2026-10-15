@@ -1,0 +1,81 @@
+---
+title: Home Assistant MQTT Statestream
+description: Simulate a Matter sensor, the IKEA ALPSTUGA, as Home Assistant's MQTT Statestream integration publishes it.
+---
+
+Some devices have no MQTT format of their own, and no bridge defines one for them. The IKEA [ALPSTUGA](https://www.ikea.com/us/en/p/alpstuga-air-quality-sensor-smart-70609396/) air quality sensor is one: it uses Matter over Thread and measures CO2, PM2.5, temperature and humidity. If it is paired with Home Assistant, Home Assistant's [MQTT Statestream](https://www.home-assistant.io/integrations/mqtt_statestream/) integration can publish the states of its entities to your broker. That is the format your consumer reads, so that is the format to simulate.
+
+## The format
+
+Statestream publishes each entity on its own topic, in the form `<base_topic>/<domain>/<entity>/state`. The topic comes from the entity ID: with the base topic `homeassistant`, the entity `sensor.alpstuga_office_carbon_dioxide` publishes on `homeassistant/sensor/alpstuga_office_carbon_dioxide/state`.
+
+The payload is the entity's state alone, such as `650`, not JSON. Statestream publishes it with QoS 1 as a retained message, each time the entity's state changes (see the [integration's source](https://github.com/home-assistant/core/blob/dev/homeassistant/components/mqtt_statestream/__init__.py)). With `publish_attributes` and `publish_timestamps` turned on, it also publishes the entity's attributes and timestamps on topics of their own; the example does not simulate those.
+
+The integration's documentation says that states and attributes are serialized as JSON, which would put a string state in quotes. The source publishes the state value as it is and JSON-serializes the attributes, and this recipe follows the source. The traffic you capture in [Adapt the entity names](#adapt-the-entity-names) shows which form your Home Assistant sends.
+
+## The project
+
+<include lang="toml" meta='title="examples/home-assistant-statestream.toml"'>../../../../examples/home-assistant-statestream.toml</include>
+
+- The template `alpstuga-statestream` has four messages, one per sensor entity. On every tick the instance publishes all four.
+- Each payload is the bare value: `{{ co2 | round | int }}` publishes `650`. Temperature keeps one decimal with `round(1)`.
+- `instance_id = "{{ id }}"` makes the instance ID `alpstuga_office`, the device ID. `{{ device_id }}` in the topics is the instance ID, so it stands for the part of the entity IDs that names the device.
+- The template has no `availability`: Statestream publishes entity states, not a connection status, so there is no status topic to simulate.
+- CO2, PM2.5 and humidity take random steps within their limits; temperature follows an 8-hour wave around 22.5 °C. See [Values and generators](/docs/concepts/values-and-generators).
+
+### Match QoS and retain
+
+The template leaves `qos` and `retain` at their defaults, 0 and `false`. Statestream publishes with QoS 1 and retained. If your consumer depends on that, for example because it reads the current value when it subscribes, set both on the template:
+
+```toml
+[[templates]]
+id = "alpstuga-statestream"
+interval = "30s"
+qos = 1
+retain = true
+# messages and fields as in the example
+```
+
+## Run it
+
+Start a broker as in the [Quick start](/docs/quick-start), then run the project:
+
+```bash
+senzor-cli run examples/home-assistant-statestream.toml
+```
+
+Subscribe to everything under `homeassistant/`. With the broker container from the Quick start:
+
+```bash
+docker exec mosquitto mosquitto_sub -v -t 'homeassistant/#'
+```
+
+Within the first 30 seconds, the instance publishes its first tick:
+
+```text
+homeassistant/sensor/alpstuga_office_carbon_dioxide/state 650
+homeassistant/sensor/alpstuga_office_pm25/state 4
+homeassistant/sensor/alpstuga_office_temperature/state 22.5
+homeassistant/sensor/alpstuga_office_humidity/state 42
+```
+
+Your values may differ. The instance then publishes all four values again every 30 seconds. The real Statestream publishes an entity when Home Assistant reports a change to it, so it sends fewer messages, and not always all four together.
+
+## Adapt the entity names
+
+The topics in the example are placeholders. Your entity IDs depend on how the device is named in Home Assistant, and you can rename them there, so copy the real ones:
+
+1. With Statestream running in Home Assistant, capture the traffic on your broker:
+
+   ```bash
+   mosquitto_sub -v -t '#'
+   ```
+
+   If your broker is Mosquitto in Docker, run it inside the container, as in the Quick start: `docker exec <container> mosquitto_sub -v -t '#'`. Each line shows a topic and its payload. Note the topics of the sensor's entities, for example `homeassistant/sensor/office_air_quality_carbon_dioxide/state`.
+2. Set the device's `id` to the part that names the device: `office_air_quality`.
+3. Make each message's `topic` match a real topic, with `{{ device_id }}` in place of that part: `homeassistant/sensor/{{ device_id }}_carbon_dioxide/state`. Change the first segment if your `base_topic` is not `homeassistant`.
+4. Look at the real payloads, and adjust the rounding in the payload templates to match, such as `round(1)` for one decimal.
+
+For a second sensor of the same kind, add another `[[devices]]` entry with the same template and its own `id`, for example `alpstuga_bedroom`.
+
+[Template variables](/docs/reference/template-variables) lists the variables and filters you can use in topics and payloads.

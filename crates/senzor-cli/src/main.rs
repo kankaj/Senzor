@@ -89,15 +89,21 @@ fn validate(path: &Path) -> ExitCode {
     match load(path) {
         Ok(project) => {
             println!(
-                "{}: OK ({} devices, {} instances)",
+                "{}: OK ({}, {})",
                 path.display(),
-                project.devices.len(),
-                project.instances().count()
+                count_noun(project.devices.len(), "device"),
+                count_noun(project.instances().count(), "instance")
             );
             ExitCode::SUCCESS
         }
         Err(code) => code,
     }
+}
+
+/// `1 device`, `2 devices`: the noun takes an `s` unless the count is exactly 1.
+fn count_noun(count: usize, noun: &str) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {noun}{plural}")
 }
 
 /// Device IDs to start: `--only` (trimmed) or every device with `autostart = true`; never empty.

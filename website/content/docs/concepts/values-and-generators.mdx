@@ -1,0 +1,64 @@
+---
+title: Values and generators
+description: How instances produce field values on each tick, and what pins, reconnects and restarts do to them.
+---
+
+Every field of a template has a generator: a rule that produces the field's next value. An instance asks its generators for new values on every tick and publishes messages built from them.
+
+## Ticks
+
+An instance ticks once per interval: the device's `interval` if it sets one, otherwise the template's. On each tick it:
+
+1. computes the next value of every field;
+2. renders the topic and payload of every message with these values;
+3. publishes each message.
+
+A message that fails to render or to publish counts as an error on the instance, and the tick's other messages are still published.
+
+Topics and payloads see each value under its field's name. They also get `seq`, which counts the ticks of the current run from 0, and the time of the tick as `now_ms` and `now_iso`. [Template variables](/docs/reference/template-variables) lists them all.
+
+An instance ticks only while it is online. While it is connecting or reconnecting, it generates and publishes nothing.
+
+## Generators
+
+| Generator | Produces |
+| --- | --- |
+| `constant` | The same `value` on every tick: a number, a boolean or a string. |
+| `random_walk` | `start` on the first tick. Each later tick adds a random step between `-step` and `+step`, keeping the result between `min` and `max`. |
+| `sine` | A wave around `center` that swings by `amplitude` and repeats every `period`. It follows the time since the run started, shifted by `phase`. |
+| `uniform` | A random number between `min` and `max`, independent of the previous one. |
+| `sequence` | The `values` in order, then again from the start. With `loop = false` it repeats the last value once it reaches the end. |
+
+Any generator can add `noise`: a random amount between `-noise` and `+noise`, added to each value. Noise needs numeric values, and it does not change the generator's state: a random walk with noise walks exactly as it would without it, and each published value gets fresh noise on top.
+
+Generated numbers usually have many decimals, so payloads format them with Jinja filters: `{{ co2 | round | int }}` turns 611.7 into `612`, and `{{ temp | round(1) }}` turns 21.5872 into `21.6`.
+
+[Generators](/docs/reference/generators) lists every parameter and the rules Senzor checks.
+
+## Pins
+
+In the GUI you can pin a field of a running instance to a value ([Instance view](/docs/gui/instance-view) shows how). While a field is pinned:
+
+- every tick uses the pinned value instead of a generated one, without noise. The payload template formats it like any other value.
+- the field's generator does not advance. After **Unpin**, a random walk continues from the value it had before the pin, and a sequence with the value it would have published next. A sine follows the clock, so it continues at the current point of its wave.
+
+What you type becomes a number if it reads as one, `true` or `false` as a boolean, and text otherwise.
+
+A pin lasts until you unpin the field or the instance's run ends. Pins are a GUI feature; `senzor-cli` has none.
+
+## Reconnects keep the state
+
+Generator state belongs to the run, not to the connection. When an instance loses its connection and reconnects, its generators, pins and `seq` continue where they were: a random walk does not jump back to `start`. While it is reconnecting, the instance does not tick, and missed ticks are not made up: if any tick fell due during the outage, the instance ticks once right after it is back online and keeps its interval from that moment. A sine, which follows the clock, is further along its wave when the instance is back.
+
+## Start begins a new run
+
+**Stop** and **Kill** end an instance's run. **Start** begins a new one with the project's current settings:
+
+- every generator starts afresh, so a random walk begins at `start` again and a sequence at its first value;
+- the time a sine follows starts again from 0;
+- `seq` starts again from 0;
+- pins are cleared.
+
+**Restart** stops a running instance and starts it again in one step, with the same effect. A run that fails, for example because the broker refused the connection, also ends; the next **Start** begins a new run.
+
+With a seed, every new run of an instance starts the same random sequence again. See [Reproducible runs](/docs/concepts/reproducible-runs).

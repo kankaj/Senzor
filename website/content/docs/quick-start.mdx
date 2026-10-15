@@ -1,0 +1,104 @@
+---
+title: Quick start
+description: Run three simulated sensors against a local Mosquitto broker and watch what they publish.
+---
+
+In this guide you start a local MQTT broker, run a project with two CO2 sensors and one thermometer, and watch their messages. You need Docker and the `senzor` or `senzor-cli` binary (see [Installation](/docs/installation)).
+
+## Start a broker
+
+Run Mosquitto 2 in Docker:
+
+```bash
+docker run -d --name mosquitto -p 127.0.0.1:1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+```
+
+`/mosquitto-no-auth.conf` ships with the image and opens a listener on port 1883 that accepts clients without a password. The `-p` option makes it reachable only from your machine, on `localhost:1883`.
+
+## The project
+
+<include lang="toml" meta='title="examples/quick-start.toml"'>../../../examples/quick-start.toml</include>
+
+The file is `examples/quick-start.toml` in the [Senzor repository](https://github.com/kankaj/Senzor). If you do not have the repository, save the project above under that path.
+
+The project connects to `localhost:1883` and defines two devices. Neither needs a template of its own: they use the built-in `co2` and `temperature` templates.
+
+- `office` runs two instances of `co2`. A device with a count above 1 numbers its instances from 0, so they are `office-0` and `office-1`.
+- `kitchen` runs one instance of `temperature`. A single instance takes the device's name: `kitchen`.
+- `autostart = true` starts a device as soon as the project is opened.
+
+## Run it
+
+Use the GUI or the CLI:
+
+```bash tab="GUI"
+senzor examples/quick-start.toml
+```
+
+```bash tab="CLI"
+senzor-cli run examples/quick-start.toml
+```
+
+The GUI opens the project and starts both devices. In the **Devices** tab on the left, `office ×2` lists `office-0` and `office-1`, and `kitchen ×1` lists `kitchen`. The dot next to an instance turns green when it is online. Click an instance to see its current values, and open the **Message log** tab at the bottom to see what the instances publish. You can also start `senzor` without a file and click **Open**.
+
+`senzor-cli` starts the same devices and logs every status change to stderr until you stop it.
+
+## Watch the messages
+
+In a second terminal, subscribe to everything under `senzor/` with the `mosquitto_sub` client inside the broker container:
+
+```bash
+docker exec mosquitto mosquitto_sub -v -t 'senzor/#'
+```
+
+`-v` prints each message's topic before its payload. The output looks like this; your values and timestamps differ:
+
+```text
+senzor/office-1/status online
+senzor/kitchen/status online
+senzor/office-0/status online
+senzor/office-0/co2 {"co2": 600, "ts": 1792079317994}
+senzor/office-1/co2 {"co2": 600, "ts": 1792079320939}
+senzor/kitchen/temperature {"temperature": 21.5, "ts": 1792079322344}
+senzor/office-0/co2 {"co2": 596, "ts": 1792079327995}
+senzor/office-1/co2 {"co2": 595, "ts": 1792079330939}
+senzor/kitchen/temperature {"temperature": 21.6, "ts": 1792079332344}
+```
+
+What you see:
+
+- Each instance first publishes `online` on `senzor/<instance>/status`. Status messages are retained, so a subscriber that connects later still gets them at once.
+- Every 10 seconds, each instance publishes a JSON reading. `ts` is the time of the reading in milliseconds since the Unix epoch.
+- The instances do not publish in step. Each one waits a random part of its first interval before its first reading, so a fleet spreads its messages over time.
+- `co2` starts at 600 and moves by up to 15 per reading, staying between 400 and 2000. `temperature` follows a slow wave around 21.5 with a period of 24 hours, plus a little noise.
+
+[Built-in templates](/docs/reference/builtin-templates) lists the topics, payloads and generators of each built-in template.
+
+## Stop
+
+Close the GUI window, or click **Stop all**. For the CLI, press Ctrl+C. Each instance publishes `offline` on its status topic and disconnects:
+
+```text
+senzor/office-1/status offline
+senzor/office-0/status offline
+senzor/kitchen/status offline
+```
+
+Because status messages are retained, the broker keeps `offline` for each instance, and new subscribers see the sensors as offline.
+
+To watch a device drop off instead, start the project again in the GUI and use **Kill** on one instance. The instance closes its connection without a word, and the broker publishes its Last Will, `offline`, on its behalf. [Simulating a device dropping off](/docs/recipes/device-dropping-off) walks through it.
+
+When you are done, remove the broker:
+
+```bash
+docker rm -f mosquitto
+```
+
+## Next steps
+
+<Cards>
+  <Card title="Templates, devices and instances" href="/docs/concepts/templates-devices-instances" description="Write your own template and run many copies of it." />
+  <Card title="The window" href="/docs/gui/window" description="Find your way around the GUI." />
+  <Card title="Running headless" href="/docs/headless" description="Run projects with senzor-cli in CI and Docker." />
+  <Card title="Project file reference" href="/docs/reference/project-file" description="Every table and key of a project file." />
+</Cards>

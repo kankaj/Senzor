@@ -1,0 +1,44 @@
+---
+title: Reproducible runs
+description: Set a seed to make every run of a project produce the same random value sequences.
+---
+
+Without a seed, every run draws fresh random numbers, so random walks wander differently each time. Set a seed in `[simulation]` and runs repeat:
+
+```toml
+[simulation]
+seed = 42
+```
+
+The seed lives in the project file, in `[simulation]`. The GUI has no field for it, so add it in a text editor; the GUI keeps it when it saves the project.
+
+Use a seed when a test depends on the data: the random parts of the values come out the same on every run, so a failure can be repeated.
+
+## What the seed fixes
+
+Each instance has its own random number generator. Senzor creates it at the start of every run from the seed and the instance's ID. With the same project and the same seed:
+
+- each instance produces the same `random_walk`, `uniform` and `noise` values, in the same order, on every run;
+- each instance waits the same time before its first tick (see [Spread-out first ticks](#spread-out-first-ticks));
+- the GUI and `senzor-cli` produce the same random values, because they run the same engine;
+- different instances still produce different values, because their IDs differ.
+
+Every new run starts the sequence from the beginning: a **Start** after **Stop** or **Kill**, a **Restart**, or another `senzor-cli run`.
+
+## What it does not fix
+
+- **Timestamps.** `now_ms` and `now_iso` are the clock time of each tick.
+- **Sine values.** A `sine` follows the time since the run started, and the seed does not fix exactly when ticks happen. Its values can differ slightly between runs.
+- **Runs with pins.** A pinned field skips its generator. If that generator draws random numbers (`random_walk`, `uniform` or `noise`), the numbers it would have drawn go to the instance's next draws instead. From then on, the instance's values no longer match a run without the pin.
+
+A reconnect does not change the values either. While reconnecting, the instance does not tick and draws no random numbers, and missed ticks are not made up, so its sequence continues where it stopped. Only the timing differs.
+
+## The seed and the instance ID
+
+Because the instance ID feeds the random number generator, anything that changes an ID gives that instance a new sequence: renaming the device, setting another `instance_id` pattern, or changing `count` between 1 and a higher number (which turns `kitchen` into `kitchen-0`).
+
+## Spread-out first ticks
+
+Instances that start together do not publish in lockstep. Each instance waits a random time, between zero and one interval, before its first tick, then ticks once per interval. A thousand sensors with a 10 second interval spread their messages over those 10 seconds instead of sending them all at once.
+
+This wait is the first random number an instance draws, so with a seed it is the same on every run as well.

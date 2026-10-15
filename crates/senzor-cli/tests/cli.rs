@@ -73,11 +73,49 @@ fn assert_exit(output: &Output, code: i32) {
 }
 
 #[test]
+fn version_flag_prints_the_package_version() {
+    let output = Command::cargo_bin(BIN)
+        .unwrap()
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert_exit(&output, 0);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("senzor-cli {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn validate_accepts_a_valid_project() {
     let path = write_project("valid", &project_toml(1883, true));
     let output = run_cli("validate", &path, &[]);
     assert_exit(&output, 0);
     assert!(String::from_utf8_lossy(&output.stdout).contains("OK (2 devices, 3 instances)"));
+}
+
+#[test]
+fn validate_uses_singular_nouns_for_one_device_and_one_instance() {
+    let content = r#"
+[broker]
+host = "127.0.0.1"
+port = 1883
+
+[[templates]]
+id = "cli"
+interval = "200ms"
+messages = [{ topic = "cli/{{ device_id }}/state", payload = "{{ v }}" }]
+fields.v = { generator = "constant", value = 1 }
+
+[[devices]]
+id = "dev"
+template = "cli"
+"#;
+    let path = write_project("singular", content);
+    let output = run_cli("validate", &path, &[]);
+    assert_exit(&output, 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("OK (1 device, 1 instance)"), "{stdout}");
 }
 
 #[test]

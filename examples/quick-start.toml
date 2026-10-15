@@ -1,0 +1,15 @@
+# Quick start: two CO2 sensors and a thermometer, using the built-in templates.
+[broker]
+host = "localhost"
+port = 1883
+
+[[devices]]
+id = "office"
+template = "co2"
+count = 2
+autostart = true
+
+[[devices]]
+id = "kitchen"
+template = "temperature"
+autostart = true

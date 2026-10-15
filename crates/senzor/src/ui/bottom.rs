@@ -48,7 +48,10 @@ fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState) {
     let log = ui_state.log_frozen.as_ref().unwrap_or(&state.log);
     let entries: Vec<&LogEntry> = log.iter().filter(|e| e.topic.contains(filter)).collect();
     let row_height = ui.text_style_height(&TextStyle::Monospace);
+    // Both tabs draw into the same `ui`; their scroll areas need IDs of their own, or showing
+    // the problems resets the log's position and its stick to the bottom.
     egui::ScrollArea::vertical()
+        .id_salt("log")
         .auto_shrink([false; 2])
         .stick_to_bottom(true)
         .show_rows(ui, row_height, entries.len(), |ui, rows| {
@@ -75,6 +78,7 @@ fn problems(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
         return;
     }
     egui::ScrollArea::vertical()
+        .id_salt("problems")
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             for error in errors {
@@ -85,4 +89,56 @@ fn problems(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::ui::test_support::Fixture;
+
+    /// One problem, so the Problems tab lists it in a scroll area of its own.
+    const ONE_PROBLEM: &str = "[[devices]]\nid = \"bad\"\ntemplate = \"nope\"\n";
+
+    /// An engine whose log holds `count` messages, on topics `topic-000`, `topic-001`, ….
+    fn engine_with_log(count: usize) -> EngineState {
+        let log = (0..count)
+            .map(|i| LogEntry {
+                time: SystemTime::UNIX_EPOCH,
+                instance: "office".to_string(),
+                topic: format!("topic-{i:03}"),
+                payload: "1".to_string(),
+                qos: 0,
+                retain: false,
+            })
+            .collect();
+        EngineState {
+            log,
+            ..EngineState::default()
+        }
+    }
+
+    #[test]
+    fn the_log_still_shows_its_newest_message_after_the_problems_tab() {
+        let state = engine_with_log(100);
+        let mut h = Fixture::new(ONE_PROBLEM).harness(move |ui, fx| {
+            show(ui, &fx.doc, &state, &mut fx.ui, &mut fx.actions);
+        });
+        assert!(
+            h.query_by_label_contains("topic-099").is_some(),
+            "the log starts at its newest message"
+        );
+
+        h.get_by_label("Problems (1)").click();
+        h.run();
+        h.get_by_label("Message log").click();
+        h.run();
+        assert!(
+            h.query_by_label_contains("topic-099").is_some(),
+            "the log is still at its newest message"
+        );
+    }
 }

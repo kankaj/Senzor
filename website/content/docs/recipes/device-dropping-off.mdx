@@ -1,0 +1,100 @@
+---
+title: Simulating a device dropping off
+description: Kill an instance so the broker publishes its Last Will, compare that with a clean Stop, and bring the device back.
+---
+
+A real sensor that loses power or network cannot say goodbye. MQTT covers this with the Last Will: when a client connects, it hands the broker a message, and the broker publishes that message if the connection ends without a clean disconnect. Use this recipe to test that your consumer notices a sensor that disappears, and that it recovers when the sensor comes back.
+
+## What Senzor sends
+
+When a template has `availability`, every instance of it:
+
+- publishes the `online` payload on its availability topic when it connects;
+- registers the `offline` payload on the same topic as its Last Will.
+
+Both are published with QoS 1 and retained. A template without `availability` has no status topic and no Last Will, so stopping or killing its instances publishes nothing. See [Availability and Last Will](/docs/concepts/availability).
+
+There are two ways to take a running instance offline:
+
+| | **Stop** | **Kill** |
+| --- | --- | --- |
+| What the instance does | Publishes `offline`, then disconnects cleanly. | Drops the connection without a word. |
+| Who publishes `offline` | The instance. | The broker, as the Last Will. |
+| Like a real device that | shuts down properly. | loses power or network. |
+| Status afterwards | **Stopped** | **Stopped** |
+
+A subscriber receives the same message in both cases: the `offline` payload on the availability topic, retained. What differs is who sends it. With **Kill**, your setup relies on the broker's Last Will handling, which is what you want to test.
+
+## Try it in the GUI
+
+1. Start a broker as in the [Quick start](/docs/quick-start) and subscribe to the status topics of the built-in templates:
+
+   ```bash
+   docker exec mosquitto mosquitto_sub -v -t 'senzor/+/status'
+   ```
+
+2. Open the Quick start project:
+
+   ```bash
+   senzor examples/quick-start.toml
+   ```
+
+   Its three instances connect, and the subscriber prints an `online` for each.
+3. In the **Devices** tab, click `office-0`. In the instance view, click **Kill** (its hint reads **Drop the connection; the broker publishes the Last Will**). The broker publishes the Last Will of `office-0`.
+4. Click **Start**. The instance connects again and publishes `online`.
+5. Click **Stop**. The instance publishes `offline` itself and disconnects.
+
+The subscriber shows:
+
+```text
+senzor/office-1/status online
+senzor/kitchen/status online
+senzor/office-0/status online
+senzor/office-0/status offline
+senzor/office-0/status online
+senzor/office-0/status offline
+```
+
+The first `offline` is the broker's Last Will after **Kill**; the second is the instance's own message after **Stop**. If you ran the project before, the subscriber first prints the retained status messages of that run.
+
+To drop several sensors at once, right-click a device in the **Devices** tab and choose **Kill**: every instance of the device loses its connection, and the broker publishes a Last Will for each. The instance menu has the same actions for one instance (see [Running devices](/docs/gui/running-devices)).
+
+### Restart
+
+**Restart** stops a running instance cleanly and starts it again with the project's current settings, like a device that reboots. The subscriber sees `offline`, then `online`. The new run starts from scratch: a random walk begins at its `start` again, `seq` counts from 0, and pins are cleared. With a `seed`, the instance repeats the values of its previous run.
+
+Use it also to apply edits. A running instance keeps the settings it started with; when you change its template, params, field overrides, interval or the broker settings, it shows **restart to apply** until you restart it (see [Editing while running](/docs/concepts/editing-while-running)).
+
+## Headless
+
+`senzor-cli` has no Kill command: Ctrl+C, SIGTERM and the end of `--duration` all stop every instance cleanly. To make devices drop off, kill the process itself with SIGKILL. The operating system then closes all of its connections, and the broker publishes the Last Will of every instance it ran.
+
+To drop one device and keep the others, run it in a process of its own with `--only`. With the IKEA example from [IKEA sensors as Zigbee2MQTT](/docs/recipes/ikea-zigbee2mqtt):
+
+```bash
+senzor-cli run examples/ikea-zigbee2mqtt.toml --only living_room_air & AIR=$!
+senzor-cli run examples/ikea-zigbee2mqtt.toml --only front_door & DOOR=$!
+sleep 5
+kill -KILL $DOOR   # front_door drops off: the broker publishes its Last Will
+sleep 5
+kill $AIR          # living_room_air stops cleanly and publishes offline itself
+```
+
+The two processes do not get in each other's way, because each one runs other instances and so uses other client IDs. A subscriber to `zigbee2mqtt/+/availability` shows:
+
+```text
+zigbee2mqtt/front_door/availability {"state":"online"}
+zigbee2mqtt/living_room_air/availability {"state":"online"}
+zigbee2mqtt/front_door/availability {"state":"offline"}
+zigbee2mqtt/living_room_air/availability {"state":"offline"}
+```
+
+In Docker, `docker stop` sends SIGTERM and stops the instances cleanly, while `docker kill` sends SIGKILL and leaves them to their Last Wills.
+
+## What to check in your consumer
+
+- The device shows as offline after **Kill**, without waiting for its next reading to be missed.
+- The device shows as online again after **Start**, and its readings are accepted.
+- A consumer that starts later sees the device as offline: the `offline` message is retained, so the broker delivers it on subscribe.
+
+**Kill** closes the connection, so the broker notices at once and publishes the Last Will within moments. A real device that loses power often leaves its connection open, and the broker only notices when the keep-alive runs out: after one and a half times the client's keep-alive interval, which is 30 seconds by default in Senzor (**Keep alive** in the [broker settings](/docs/gui/broker-settings)). Expect real Last Wills to arrive later than simulated ones.

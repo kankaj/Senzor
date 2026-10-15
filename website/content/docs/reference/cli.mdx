@@ -1,0 +1,144 @@
+---
+title: CLI
+description: The senzor-cli commands, options, exit codes, messages and logging.
+---
+
+`senzor-cli` is the headless runner. For a guided introduction, see
+[Running headless](/docs/headless).
+
+## Synopsis
+
+```text
+senzor-cli [OPTIONS] validate <PROJECT>
+senzor-cli [OPTIONS] run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+senzor-cli help [COMMAND]
+senzor-cli --version
+```
+
+`<PROJECT>` is the path of a project file.
+
+## Global options
+
+`-v` and `-h` work before or after the command; `-V` only before it.
+
+| Option | Meaning |
+| --- | --- |
+| `-v`, `--verbose` | Log every published message at `debug` level. Giving it more than once has the same effect. `RUST_LOG` overrides it. |
+| `-h`, `--help` | Print help. `senzor-cli help <COMMAND>` prints the help of one command. |
+| `-V`, `--version` | Print the version, e.g. `senzor-cli 1.0.0`. |
+
+## validate
+
+```text
+senzor-cli validate <PROJECT>
+```
+
+Loads and validates a project and prints every problem. It resolves the broker settings as `run`
+does: it reads the environment variable named in `password_env` and the TLS files, relative to the
+folder of the project file. It does not connect to the broker.
+
+- **Valid**: prints `<PROJECT>: OK (<n> devices, <m> instances)` to stdout and exits with 0. A
+  count of 1 takes the singular, for example `examples/headless-ci.toml: OK (1 device, 10 instances)`.
+- **Invalid**: prints each problem to stderr as `<PROJECT>: <location>: <message>` and exits with 2.
+  See [Validation errors](/docs/reference/validation-errors).
+
+## run
+
+```text
+senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--only <ID>[,<ID>…]` | Device IDs to start instead of those with `autostart = true`. Separate IDs with commas or repeat the option. Spaces around an ID are ignored. A device ID is the `id` of a `[[devices]]` entry, not an instance ID. |
+| `--duration <DURATION>` | Stop after this long, e.g. `500ms`, `30s`, `10m`, `1h 30m`. The unit is required. Without this option, `run` runs until Ctrl+C or SIGTERM. |
+
+`run` does the following:
+
+1. Loads and validates the project like `validate`. If there is any problem, it prints the problems
+   and exits with 2 without starting anything.
+2. Selects the devices: those listed in `--only`, or, without `--only`, every device with
+   `autostart = true`.
+3. Starts every instance of the selected devices. Each one connects to the broker with its own
+   client.
+4. Waits for Ctrl+C, SIGTERM (on Linux and macOS), or the end of `--duration`.
+5. Logs `shutting down` and stops the instances gracefully: each online instance publishes its
+   availability `offline` message, if its template has availability, and disconnects. After 2 seconds,
+   connections that are still open are dropped.
+6. Exits with 0.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. Also `--help` and `--version`. |
+| `1` | The async runtime could not start. |
+| `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
+
+`run` exits with 0 even when instances could not connect or failed while running.
+
+## Messages
+
+`senzor-cli` prints these errors to stderr itself, before anything runs.
+
+| Message | Exit code | Cause |
+| --- | --- | --- |
+| `error: cannot read <PROJECT>: <reason>` | 2 | The file does not exist or cannot be read. |
+| `error: no devices to start (none has autostart = true; use --only)` | 2 | `run` without `--only`, and no device has autostart on. |
+| `error: --only names no devices` | 2 | `--only` contains only commas or spaces. |
+| `error: unknown device id(s): <ids>` | 2 | `--only` names IDs that are not devices of the project, listed with commas. |
+| `error: cannot start the async runtime: <reason>` | 1 | `run` could not create the runtime that drives the instances. |
+
+Invalid arguments are reported by the argument parser and exit with 2, for example:
+
+```text
+error: invalid value '30' for '--duration <DURATION>': time unit needed, for example 30sec or 30ms
+```
+
+## Output
+
+- stdout gets only the `OK` line of `validate`, and the output of `--help` and `--version`.
+- stderr gets everything else: problems, errors and the log.
+
+## Logging
+
+The log goes to stderr, one line per event:
+
+```text
+2026-10-15T15:53:14.229242Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=1
+```
+
+The time is UTC. Lines about an instance carry `instance=<instance ID>`. Other libraries, such as
+the MQTT client, log only warnings and errors unless `RUST_LOG` says otherwise.
+
+| Setting | Filter |
+| --- | --- |
+| Default | `warn,senzor_core=info,senzor_cli=info` |
+| `-v` | `warn,senzor_core=debug,senzor_cli=debug` |
+| `RUST_LOG` set | The value of `RUST_LOG`, which replaces the filter above. A value that cannot be parsed is ignored, and the filter above applies. |
+
+| Level | Message | Meaning |
+| --- | --- | --- |
+| `INFO` | `Connecting` | The instance started and is connecting to the broker. |
+| `INFO` | `Online` | The broker accepted the connection. |
+| `INFO` | `reconnecting: <error>` with `attempt=<n>` | The connection failed or dropped. The instance tries again after 1 s, 2 s, 4 s, …, at most 30 s apart. |
+| `INFO` | `Stopped` | The instance stopped. |
+| `ERROR` | `failed: <reason>` | The instance stopped because of an error and does not retry. |
+| `WARN` | `render: <error>` | A message could not be rendered. It is skipped and counted as an error. |
+| `WARN` | `` message on `<topic>` is <size> bytes; the limit is 1048576 `` | A message is larger than 1 MiB. It is skipped and counted as an error. |
+| `WARN` | `publish: <error>` | A message could not be handed to the MQTT client, for example because its queue is full. It is skipped and counted as an error. |
+| `WARN` | `publish online: <error>` | The availability `online` message could not be handed to the MQTT client. |
+| `INFO` | `shutting down` | `run` is stopping. |
+| `DEBUG` | `publish` with `topic=<topic>` and `payload=<payload>` | One published message. Shown with `-v`. |
+
+When the broker refuses a connection, the reason is
+`broker refused the connection: <code>`, where `<code>` is one of `RefusedProtocolVersion`,
+`BadClientId`, `ServiceUnavailable`, `BadUserNamePassword` or `NotAuthorized`.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored. |
+| `NO_COLOR` | Any non-empty value turns off colours in the log. |
+| The name in `password_env` | The broker password. Needed by `validate` and `run`. |

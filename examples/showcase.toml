@@ -1,0 +1,70 @@
+# The demo project the documentation's screenshots are taken from.
+[broker]
+host = "localhost"
+port = 1883
+
+[simulation]
+seed = 42
+
+[[templates]]
+id = "office-air"
+interval = "2s"
+availability = { topic = "b/{{ room }}/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "b/{{ room }}/{{ device_id }}/state"
+payload = '{"co2": {{ co2 | round | int }}, "temp": {{ temp | round(1) }}, "ts": {{ now_ms }}}'
+
+[templates.fields.co2]
+generator = "random_walk"
+start = 650
+min = 400
+max = 2000
+step = 25
+
+[templates.fields.temp]
+generator = "sine"
+center = 22
+amplitude = 1.5
+period = "1h"
+noise = 0.1
+
+[[templates]]
+id = "door"
+interval = "3s"
+availability = { topic = "b/{{ room }}/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "b/{{ room }}/{{ device_id }}/contact"
+payload = '{"open": {{ open | tojson }}}'
+
+[templates.fields.open]
+generator = "sequence"
+values = [false, false, true, false]
+
+[[devices]]
+id = "office"
+template = "office-air"
+count = 5
+params = { room = "office" }
+autostart = true
+
+[[devices]]
+id = "meeting"
+template = "office-air"
+count = 2
+params = { room = "meeting" }
+autostart = true
+fields.co2 = { start = 1100 }
+
+[[devices]]
+id = "front-door"
+template = "door"
+params = { room = "hall" }
+autostart = true
+
+[[devices]]
+id = "lab"
+template = "co2"
+count = 3
+autostart = true

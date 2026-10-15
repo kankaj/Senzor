@@ -1,0 +1,224 @@
+---
+title: Project file reference
+description: Every table and key of a Senzor project file, with its type, default and rules.
+---
+
+A project is one TOML file. It has four top-level entries, all optional:
+
+| Key | Type | Contents |
+| --- | --- | --- |
+| `broker` | table | [Broker](#broker) connection settings. |
+| `simulation` | table | [Simulation](#simulation) settings: the seed. |
+| `templates` | array of tables | [Templates](#templates): what a kind of sensor publishes. |
+| `devices` | array of tables | [Devices](#devices): which sensors run, built from templates. |
+
+An empty file is a valid project with no devices. For how the pieces fit together, see
+[Project file](/docs/concepts/project-file) and
+[Templates, devices and instances](/docs/concepts/templates-devices-instances).
+
+## General rules
+
+- **Unknown keys are errors**, in every table, including generator tables. A misspelt key is reported
+  with its line and column, for example `` unknown field `prot`, expected one of `host`, `port`, … ``.
+- **Durations** are strings with a unit: `"500ms"`, `"10s"`, `"1.5s"`, `"5m"`, `"1h 30m"`, `"24h"`.
+  A bare number such as `30` is rejected (`expected a duration`). Durations cannot be negative.
+- **Values** (params, `constant` values, `sequence` values) are a string, a number or a boolean.
+  Arrays, tables and dates are rejected. A number whose value is a whole number renders without a
+  decimal point, so `3` and `3.0` both render as `3`.
+- **Template strings** (`topic`, `payload`, the availability `topic` and `instance_id`) use Jinja
+  syntax. See [Template variables](/docs/reference/template-variables).
+
+## Broker
+
+The `[broker]` table sets the MQTT broker every instance connects to. Each instance opens its own
+connection, with a clean session.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `host` | string | `"localhost"` | Must not be empty or only spaces. |
+| `port` | integer | `1883` | 1 to 65535. |
+| `client_id_prefix` | string | `"senzor-"` | The MQTT client ID of an instance is this prefix followed by the instance ID, e.g. `senzor-office-0`. |
+| `keep_alive` | duration | `"30s"` | MQTT keep-alive. At least `"1s"`. |
+| `username` | string | none | Can be used without a password; Senzor then sends only the username. |
+| `password` | string | none | Requires `username`. Cannot be combined with `password_env`. |
+| `password_env` | string | none | The name of an environment variable that holds the password. Requires `username`. The variable must be set when the project is loaded. |
+| `tls` | table | none | Turns on TLS. See [TLS](#tls). |
+
+```toml
+[broker]
+host = "mqtt.example.com"
+port = 8883
+client_id_prefix = "lab-"
+username = "senzor"
+password_env = "MQTT_PASSWORD"
+tls = { ca_file = "certs/ca.pem" }
+```
+
+Prefer `password_env` to `password`: the password then stays out of the project file. In the GUI,
+see [Broker settings](/docs/gui/broker-settings).
+
+### TLS
+
+The `[broker.tls]` table, usually written inline as `tls = { … }`. Its presence turns on TLS; even
+`tls = {}` connects with TLS, trusting the system's root certificates. Files are PEM and are read when
+the project is loaded. Relative paths are relative to the folder of the project file.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `ca_file` | path | none | CA certificate to trust instead of the system's root certificates. |
+| `client_cert` | path | none | Client certificate, for mutual TLS. Requires `client_key` and `ca_file`. |
+| `client_key` | path | none | Private key of the client certificate. Requires `client_cert`. |
+
+## Simulation
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `seed` | integer | none | Zero or greater. With a seed, the random draws of every instance repeat from run to run. Without one, each run draws new random numbers. |
+
+```toml
+[simulation]
+seed = 42
+```
+
+See [Reproducible runs](/docs/concepts/reproducible-runs).
+
+## Templates
+
+Each `[[templates]]` entry describes one kind of sensor: what it publishes, how often, and how its
+values change. Three [built-in templates](/docs/reference/builtin-templates) exist without being
+declared.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `id` | string | required | Unique among the templates. Must not be `co2`, `temperature` or `humidity`, the built-in IDs. |
+| `interval` | duration | `"10s"` | Time between two publishes. Greater than 0. A device can override it. |
+| `qos` | integer | `0` | QoS of the messages: `0`, `1` or `2`. |
+| `retain` | boolean | `false` | Retain flag of the messages. |
+| `availability` | table | none | Status topic and Last Will. See [Availability](#availability). |
+| `messages` | array of tables | required | What to publish on every tick. At least one. See [Messages](#messages). |
+| `fields` | table | required | The values to generate. At least one. See [Fields](#fields). |
+
+```toml
+[[templates]]
+id = "office-air"
+interval = "30s"
+qos = 1
+availability = { topic = "office/{{ device_id }}/status", online = "online", offline = "offline" }
+messages = [
+    { topic = "office/{{ device_id }}/state", payload = '{"co2": {{ co2 | round | int }}, "temperature": {{ temperature | round(1) }}}' },
+]
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15 }
+fields.temperature = { generator = "sine", center = 22, amplitude = 1.5, period = "24h" }
+```
+
+### Messages
+
+Each entry of `messages` is one MQTT message published on every tick, with the template's `qos` and
+`retain`.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | Must render to a non-empty topic without the wildcards `+` and `#`. |
+| `payload` | template string | required | Any text. |
+
+Both are rendered on every tick and can use the field values. A message whose topic and payload
+together are larger than 1 MiB (1,048,576 bytes) is not published and counts as an error.
+
+### Availability
+
+With `availability`, an instance publishes `online` to the topic when it connects, and registers
+`offline` as its Last Will. Both messages are QoS 1 and retained, whatever the template's `qos` and
+`retain`. A graceful stop publishes `offline` itself. Without `availability`, an instance publishes no
+status messages and sets no Last Will. See [Availability and Last Will](/docs/concepts/availability).
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | Can use params, `device_id`, `index` and `template_id`, but not field values or time. Must render to a non-empty topic without `+` or `#`. |
+| `online` | string | required | Published when the instance connects. Plain text, not a template. |
+| `offline` | string | required | The Last Will, and what a graceful stop publishes. Plain text, not a template. |
+
+### Fields
+
+`fields` maps a field name to a generator table. The field name becomes a template variable that
+holds the field's current value.
+
+```toml
+[[templates]]
+id = "door"
+messages = [{ topic = "door/{{ device_id }}", payload = '{"state": "{{ state }}"}' }]
+fields.state = { generator = "sequence", values = ["open", "closed"] }
+```
+
+- A field name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
+- Every generator table needs a `generator` key and that generator's parameters. See
+  [Generators](/docs/reference/generators).
+
+## Devices
+
+Each `[[devices]]` entry runs `count` instances of a template. Every instance is one simulated sensor
+with its own MQTT connection.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `id` | string | required | Unique among the devices. This is the ID `senzor-cli run --only` takes. |
+| `template` | string | required | The ID of a template in this file or of a built-in template. |
+| `count` | integer | `1` | Number of instances. At least 1. |
+| `instance_id` | template string | `"{{ id }}"` when `count` is 1, otherwise `"{{ id }}-{{ index }}"` | The ID of each instance. See [Instance IDs](#instance-ids). |
+| `params` | table of values | empty | Extra template variables for this device's instances, such as a room name. |
+| `autostart` | boolean | `true` | Whether the device starts when the GUI opens the project and when `senzor-cli run` runs without `--only`. |
+| `interval` | duration | the template's `interval` | Overrides the template's interval for this device. Greater than 0. |
+| `fields` | table of tables | empty | Per-device changes to the template's fields. See [Field overrides](#field-overrides). |
+
+```toml
+[[devices]]
+id = "office"
+template = "office-air"
+count = 5
+params = { room = "office", floor = 3 }
+autostart = false
+interval = "5s"
+fields.co2 = { start = 1200 }
+```
+
+Rules for `params`:
+
+- A param name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
+- A param must not have the same name as one of the template's fields.
+- Every variable the template uses must exist. A template that uses `{{ room }}` needs a `room`
+  param on every device that uses it.
+
+### Instance IDs
+
+`instance_id` is rendered once per instance. It can use the device's `id`, the instance's `index`
+(0, 1, 2, …) and the device's params.
+
+| Device | Instance IDs |
+| --- | --- |
+| `id = "kitchen"` | `kitchen` |
+| `id = "office"`, `count = 3` | `office-0`, `office-1`, `office-2` |
+| `id = "office"`, `count = 2`, `instance_id = "{{ room }}-{{ index }}"`, `params = { room = "lab" }` | `lab-0`, `lab-1` |
+
+The rendered IDs must not be empty, must differ from each other, and must not be used by an instance
+of another device. The instance ID is what templates see as `device_id`, and it is part of the MQTT
+client ID.
+
+### Field overrides
+
+`fields` in a device changes the template's fields for this device only. Each key must be a field of
+the template.
+
+- **Without `generator`**, the keys are merged into the template's field. The generator stays the
+  same and only the listed parameters change:
+
+  ```toml
+  fields.co2 = { start = 1200 }
+  ```
+
+- **With `generator`**, the override replaces the field completely. Give every parameter the new
+  generator needs:
+
+  ```toml
+  fields.co2 = { generator = "constant", value = 2500 }
+  ```
+
+The result must be a valid generator, with the same rules as in a template.

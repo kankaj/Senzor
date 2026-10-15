@@ -1,0 +1,157 @@
+---
+title: Validation errors
+description: Every problem Senzor reports when it loads a project, what it means and how to fix it.
+---
+
+Senzor checks a project whenever it loads it: `senzor-cli validate` and `senzor-cli run` check it
+before they do anything else, and the GUI checks it after every edit and lists the problems in the
+**Problems** tab. This page lists every message. In the messages, `<name>` stands for a part that
+Senzor fills in.
+
+## Reading a problem
+
+A problem reads `<location>: <message>`. `senzor-cli` puts the path of the project file in front:
+
+```text
+project.toml: device `office`: unknown template `co-2`
+```
+
+| Location | Refers to |
+| --- | --- |
+| `line <L>, column <C>` | A TOML syntax or schema error at that position. |
+| `project file` | A TOML error the parser cannot place. |
+| `broker` | The `[broker]` table. |
+| `` template `<id>` `` | The `[[templates]]` entry with this `id`. |
+| `` device `<id>` `` | The `[[devices]]` entry with this `id`. |
+
+How problems are reported, and what they block:
+
+- A TOML error stops loading, so it is the only problem reported. Fix it and validate again to see
+  the rest.
+- Otherwise every problem is reported at once: broker problems first, then templates and devices in
+  file order.
+- A broker problem blocks every device.
+- A template problem blocks every device that uses the template. Those devices get no message of
+  their own.
+- A device problem blocks that device.
+- Senzor checks a device's instance IDs and renders its templates only when the device's other
+  settings are valid, so fixing one problem can reveal the next.
+
+`senzor-cli` runs nothing while there is any problem, and exits with code 2. The GUI runs the devices
+that are not blocked; see [Editing while running](/docs/concepts/editing-while-running).
+
+## File syntax and schema
+
+These come from the TOML parser and carry a line and column. The most common ones:
+
+| Example | Meaning and fix |
+| --- | --- |
+| `` unknown field `prot`, expected one of `host`, `port`, … `` | A key that this table does not have. Fix the spelling; the message lists the valid keys. |
+| `` missing field `template` `` | A required key is missing. Add it. |
+| `invalid type: string "x", expected u16` | The value has the wrong type, here a string where a number belongs. |
+| `` invalid value: integer `70000`, expected u16 `` | The number is out of range; a port is at most 65535. |
+| `` invalid value: integer `-1`, expected u64 `` | The number must not be negative, as for `seed`. |
+| `invalid value: string "30", expected a duration` | A duration without a unit. Write `"30s"`. |
+| `` invalid type: integer `30`, expected a duration `` | A duration written as a number. Write it as a string with a unit, `"30s"`. |
+| `` unknown variant `linear`, expected one of `constant`, `random_walk`, `sine`, `uniform`, `sequence` `` | An unknown generator name. |
+| `` missing field `generator` `` | A field table without a `generator` key. |
+| `data did not match any variant of untagged enum Value` | A param or value that is not a string, number or boolean, such as an array. |
+| `` unclosed table, expected `]` `` | A TOML syntax error. |
+
+See [Project file reference](/docs/reference/project-file) for every key and its type.
+
+## Broker
+
+| Message | Meaning and fix |
+| --- | --- |
+| `host must not be empty` | `host` is empty or only spaces. |
+| `port must not be 0` | Use the broker's port, 1 to 65535. |
+| `keep_alive must be at least 1s` | Set `keep_alive` to `"1s"` or more. |
+| `use either password or password_env, not both` | Remove one of them. |
+| `` environment variable `<name>` (password_env) is not set `` | Set the variable before you start Senzor or run `senzor-cli`. |
+| `a password requires a username` | Add `username`, or remove the password. |
+| `` cannot read tls.<key> `<path>`: <reason> `` | A TLS file (`ca_file`, `client_cert` or `client_key`) cannot be read. Relative paths start at the folder of the project file. |
+| `tls.client_cert and tls.client_key must be set together` | Set both, or neither. |
+| `tls.client_cert requires tls.ca_file` | Add `ca_file` when you use a client certificate. |
+
+## Templates
+
+| Message | Meaning and fix |
+| --- | --- |
+| `` `<id>` is a built-in template id; choose another id `` | `co2`, `temperature` and `humidity` are taken by the [built-in templates](/docs/reference/builtin-templates). Rename the template. Devices that use the ID keep using the built-in one. |
+| `duplicate template id` | Two templates have the same `id`. Rename one. |
+| `at least one message is required` | `messages` is empty. |
+| `at least one field is required` | `fields` is empty. |
+| `qos must be 0, 1 or 2, got <n>` | Set `qos` to 0, 1 or 2. |
+| `interval must be greater than 0` | `interval` is `"0s"`. |
+| `` field `<name>` uses a reserved name `` | Rename the field; see [reserved names](/docs/reference/template-variables#reserved-names). |
+| `` field `<name>`: <problem> `` | The field's generator breaks a rule; see [Generator problems](#generator-problems). |
+| `syntax error: <details> (in <template>:<line>)` | A topic or payload is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload` or `availability.topic`, with messages counted from 1. |
+
+A syntax error is reported for the first broken template string only. For example, a payload
+`{{ v ` without the closing braces gives
+`syntax error: unexpected end of input, expected end of variable block (in messages[1].payload:1)`.
+
+### Generator problems
+
+Reported as `` field `<name>`: <problem> `` in a template, and as
+`` field `<name>` override: <problem> `` in a device. See [Generators](/docs/reference/generators)
+for the parameters.
+
+| Problem | Meaning and fix |
+| --- | --- |
+| `numbers must be finite` | A parameter or value is `nan`, `inf` or `-inf`. |
+| `noise must be greater than 0` | Remove `noise` or make it positive. |
+| `noise requires numeric values` | `noise` on a `constant` or `sequence` whose values are not all numbers. |
+| `min must be less than max` | `random_walk` or `uniform` with `min` equal to or above `max`. |
+| `start must be between min and max` | Move `start` inside the bounds of the `random_walk`. |
+| `step must be greater than 0` | Give the `random_walk` a positive `step`. |
+| `period must be greater than 0` | Give the `sine` a `period` longer than `"0s"`. |
+| `values must not be empty` | Give the `sequence` at least one value. |
+
+## Devices
+
+| Message | Meaning and fix |
+| --- | --- |
+| `` unknown template `<id>` `` | No template in the file or among the built-ins has this ID. Check the spelling. |
+| `duplicate device id` | Several devices have this `id`. It is reported once and blocks all of them. Rename all but one. |
+| `count must be at least 1` | `count` is 0. |
+| `interval must be greater than 0` | The device's `interval` is `"0s"`. |
+| `` param `<name>` uses a reserved name `` | Rename the param; see [reserved names](/docs/reference/template-variables#reserved-names). |
+| `` param `<name>` has the same name as a field `` | The template has a field with this name. Rename the param. |
+
+### Rendering problems
+
+Senzor renders each device's templates once while it validates, for the first instance and with
+sample values (see [Template variables](/docs/reference/template-variables#undefined-variables-are-errors)).
+It reports the first failure.
+
+| Message | Meaning and fix |
+| --- | --- |
+| `` undefined value: `<name>` is undefined (in <template>:<line>) `` | A template uses a variable that does not exist here: a typo, a param this device does not set, or a variable this template string cannot see. |
+| `availability topic: topic is empty` | The availability topic renders to nothing. |
+| `` availability topic: topic `<topic>` contains a wildcard (+ or #) `` | The rendered availability topic contains `+` or `#`, maybe from a param. |
+| `message <n> topic: topic is empty` | Message `<n>` (counted from 1) has a topic that renders to nothing. |
+| `` message <n> topic: topic `<topic>` contains a wildcard (+ or #) `` | The rendered topic of message `<n>` contains `+` or `#`. |
+| Other MiniJinja errors, e.g. `unknown filter: filter <name> is unknown (in <template>:<line>)` | A filter or operation fails on the sample values. |
+
+## Field overrides
+
+| Message | Meaning and fix |
+| --- | --- |
+| `` override of unknown field `<name>` `` | The device overrides a field its template does not have. Check the field name. |
+| `` field `<name>` override: <problem> `` | The field after the override is not a valid generator. `<problem>` is one of the [generator problems](#generator-problems) or a schema error such as `` missing field `max` `` (an override with `generator` replaces the whole field, so it needs every parameter) or `` unknown field `stepp`, expected one of `start`, `min`, `max`, `step`, `noise` ``. |
+
+See [Field overrides](/docs/reference/project-file#field-overrides) for how overrides merge.
+
+## Instance IDs
+
+| Message | Meaning and fix |
+| --- | --- |
+| `instance_id: syntax error: <details> (in <string>:1)` | `instance_id` is not valid Jinja. |
+| `` instance_id: undefined value: `<name>` is undefined (in <string>:1) `` | `instance_id` uses a variable it cannot see. It can use `id`, `index` and the device's params. |
+| `instance_id renders to an empty string` | `instance_id` produces an empty ID. |
+| `` instance id `<id>` repeats; include {{ index }} in instance_id `` | Two instances of the device get the same ID. With `count` above 1, put `{{ index }}` in `instance_id`. |
+| `` instance id `<id>` is already used by device `<device>` `` | An instance ID of this device is also an instance ID of an earlier device. Change `instance_id` or the device `id`. |
+
+`(in <string>:1)` is literal text: it is how MiniJinja names the `instance_id` template.

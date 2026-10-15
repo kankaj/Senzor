@@ -1,0 +1,59 @@
+# An IKEA ALPSTUGA (Matter over Thread) as Home Assistant's MQTT Statestream republishes it:
+# one topic per sensor entity, the value alone as payload. Entity names depend on your setup.
+[broker]
+host = "localhost"
+port = 1883
+
+[[templates]]
+id = "alpstuga-statestream"
+interval = "30s"
+
+[[templates.messages]]
+topic = "homeassistant/sensor/{{ device_id }}_carbon_dioxide/state"
+payload = "{{ co2 | round | int }}"
+
+[[templates.messages]]
+topic = "homeassistant/sensor/{{ device_id }}_pm25/state"
+payload = "{{ pm25 | round | int }}"
+
+[[templates.messages]]
+topic = "homeassistant/sensor/{{ device_id }}_temperature/state"
+payload = "{{ temperature | round(1) }}"
+
+[[templates.messages]]
+topic = "homeassistant/sensor/{{ device_id }}_humidity/state"
+payload = "{{ humidity | round | int }}"
+
+[templates.fields.co2]
+generator = "random_walk"
+start = 650
+min = 400
+max = 2500
+step = 20
+
+[templates.fields.pm25]
+generator = "random_walk"
+start = 4
+min = 0
+max = 80
+step = 1
+
+[templates.fields.temperature]
+generator = "sine"
+center = 22.5
+amplitude = 1
+period = "8h"
+noise = 0.05
+
+[templates.fields.humidity]
+generator = "random_walk"
+start = 42
+min = 25
+max = 70
+step = 1
+
+[[devices]]
+id = "alpstuga_office"
+template = "alpstuga-statestream"
+instance_id = "{{ id }}"
+autostart = true

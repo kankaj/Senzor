@@ -1,0 +1,103 @@
+---
+title: Template variables
+description: The variables each template string can use, the reserved names, and how values render.
+---
+
+Topics, payloads, the availability topic and `instance_id` are templates in Jinja syntax, rendered
+with [MiniJinja](https://docs.rs/minijinja/). Write a variable as `{{ name }}` and apply filters with
+`|`, as in `{{ temperature | round(1) }}`.
+
+## Variables by context
+
+Each kind of template string sees a different set of variables.
+
+| Variable | Value | `instance_id` | Availability `topic` | Message `topic` and `payload` |
+| --- | --- | --- | --- | --- |
+| `id` | The device's `id`, e.g. `office` | yes | no | no |
+| `index` | The instance's position in its device: 0, 1, 2, … | yes | yes | yes |
+| `device_id` | The instance ID, e.g. `office-3` | no | yes | yes |
+| `template_id` | The template's `id` | no | yes | yes |
+| params | Each of the device's params, by name | yes | yes | yes |
+| fields | Each field's value for this tick, by name | no | no | yes |
+| `now_ms` | Time of the tick, milliseconds since the Unix epoch (an integer) | no | no | yes |
+| `now_iso` | Time of the tick in RFC 3339, UTC with milliseconds, e.g. `2023-11-14T22:13:20.123Z` | no | no | yes |
+| `seq` | Number of the tick in the current run, starting at 0 | no | no | yes |
+
+`device_id` is the instance ID, not the device's `id`. To the broker, every instance is a separate
+device, with its own connection and client ID.
+
+The availability topic is rendered once, when the instance starts, so it cannot use field values or
+the time. The availability `online` and `offline` texts are plain strings, not templates.
+
+`seq` and the generators start again from the beginning each time an instance starts.
+
+## Example
+
+With the param `room = "office"`, instance `office-3`, field values `co2 = 1184.6` and
+`temp = 22.6789`, tick number 7 and the time `1700000000123`:
+
+```toml
+messages = [
+    { topic = "b/{{ room }}/{{ device_id }}/state", payload = '{"co2": {{ co2 | round | int }}, "temp": {{ temp | round(1) }}, "ts": {{ now_ms }}, "seq": {{ seq }}}' },
+]
+```
+
+renders the topic `b/office/office-3/state` and the payload:
+
+```json
+{"co2": 1185, "temp": 22.7, "ts": 1700000000123, "seq": 7}
+```
+
+## Reserved names
+
+These names are set by Senzor. Fields and params must not use them:
+
+`device_id`, `index`, `id`, `template_id`, `now_ms`, `now_iso`, `seq`
+
+A param must also not have the same name as a field of its template.
+
+## How values render
+
+- A number whose value is whole renders without a decimal point: `3`, not `3.0`. Other numbers render
+  in full, e.g. `22.6789`.
+- Booleans render as `true` and `false`, so they can go into JSON as they are.
+- Strings render as they are. Nothing is escaped or quoted. In JSON, put a string between quotes
+  yourself (`"{{ state }}"`), or use `tojson`, which adds the quotes and escapes the content.
+
+Filters that payloads use most:
+
+| Expression | Value | Renders |
+| --- | --- | --- |
+| `{{ co2 \| round \| int }}` | `1184.6` | `1185` |
+| `{{ temp \| round(1) }}` | `22.6789` | `22.7` |
+| `{{ room \| tojson }}` | `a"b` | `"a\"b"` |
+
+`round` alone returns a decimal number, so `{{ co2 | round }}` renders `1185.0` for `1184.6`; add
+`| int` to get `1185`. MiniJinja's built-in filters are available, including `tojson`, except
+`urlencode`. The loop controls `{% break %}` and `{% continue %}` are not available either.
+
+## Undefined variables are errors
+
+A variable that does not exist is an error, not an empty string. A typo such as `{{ c02 }}` is
+reported as `` undefined value: `c02` is undefined (in messages[1].payload:1) ``. The part in
+parentheses names the template string, with messages counted from 1, and the line.
+
+- **When the project is loaded**, Senzor renders the templates of each device once, for its first
+  instance, with `seq` 0, the current time and a sample value for each field: `value` of a
+  `constant`, `start` of a `random_walk`, `center` of a `sine`, `min` of a `uniform` and the first of
+  a `sequence`'s `values`. A problem there blocks the device, and `senzor-cli` refuses to run the
+  project. See [Validation errors](/docs/reference/validation-errors).
+- **While running**, a message that fails to render is skipped and counted as an error; the other
+  messages of the tick are still published. This can happen when a later value breaks a filter that
+  the first value passed, for example a `sequence` that mixes numbers and strings.
+
+## Topic rules
+
+A rendered topic must not be empty and must not contain the MQTT wildcards `+` or `#`. This applies
+to message topics and the availability topic.
+
+## Message size
+
+A message whose topic and payload together are larger than 1 MiB (1,048,576 bytes) is not published.
+It counts as an error, and the log shows
+`` message on `<topic>` is <size> bytes; the limit is 1048576 ``.

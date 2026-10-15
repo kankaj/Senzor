@@ -1,0 +1,174 @@
+---
+title: Running headless
+description: Validate and run a project from the command line with senzor-cli, for example in CI or a container.
+---
+
+`senzor-cli` runs the same project file as the GUI, without a window. It has two commands:
+`validate` checks a project, and `run` connects its devices to the broker and publishes until you stop
+it. This page shows how to use them; the [CLI reference](/docs/reference/cli) lists every flag and
+message.
+
+## Validate a project
+
+```bash
+senzor-cli validate examples/quick-start.toml
+```
+
+```text
+examples/quick-start.toml: OK (2 devices, 3 instances)
+```
+
+`validate` reads the file and runs the same checks as the GUI. It also resolves the broker settings:
+it reads the environment variable named in `password_env` and the TLS files. Run it with the same
+environment you will use for `run`, or it reports a missing variable. It does not connect to the
+broker.
+
+When something is wrong, `validate` prints every problem on its own line to stderr, each prefixed with
+the file name, and exits with code 2:
+
+```text
+project.toml: broker: port must not be 0
+project.toml: device `office`: unknown template `co-2`
+project.toml: device `kitchen`: param `seq` uses a reserved name
+```
+
+A TOML syntax error, or a key Senzor does not know, is reported with its position, and the remaining
+checks are skipped until you fix it:
+
+```text
+typo.toml: line 3, column 1: unknown field `prot`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`
+```
+
+[Validation errors](/docs/reference/validation-errors) explains each message and how to fix it.
+
+## Run a project
+
+```bash
+senzor-cli run examples/quick-start.toml
+```
+
+`run` first validates the project like `validate` does. If there is any problem, it prints the
+problems, starts nothing and exits with code 2. This is stricter than the GUI, where only the devices
+with errors are blocked: the CLI runs a project only when the whole file is valid, even if you start
+only some of its devices.
+
+### Which devices start
+
+Without `--only`, `run` starts every device with `autostart = true`, which is the default when a
+device does not set `autostart`. If no device has autostart on, `run` prints
+`error: no devices to start (none has autostart = true; use --only)` and exits with code 2.
+
+With `--only`, `run` starts exactly the devices you list, whether or not they have autostart on:
+
+```bash
+senzor-cli run examples/quick-start.toml --only office,kitchen
+```
+
+- `--only` takes device IDs: the `id` of a `[[devices]]` entry, such as `office`. Instance IDs such
+  as `office-0` are not accepted.
+- Separate IDs with commas, or repeat the flag (`--only office --only kitchen`). Spaces around an ID
+  are ignored.
+- An ID that is not in the project is an error: `error: unknown device id(s): <ids>`, exit code 2.
+- An `--only` that names no device at all, such as `--only ,`, is an error too:
+  `error: --only names no devices`.
+
+### What happens while it runs
+
+Every instance of the started devices connects to the broker as its own MQTT client and publishes on
+its interval: the device's `interval` if it sets one, otherwise the template's. The first message of each instance comes at a random point within its first
+interval, so instances started together do not publish in lockstep (see
+[Reproducible runs](/docs/concepts/reproducible-runs)).
+
+If the broker cannot be reached, an instance keeps retrying: it waits 1 s, then 2 s, 4 s and so on,
+up to 30 s between attempts. You can start `senzor-cli` before the broker is up. If the broker
+answers but refuses the connection, for example because of wrong credentials, that instance fails
+and does not retry; the other instances keep running. See
+[Availability and Last Will](/docs/concepts/availability) for the details.
+
+## Stop
+
+`run` stops when one of these happens:
+
+- You press Ctrl+C.
+- The process receives SIGTERM, on Linux and macOS. This is what `docker stop`, systemd and a plain
+  `kill` send.
+- The time given with `--duration` has passed.
+
+`--duration` takes a number with a unit, such as `500ms`, `30s`, `10m` or `1h 30m`. A number without
+a unit is rejected.
+
+```bash
+senzor-cli run examples/quick-start.toml --duration 10m
+```
+
+On stop, `senzor-cli` logs `shutting down` and stops every instance gracefully: each online instance
+publishes its `offline` message, if its template has availability, and then disconnects cleanly, so
+the broker does not send its Last Will. Senzor waits up to 2 seconds for the instances to finish,
+then drops any connection that is still open, and exits with code 0.
+
+## Logging
+
+`senzor-cli` logs to stderr. By default it logs at `info` level:
+
+- status changes of each instance: `Connecting`, `Online`, `reconnecting: <error>`, `Stopped`;
+- problems: a warning for every message that cannot be rendered or published, and an error when an
+  instance fails.
+
+This is a short run of one device, `kitchen`, while the broker is not running (the timestamps are UTC):
+
+```text
+2026-10-15T15:53:14.229095Z  INFO senzor_core::engine::state: Connecting instance=kitchen
+2026-10-15T15:53:14.229242Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=1
+2026-10-15T15:53:15.230419Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=2
+2026-10-15T15:53:16.729666Z  INFO senzor_cli: shutting down
+2026-10-15T15:53:16.729975Z  INFO senzor_core::engine::state: Stopped instance=kitchen
+```
+
+Add `-v` to log every published message at `debug` level, with its instance, topic and payload:
+
+```bash
+senzor-cli run examples/quick-start.toml -v
+```
+
+The `RUST_LOG` environment variable replaces both defaults. For example, `RUST_LOG=warn` logs only
+problems. Set `NO_COLOR=1` to turn off the colour codes, which is useful in CI logs.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | `validate`: the project is valid. `run`: stopped by Ctrl+C, SIGTERM or `--duration`. |
+| `1` | The async runtime could not start. |
+| `2` | The file cannot be read, the project has problems, the arguments are invalid, or there are no devices to start. |
+
+`run` exits with 0 even if no instance ever reached the broker. The exit code tells you that the
+simulation ran, not that messages arrived. To check that, subscribe to the topics on the broker.
+
+## In CI and containers
+
+This project starts ten CO2 sensors from the built-in `co2` template against a broker service named
+`mqtt`, with the password taken from the environment:
+
+<include lang="toml" meta='title="examples/headless-ci.toml"'>../../../examples/headless-ci.toml</include>
+
+```bash
+export MQTT_PASSWORD="…"   # from your CI secret store
+senzor-cli validate headless-ci.toml
+senzor-cli run headless-ci.toml --duration 30s
+```
+
+- The instances are `ci-co2-0` to `ci-co2-9`. They publish to `senzor/ci-co2-0/co2` and so on (see
+  [Built-in templates](/docs/reference/builtin-templates)).
+- `password_env` keeps the password out of the file. Set the variable for `validate` as well as for
+  `run`.
+- `seed = 1` makes the CO2 values repeat from run to run (timestamps still differ). See
+  [Reproducible runs](/docs/concepts/reproducible-runs).
+- `--duration` ends the job on its own. Without it, stop `senzor-cli` with SIGTERM.
+- The broker does not have to be ready first: the instances retry until it is.
+
+In a container, make `senzor-cli` the container's main process: use the exec form of `CMD` or
+`ENTRYPOINT`, not a shell wrapper, so the SIGTERM from `docker stop` reaches it. The graceful shutdown
+takes at most about 2 seconds, well within the grace period `docker stop` gives.
+
+The [CI and Docker recipe](/docs/recipes/ci-and-docker) shows a complete CI job with a broker
+service.

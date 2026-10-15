@@ -1,0 +1,71 @@
+---
+title: Project file
+description: One TOML file holds the broker settings, templates and devices; the GUI edits it and the CLI runs it.
+---
+
+A Senzor project is one TOML file. It holds everything a run needs: how to reach the broker, the templates you define and the devices that use them. The GUI is an editor for this file, and `senzor-cli` runs it as it is, so the project you build in the GUI is the one you run in CI.
+
+## What is in it
+
+This is the project the screenshots in this documentation are taken from:
+
+<include lang="toml" meta='title="examples/showcase.toml"'>../../../../examples/showcase.toml</include>
+
+A project file has up to five parts. Each is optional; a part you leave out takes its defaults.
+
+| Section | What it holds |
+| --- | --- |
+| `[broker]` | Where and how to connect: `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, and `password` or `password_env`. Without it, Senzor connects to `localhost:1883`. |
+| `[broker.tls]` | TLS settings: `ca_file`, and `client_cert` with `client_key` for a client certificate. Without this table, the connection is plain TCP. |
+| `[simulation]` | `seed`, which makes generated values repeat from run to run. See [Reproducible runs](/docs/concepts/reproducible-runs). |
+| `[[templates]]` | Your templates, one entry each: messages, fields, interval, QoS, retain and availability. |
+| `[[devices]]` | Your devices, one entry each: the template, how many instances, params and overrides. |
+
+The built-in templates `co2`, `temperature` and `humidity` need no entry: a device names them in `template`, as the `lab` device above does. [Templates, devices and instances](/docs/concepts/templates-devices-instances) explains how templates and devices fit together, and the [project file reference](/docs/reference/project-file) lists every key with its type and default.
+
+Durations such as `interval`, `period` and `keep_alive` are strings with a unit: `"500ms"`, `"10s"`, `"1h"`.
+
+The showcase writes messages and fields as tables (`[[templates.messages]]`, `[templates.fields.co2]`). TOML also allows the inline form, such as `fields.co2 = { generator = "random_walk", start = 650, min = 400, max = 2000, step = 25 }`. Both mean the same to Senzor.
+
+## Two kinds of errors
+
+Senzor reads a project in two steps, and each step has its own kind of error.
+
+### The file must parse
+
+A TOML syntax error, a key Senzor does not know, a value of the wrong type or a missing required key stops the file from loading. Unknown keys are errors, not ignored, so a typo cannot slip through. The error names the line and column:
+
+```text
+project.toml: line 2, column 1: unknown field `hots`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`
+```
+
+The GUI cannot open such a file. It shows the error and asks you to fix the file in a text editor. `senzor-cli` exits with code 2.
+
+### The project must be valid
+
+Once the file parses, Senzor checks what it says: that each device's template exists, that generator parameters make sense, that every template renders, that IDs are unique, and more. It reports every problem at once, not only the first:
+
+```text
+project.toml: device `office`: unknown template `co3`
+project.toml: device `kitchen`: field `temperature` override: period must be greater than 0
+```
+
+The GUI opens a project with such problems, lists them in the **Problems** tab and blocks the devices they affect; the other devices run. `senzor-cli validate` and `senzor-cli run` print every problem and exit with code 2 without starting anything. [Validation errors](/docs/reference/validation-errors) explains each message.
+
+## Editing in the GUI
+
+The GUI keeps the project in memory and validates it again after every edit, so the **Problems** tab always matches what you see. While there are unsaved changes, the file name in the top bar and in the window title ends with `*`. **Save** writes the file. [Files](/docs/gui/files) covers **New**, **Open**, **Save** and **Save as**, and [Editing while running](/docs/concepts/editing-while-running) what edits do to running devices.
+
+<Callout type="warn" title="Saving rewrites the whole file">
+The GUI saves the project in a canonical TOML layout. Comments are dropped, the layout can change, and keys you left at their defaults, such as `count = 1`, are written out. If the comments in a file matter to you, edit that file in a text editor and use the GUI only to run it.
+</Callout>
+
+## Relative paths
+
+`ca_file`, `client_cert` and `client_key` may be relative paths. Senzor resolves them against the folder that contains the project file, not the folder you start Senzor from, so a project and its certificates can move together. A new project that has not been saved yet resolves them against the current working directory, and after **Save as** into another folder they resolve against that folder.
+
+Senzor reads these files when it validates the project. A file it cannot read is a problem on the broker settings, and a broker problem blocks every device.
+
+## Passwords
+
+`password` stores the broker password in the project file. To keep it out of the file, set `password_env` to the name of an environment variable instead; Senzor reads the variable when it validates the project. A variable that is not set is a broker problem, so no device starts. A project cannot set both `password` and `password_env`, and either one needs a `username`: a password without a username is a broker problem too, so no device starts. [Broker settings](/docs/gui/broker-settings) shows where to set them in the GUI.

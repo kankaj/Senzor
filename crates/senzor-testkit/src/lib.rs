@@ -124,10 +124,33 @@ fn probe_arrived(link: &mut rumqttd::local::LinkRx, deadline: std::time::Instant
     }
 }
 
+/// Whether an MQTT broker on 127.0.0.1:`port` accepts an anonymous MQTT 3.1.1 connection.
+/// It only connects and disconnects: nothing is published to the broker.
+pub fn broker_answers(port: u16) -> bool {
+    use std::io::Write;
+
+    mqtt_connect(port)
+        .and_then(|mut stream| stream.write_all(&DISCONNECT))
+        .is_ok()
+}
+
 /// Sends a raw MQTT 3.1.1 CONNECT, expects an accepting CONNACK, then publishes an empty QoS 0
 /// message on [`PROBE_TOPIC`]. A plain TCP connect is not enough: another listener, or a socket
 /// connected to itself, would also accept it.
 fn mqtt_probe(port: u16) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut stream = mqtt_connect(port)?;
+    // The remaining length counts the length-prefixed topic; the payload is empty.
+    let mut publish = vec![0x30, (2 + PROBE_TOPIC.len()) as u8];
+    publish.extend_from_slice(&[0x00, PROBE_TOPIC.len() as u8]);
+    publish.extend_from_slice(PROBE_TOPIC.as_bytes());
+    publish.extend_from_slice(&DISCONNECT);
+    stream.write_all(&publish)
+}
+
+/// Sends a raw MQTT 3.1.1 CONNECT and returns the connection once an accepting CONNACK arrived.
+fn mqtt_connect(port: u16) -> std::io::Result<std::net::TcpStream> {
     use std::io::{Read, Write};
 
     const CLIENT_ID: &[u8] = b"testkit-probe";
@@ -150,12 +173,7 @@ fn mqtt_probe(port: u16) -> std::io::Result<()> {
             "unexpected reply {reply:02x?}"
         )));
     }
-    // The remaining length counts the length-prefixed topic; the payload is empty.
-    let mut publish = vec![0x30, (2 + PROBE_TOPIC.len()) as u8];
-    publish.extend_from_slice(&[0x00, PROBE_TOPIC.len() as u8]);
-    publish.extend_from_slice(PROBE_TOPIC.as_bytes());
-    publish.extend_from_slice(&DISCONNECT);
-    stream.write_all(&publish)
+    Ok(stream)
 }
 
 const DISCONNECT: [u8; 2] = [0xe0, 0x00];

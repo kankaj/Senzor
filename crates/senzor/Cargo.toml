@@ -6,11 +6,15 @@ edition.workspace = true
 [features]
 # The `testing` module: helpers that drive the whole window headlessly, for `tests/gui.rs`.
 test-support = ["dep:egui_kittest"]
+# Renders the documentation's screenshots: cargo run -p senzor --example screenshots --features screenshots
+screenshots = ["test-support", "egui_kittest/wgpu", "dep:image"]
 
 [dependencies]
 eframe.workspace = true
 egui_kittest = { workspace = true, optional = true }
 humantime.workspace = true
+# Must match egui_kittest's image version: `render()` returns its RgbaImage, which needs `png` to save.
+image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }
 rfd.workspace = true
 senzor-core.workspace = true
 tokio.workspace = true
@@ -21,3 +25,7 @@ egui_kittest.workspace = true
 # Turns on `test-support` for this package's own tests, so `cargo test` needs no flags.
 senzor = { path = ".", features = ["test-support"] }
 senzor-testkit.workspace = true
+
+[[example]]
+name = "screenshots"
+required-features = ["screenshots"]

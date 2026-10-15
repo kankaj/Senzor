@@ -1,0 +1,81 @@
+---
+title: IKEA sensors as Zigbee2MQTT
+description: Simulate an IKEA VINDSTYRKA air quality sensor and a PARASOLL door sensor the way Zigbee2MQTT publishes them.
+---
+
+IKEA's VINDSTYRKA air quality sensor and PARASOLL door and window sensor speak Zigbee, not MQTT. What reaches your broker is what [Zigbee2MQTT](https://www.zigbee2mqtt.io/), the bridge between a Zigbee network and MQTT, publishes on their behalf. So if your dashboard or backend reads these sensors through Zigbee2MQTT, you simulate Zigbee2MQTT's messages, and the format comes from Zigbee2MQTT's documentation, not from IKEA.
+
+## The format
+
+Zigbee2MQTT publishes two kinds of messages per device:
+
+- **State**: one JSON object with all of the device's values on `zigbee2mqtt/<friendly_name>`. The friendly name is the device's IEEE address unless you give it a name, and `zigbee2mqtt` is the default base topic. See [MQTT topics and messages](https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html).
+- **Availability**: `{"state":"online"}` or `{"state":"offline"}` on `zigbee2mqtt/<friendly_name>/availability`, as a retained message. Zigbee2MQTT publishes it only when device availability is turned on in its configuration. See [Device availability](https://www.zigbee2mqtt.io/guide/configuration/device-availability.html).
+
+The keys of the JSON object depend on the device. The device pages list them:
+
+- [E2112 VINDSTYRKA](https://www.zigbee2mqtt.io/devices/E2112.html): `temperature` (°C), `humidity` (%), `pm25` (µg/m³) and `voc_index`.
+- [E2013 PARASOLL](https://www.zigbee2mqtt.io/devices/E2013.html): `contact` (`true` or `false`), `battery` (%) and `voltage` (mV).
+
+## The project
+
+<include lang="toml" meta='title="examples/ikea-zigbee2mqtt.toml"'>../../../../examples/ikea-zigbee2mqtt.toml</include>
+
+- There is one template per device model, `ikea-vindstyrka` and `ikea-parasoll`, and one device of each: `living_room_air` and `front_door`.
+- `{{ device_id }}` in a topic is the instance ID. Each device has one instance, and `instance_id = "{{ id }}"` makes the instance ID equal to the device ID, so the device ID plays the part of the friendly name: `zigbee2mqtt/living_room_air`.
+- `availability` gives the topic and the exact JSON payloads Zigbee2MQTT uses. Senzor publishes the `online` payload when an instance connects and the `offline` payload when it stops, both retained, like Zigbee2MQTT. It also registers the `offline` payload as the instance's Last Will (see [Availability and Last Will](/docs/concepts/availability)).
+- The payload is a JSON object written out in the template. `round | int` turns a generated number into a whole number, and `round(1)` keeps one decimal. `contact | tojson` writes the boolean as `true` or `false`.
+- The values come from generators (see [Values and generators](/docs/concepts/values-and-generators)):
+  - `temperature` follows a slow wave around 22 °C with a period of 6 hours, plus a little noise.
+  - `humidity`, `pm25` and `voc_index` take random steps within their limits.
+  - `contact` repeats the sequence `true`, `true`, `false`, `true`.
+  - `battery` stays at 87, and `voltage` is a random value between 2900 and 3000.
+  - `linkquality` is a random value in its range, drawn anew for every message.
+- VINDSTYRKA publishes every 10 seconds, PARASOLL every 30 seconds.
+
+## Run it
+
+Start a broker as in the [Quick start](/docs/quick-start), then run the project in the GUI or the CLI:
+
+```bash
+senzor examples/ikea-zigbee2mqtt.toml
+```
+
+```bash
+senzor-cli run examples/ikea-zigbee2mqtt.toml
+```
+
+In another terminal, subscribe to everything under `zigbee2mqtt/`. With the broker container from the Quick start:
+
+```bash
+docker exec mosquitto mosquitto_sub -v -t 'zigbee2mqtt/#'
+```
+
+The output of a 35-second run looks like this; your values differ:
+
+```text
+zigbee2mqtt/living_room_air/availability {"state":"online"}
+zigbee2mqtt/front_door/availability {"state":"online"}
+zigbee2mqtt/front_door {"contact": true, "battery": 87, "voltage": 2957, "linkquality": 140}
+zigbee2mqtt/living_room_air {"temperature": 22.1, "humidity": 45, "pm25": 5, "voc_index": 100, "linkquality": 120}
+zigbee2mqtt/living_room_air {"temperature": 22.0, "humidity": 46, "pm25": 3, "voc_index": 101, "linkquality": 105}
+zigbee2mqtt/living_room_air {"temperature": 22.1, "humidity": 45, "pm25": 4, "voc_index": 98, "linkquality": 140}
+zigbee2mqtt/living_room_air/availability {"state":"offline"}
+zigbee2mqtt/front_door/availability {"state":"offline"}
+```
+
+The last two lines appear when you stop the run. Because availability messages are retained, a subscriber that connects later gets the last `online` or `offline` of each device first; if you ran the project before, you see the old `offline` messages before anything else.
+
+## Differences from a real bridge
+
+**Interval instead of change.** A real PARASOLL reports when its contact changes. Senzor 1.0.0 publishes every message of a template on every tick, so `front_door` publishes its full state every 30 seconds, whether `contact` changed or not. To change the contact at a moment you choose, pin `contact` to `true` or `false` in the [instance view](/docs/gui/instance-view); the next tick publishes the pinned value.
+
+**Offline at once.** Zigbee2MQTT marks a device offline only after it has missed its check-ins: by default 10 minutes for mains-powered devices and 25 hours for battery-powered ones. A Senzor instance publishes `offline` the moment you stop it, and its Last Will arrives as soon as you kill it. See [Simulating a device dropping off](/docs/recipes/device-dropping-off).
+
+**Device topics only.** The project simulates the devices' own topics. It does not publish Zigbee2MQTT's bridge topics under `zigbee2mqtt/bridge/`.
+
+## Adapt it
+
+- **Your friendly names**: change the device `id`, for example to `hallway_air`. The topics follow, because they use `{{ device_id }}`.
+- **More sensors of the same model**: add a `[[devices]]` entry with another `id` and the same `template`. For many identical sensors, use `count` with a pattern such as `instance_id = "air_{{ index }}"` (see [A fleet of sensors](/docs/recipes/fleet)).
+- **Other keys or devices**: copy a real message from your bridge with `mosquitto_sub -v -t 'zigbee2mqtt/#'` (or `docker exec <container> mosquitto_sub -v -t 'zigbee2mqtt/#'` if your broker is Mosquitto in Docker), paste it as the payload and replace each value with a field, as in `{{ temperature | round(1) }}`. [Generators](/docs/reference/generators) lists the generators you can use for the fields, and [Template variables](/docs/reference/template-variables) the variables and filters.

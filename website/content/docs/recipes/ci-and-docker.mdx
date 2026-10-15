@@ -1,0 +1,125 @@
+---
+title: CI and Docker
+description: Run simulated sensors in a CI job next to a Mosquitto service container, with the broker password from a CI secret.
+---
+
+In CI you want sensors publishing while your tests check whatever consumes them. `senzor-cli` runs a project without a window, for a fixed time if you ask it to. This recipe puts it into a GitHub Actions job next to a Mosquitto broker. [Running headless](/docs/headless) explains the commands in detail.
+
+## The project
+
+<include lang="toml" meta='title="examples/headless-ci.toml"'>../../../../examples/headless-ci.toml</include>
+
+- `host = "mqtt"` is the broker's host name inside the CI job: the name of the broker service.
+- The username is in the file. The password comes from the environment variable named by `password_env`, so it stays out of the repository.
+- `seed = 1` makes the random values repeat from run to run (timestamps still differ).
+- `ci-co2` runs ten instances of the built-in `co2` template, `ci-co2-0` to `ci-co2-9`. Each publishes a reading such as `{"co2": 600, "ts": 1792079716800}` on `senzor/ci-co2-0/co2` and so on every 10 seconds, and its status on `senzor/ci-co2-0/status` (see [Built-in templates](/docs/reference/builtin-templates)).
+
+## The commands
+
+```bash
+senzor-cli validate headless-ci.toml
+senzor-cli run headless-ci.toml --duration 30s
+```
+
+`validate` checks the project without connecting, so a broken file fails the job early. `run` starts every device with `autostart = true`, publishes for the time given with `--duration`, then stops each instance cleanly and exits.
+
+Choose the duration with the interval in mind. Each instance publishes its first reading at a random point within its first interval, so with `--duration 5s` and a 10-second interval, about half of the instances publish nothing. Give the run at least one interval, plus the time your tests need.
+
+## Exit codes
+
+| Code | When |
+| --- | --- |
+| `0` | The run ended: `--duration` passed, or the process got Ctrl+C or SIGTERM. |
+| `1` | The async runtime could not start. |
+| `2` | The file cannot be read, the project has problems, the arguments are invalid, or no device is set to start. |
+
+<Callout type="warn" title="Exit code 0 does not mean messages arrived">
+`run` exits with 0 even if no instance ever reached the broker: an instance that cannot reach the broker keeps retrying until the run ends, and one the broker refuses, for example because of a wrong password, stops as **Failed**. Check in your tests that the messages arrived, not only that `senzor-cli` succeeded.
+</Callout>
+
+The retrying also means the broker does not have to be ready when `senzor-cli` starts: an instance tries again after 1 s, 2 s, 4 s and so on, up to 30 s between attempts. [CLI reference](/docs/reference/cli) lists every message and code.
+
+## The password from a CI secret
+
+`password_env = "MQTT_PASSWORD"` makes Senzor read the password from `MQTT_PASSWORD` when it loads the project. Set the variable from your CI system's secret store for both `validate` and `run`. If the variable is not set, both stop with exit code 2:
+
+```text
+headless-ci.toml: broker: environment variable `MQTT_PASSWORD` (password_env) is not set
+```
+
+An empty variable counts as set. The password is then empty, and because the MQTT client leaves an empty password out of the connect message, Senzor connects with the username only. In GitHub Actions, a secret that does not exist [expands to an empty string](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), so a missing secret does not fail validation; the broker rejects the connection instead, if it checks passwords.
+
+## A GitHub Actions job
+
+This job runs its steps in a container, so the broker service is reachable under its name, `mqtt` (see [About service containers](https://docs.github.com/en/actions/use-cases-and-examples/using-containerized-services/about-service-containers)). It assumes the project is in your repository as `ci/headless-ci.toml`, and that `./run-integration-tests.sh` stands for your own tests.
+
+```yaml
+name: Integration tests
+
+on: [push]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # Steps run in a container, so the service below is reachable as "mqtt".
+    container: ubuntu:24.04
+    services:
+      mqtt:
+        image: eclipse-mosquitto:2
+        # The configuration from the Quick start: port 1883, no password check.
+        command: mosquitto -c /mosquitto-no-auth.conf
+    env:
+      MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install senzor-cli here; see the Installation page of the Senzor docs.
+
+      - name: Check the project
+        run: senzor-cli validate ci/headless-ci.toml
+
+      - name: Run the sensors and the tests
+        run: |
+          senzor-cli run ci/headless-ci.toml --duration 10m &
+          SENZOR=$!
+          ./run-integration-tests.sh
+          kill "$SENZOR" 2>/dev/null || true
+          wait "$SENZOR"
+```
+
+- The installation step is up to you; see [Installation](/docs/installation).
+- `senzor-cli run` runs in the background while your tests run. Each instance publishes its first reading up to one interval after it connects, 10 seconds for the `co2` template, so let your tests wait at least that long for the first message.
+- When the tests are done, `kill` sends SIGTERM, so the instances publish `offline` and disconnect cleanly. GitHub runs the step with `bash -e`, which stops at the first failing command. If `senzor-cli` has already stopped, `kill` finds no process and fails; `2>/dev/null || true` keeps that from failing the step.
+- `wait` returns the exit code of `senzor-cli`: 0 after SIGTERM or after `--duration`, so the step fails only if `senzor-cli` could not run the project. If the tests fail, the step fails at once with their exit code.
+- `--duration` stops `senzor-cli` after a time limit, also when the step never reaches `kill`. Set it longer than your tests can take: when it runs out, the sensors go offline, even if the tests are still running.
+- `NO_COLOR=1` turns off the colour codes in the log, which CI logs would show as raw text.
+- The service's [`command`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) starts Mosquitto with `/mosquitto-no-auth.conf`, a configuration that ships with the image, as in the Quick start. It opens port 1883 to every client without checking the username and password, which is enough for a throwaway broker.
+
+The log of the run step starts like this:
+
+```text
+2026-10-15T15:55:16.606220Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-9
+2026-10-15T15:55:16.606235Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-5
+2026-10-15T15:55:16.606235Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-4
+```
+
+followed by an `Online` line for each instance. Add `-v` to `senzor-cli run` to log every message it publishes.
+
+## Running on your machine
+
+The project's host `mqtt` only resolves inside the CI job. To try the same project on your machine against the broker from the [Quick start](/docs/quick-start), copy it and change `host` to `localhost`. Then:
+
+```bash
+export MQTT_PASSWORD=anything
+senzor-cli run headless-ci.toml --duration 30s
+```
+
+The Quick start broker does not check passwords either, so any value works.
+
+## Senzor in a container
+
+If you build your own image that runs `senzor-cli`, make it the container's main process (see [Running headless](/docs/headless)). Then:
+
+- `docker stop` sends SIGTERM: the instances publish `offline` and disconnect cleanly, and `senzor-cli` exits with 0.
+- `docker kill` sends SIGKILL: the connections drop, and the broker publishes each instance's Last Will. [Simulating a device dropping off](/docs/recipes/device-dropping-off) shows what that looks like.

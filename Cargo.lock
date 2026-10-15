@@ -1384,10 +1384,14 @@ checksum = "5eb3f3effb2726fee23449293e67acbf6cc6ce35525b1722bd5743bb348114d5"
 dependencies = [
  "eframe",
  "egui",
+ "egui-wgpu",
+ "image",
  "kittest",
  "log",
+ "pollster 1.0.1",
  "serde",
  "toml 1.1.8+spec-1.1.0",
+ "wgpu",
 ]
 
 [[package]]
@@ -4117,11 +4121,12 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "senzor"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "egui_kittest",
  "humantime",
+ "image",
  "rfd",
  "senzor",
  "senzor-core",
@@ -4132,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -4146,7 +4151,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "humantime",
  "humantime-serde",
@@ -4163,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-testkit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rumqttc",
  "rumqttd",

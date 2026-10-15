@@ -552,3 +552,20 @@ fn closing_with_a_pending_rename_asks_first() {
     request_close(&mut app);
     assert!(app.query_by_label("Unsaved changes").is_some());
 }
+
+/// Where the bottom panel's tabs are: they move down when the panel gets lower.
+fn bottom_tabs_top(harness: &App) -> f32 {
+    harness.get_by_label("Message log").rect().top()
+}
+
+#[test]
+fn the_bottom_panel_keeps_its_height_while_there_are_no_problems() {
+    let mut app = app(None, FakeDialogs::default());
+    let top = bottom_tabs_top(&app);
+
+    click(&mut app, "Problems");
+    assert!(app.query_by_label("No problems.").is_some());
+    assert_eq!(bottom_tabs_top(&app), top, "on the Problems tab");
+    click(&mut app, "Message log");
+    assert_eq!(bottom_tabs_top(&app), top, "back on the log");
+}

@@ -1,0 +1,11 @@
+{
+  "title": "Concepts",
+  "pages": [
+    "project-file",
+    "templates-devices-instances",
+    "values-and-generators",
+    "availability",
+    "reproducible-runs",
+    "editing-while-running"
+  ]
+}

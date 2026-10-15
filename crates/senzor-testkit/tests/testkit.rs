@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use rumqttc::{AsyncClient, ConnectReturnCode, ConnectionError, MqttOptions, QoS};
 use senzor_testkit::{
-    Received, Subscriber, free_port, refusing_broker, start_broker, start_broker_on,
+    Received, Subscriber, broker_answers, free_port, refusing_broker, start_broker, start_broker_on,
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -76,8 +76,8 @@ fn free_port_never_hands_out_a_port_twice() {
     assert_eq!(distinct.len(), ports.len(), "a port was handed out twice");
 }
 
-#[test]
-fn a_port_held_by_a_non_mqtt_listener_is_not_reported_as_a_broker() {
+/// A port whose listener accepts connections and never answers.
+fn non_mqtt_listener() -> u16 {
     let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = squatter.local_addr().unwrap().port();
     std::thread::spawn(move || {
@@ -85,7 +85,36 @@ fn a_port_held_by_a_non_mqtt_listener_is_not_reported_as_a_broker() {
             std::mem::forget(stream);
         }
     });
-    assert!(start_broker_on(port).is_err());
+    port
+}
+
+#[test]
+fn a_port_held_by_a_non_mqtt_listener_is_not_reported_as_a_broker() {
+    assert!(start_broker_on(non_mqtt_listener()).is_err());
+}
+
+#[test]
+fn a_started_broker_answers() {
+    assert!(broker_answers(start_broker()));
+}
+
+#[test]
+fn nothing_answers_on_a_free_port() {
+    assert!(!broker_answers(free_port()));
+}
+
+#[test]
+fn a_non_mqtt_listener_does_not_answer() {
+    assert!(!broker_answers(non_mqtt_listener()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broker_that_refuses_the_connection_does_not_answer() {
+    let port = refusing_broker(ConnectReturnCode::NotAuthorized).await;
+    let answers = tokio::task::spawn_blocking(move || broker_answers(port))
+        .await
+        .unwrap();
+    assert!(!answers);
 }
 
 #[test]

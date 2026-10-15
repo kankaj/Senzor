@@ -1,0 +1,11 @@
+{
+  "title": "Reference",
+  "pages": [
+    "project-file",
+    "generators",
+    "template-variables",
+    "builtin-templates",
+    "cli",
+    "validation-errors"
+  ]
+}

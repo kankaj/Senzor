@@ -1,0 +1,18 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* Fumadocs' search marks matched words with `::highlight(fd-search)`. Turbopack's CSS parser
+   does not know that pseudo-element and warns about it on every request, so these two
+   utilities are not generated; app/layout.tsx adds the same rule as an inline style. */
+@source not inline("[&_::highlight(fd-search)]:text-fd-primary");
+@source not inline("[&_::highlight(fd-search)]:underline");
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}

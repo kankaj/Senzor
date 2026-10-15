@@ -1,0 +1,10 @@
+{
+  "title": "Recipes",
+  "pages": [
+    "ikea-zigbee2mqtt",
+    "home-assistant-statestream",
+    "fleet",
+    "device-dropping-off",
+    "ci-and-docker"
+  ]
+}

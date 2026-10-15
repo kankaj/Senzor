@@ -1,0 +1,12 @@
+{
+  "title": "GUI guide",
+  "pages": [
+    "window",
+    "running-devices",
+    "instance-view",
+    "editing-templates",
+    "editing-devices",
+    "broker-settings",
+    "files"
+  ]
+}

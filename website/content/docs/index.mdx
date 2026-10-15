@@ -1,0 +1,51 @@
+---
+title: Introduction
+description: What Senzor is, who it is for, and what version 1.0.0 does and does not do.
+---
+
+Senzor simulates MQTT sensors, so you can test whatever consumes them: a dashboard, a backend that stores readings, a home automation setup. You describe a kind of sensor once, as a template, and Senzor runs as many copies of it as you ask for. Each copy connects to your broker on its own, publishes values at a fixed interval and, if the template has availability, announces when it goes online and offline and leaves a Last Will for the broker to publish if it drops off.
+
+Senzor comes as two programs that read the same project file:
+
+- `senzor`, a desktop GUI. You edit the project, start and stop devices, force values and watch the messages.
+- `senzor-cli`, a headless runner for terminals, Docker containers and CI pipelines.
+
+Senzor does not include a broker. It connects to yours, for example Mosquitto, over MQTT 3.1.1.
+
+This documentation covers Senzor 1.0.0.
+
+## Who it is for
+
+You are building or testing something that reads sensor data over MQTT, and you need devices you do not have: before the hardware exists, more of them than you own, or ones that do what you tell them. A simulated sensor can report a CO2 level of 2500 ppm on request, disappear without saying goodbye, and come back. You know MQTT; Senzor plays the devices.
+
+## What Senzor does
+
+- **Templates and counts.** A template defines the topics, the payloads, the fields and the interval. A device uses a template with a `count`: `count = 200` gives 200 instances, each with its own MQTT connection and client ID, and with its own availability topic when the template puts `{{ device_id }}` in it.
+- **Built-in templates.** `co2`, `temperature` and `humidity` work without writing a template.
+- **Generated values.** Each field takes its values from a generator: `constant`, `random_walk`, `sine`, `uniform` or `sequence`, with optional noise.
+- **Jinja templates for topics and payloads.** Payloads are text, so you can publish JSON, plain numbers or whatever format your consumer expects.
+- **Pins.** In the GUI you pin a field of a running instance to a value, for example CO2 = 2500. The instance publishes that value until you unpin it.
+- **Stop and Kill.** **Stop** takes an instance offline cleanly. **Kill** drops its connection, so the broker publishes its Last Will (when the template has availability), as it would for a device that loses power.
+- **GUI and headless CLI.** Build and watch a project in the GUI, then run the same file with `senzor-cli` in CI or Docker.
+- **Reproducible runs.** With a seed, every run of a project produces the same random value sequences.
+- **Secured brokers.** Username and password (the password can come from an environment variable), TLS, and client certificates.
+- **Validation.** Senzor checks the whole project when it loads it and lists every problem with its location. A device with problems does not start.
+
+## What 1.0.0 does not do yet
+
+- Scripting. Values come from generators and pins only.
+- Subscribing to topics or reacting to commands. Instances only publish.
+- Event-driven sending. Instances publish at a fixed interval.
+- MQTT 5 and MQTT over WebSocket.
+- Binary payloads such as protobuf or CBOR. Payloads are text.
+- Value charts in the GUI.
+- Keeping comments and formatting when the GUI saves a project file.
+
+## Where to start
+
+<Cards>
+  <Card title="Installation" href="/docs/installation" description="How to get Senzor 1.0.0." />
+  <Card title="Quick start" href="/docs/quick-start" description="Run three simulated sensors against a local broker in a few minutes." />
+  <Card title="Templates, devices and instances" href="/docs/concepts/templates-devices-instances" description="How one template becomes a fleet of devices." />
+  <Card title="Running headless" href="/docs/headless" description="Run projects with senzor-cli in CI and Docker." />
+</Cards>

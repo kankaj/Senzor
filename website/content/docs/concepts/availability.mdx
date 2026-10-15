@@ -1,0 +1,51 @@
+---
+title: Availability and Last Will
+description: How instances announce online and offline, what Stop and Kill look like on the broker, and how reconnects work.
+---
+
+Real devices tell their consumers whether they are reachable, usually with a status topic and an MQTT Last Will. A Senzor template does the same with `availability`:
+
+```toml
+availability = { topic = "b/{{ room }}/{{ device_id }}/status", online = "online", offline = "offline" }
+```
+
+Each instance renders the topic for itself, so instance `office-0` of the showcase uses `b/office/office-0/status`. Put `{{ device_id }}` in the topic: Senzor also accepts a fixed topic such as `status/air`, but then every instance shares one status topic and one Last Will topic. The availability topic can use the device's params, `device_id`, `index` and `template_id`. It cannot use field values or the time: Senzor renders it once when the instance starts, because it also goes into the Last Will.
+
+## Online
+
+When an instance connects, it hands the broker its Last Will: the `offline` payload on the availability topic. Once the broker accepts the connection, the instance publishes `online` on the same topic. Both messages are retained and use QoS 1, whatever the template's `qos` and `retain` say. Because `online` is retained, a consumer that subscribes later still learns at once that the device is there.
+
+## Last Will
+
+The broker publishes the Last Will on the instance's behalf when the connection ends without a clean disconnect. That happens when you **Kill** an instance, and also when the `senzor` or `senzor-cli` process dies or the network fails: the broker publishes the Will once it notices that the connection is gone.
+
+## Stop and Kill
+
+| | **Stop** | **Kill** |
+| --- | --- | --- |
+| The instance | Publishes `offline` itself, then disconnects cleanly | Drops the connection without a word |
+| The broker | Discards the Last Will | Publishes the Last Will, `offline` |
+| A subscriber to the status topic sees | `offline`, once | `offline`, once |
+| The instance's status afterwards | **Stopped** | **Stopped** |
+
+Both end with `offline` on the status topic. The difference is who sends it: after a Stop the device said goodbye; after a Kill the broker reports that the device vanished, as it would for a sensor that lost power. Use Kill to test how your system copes with a device that disappears. [Simulating a device dropping off](/docs/recipes/device-dropping-off) walks through it.
+
+Stop waits up to 2 seconds for the broker to close the connection. When `senzor-cli` exits or the GUI window closes, every instance stops this way; an instance still running after 2 seconds is cut off.
+
+An instance that is still connecting has nothing to take offline: Stop only ends its attempts.
+
+## Reconnecting
+
+If the connection fails or drops, the instance shows **Reconnecting** with the attempt number and the error, and tries again after a delay. The delay doubles with every failed attempt: 1 s, 2 s, 4 s, 8 s, 16 s, then 30 s for every attempt after that. A successful connection resets it.
+
+After reconnecting, the instance publishes `online` again and carries on where it was; its generators keep their state (see [Values and generators](/docs/concepts/values-and-generators#reconnects-keep-the-state)). An instance that cannot reach the broker when it starts goes through the same cycle, and `senzor-cli` keeps running and logs each attempt.
+
+## Refused connections
+
+If the broker answers but refuses the connection, for example because the username or password is wrong, the instance does not retry. It shows **Failed** with the broker's reason, such as `broker refused the connection: BadUserNamePassword`. Other instances keep running. Fix the cause, then start the instance again.
+
+## Without availability
+
+`availability` is optional. Without it, an instance sets no Last Will and publishes no status messages; it connects and publishes its data. **Stop** and **Kill** still end its connection, but after a Kill the broker has nothing to publish.
+
+See [Running devices](/docs/gui/running-devices) for where Stop, Kill and Restart are in the GUI.
