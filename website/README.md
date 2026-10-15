@@ -54,7 +54,7 @@ In the Cloudflare dashboard, **Workers & Pages** → **Create application**, con
 
 The build runs from the repository root, where `wrangler.jsonc` is: the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.
 
-Cloudflare's build image comes with pnpm 10, older than the pnpm 11 the site is built with. Add a build variable under **Settings** → **Build** → **Build Variables and Secrets** (Node.js is already 24 there):
+Cloudflare's build image comes with an older pnpm than the pnpm 11 the site is built with (the first build ran pnpm 9, although Cloudflare's docs list 10). `pnpm-workspace.yaml` lists `packages` so that older pnpm versions can still install, but pin the version so Cloudflare builds exactly like a local build. Add a build variable under **Settings** → **Build** → **Build Variables and Secrets** (Node.js is already 24 there):
 
 | Variable       | Value     |
 | -------------- | --------- |

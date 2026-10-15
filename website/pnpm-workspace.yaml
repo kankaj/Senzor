@@ -1,2 +1,6 @@
+# pnpm 9 and older treat this file as a workspace definition and refuse to install without a
+# `packages` list ("packages field missing or empty"); listing just this folder keeps them working.
+packages:
+  - .
 allowBuilds:
   esbuild: false
