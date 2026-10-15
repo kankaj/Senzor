@@ -1,0 +1,20 @@
+[package]
+name = "senzor-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+humantime.workspace = true
+humantime-serde.workspace = true
+minijinja.workspace = true
+rand.workspace = true
+rumqttc.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+senzor-testkit.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

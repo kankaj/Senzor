@@ -1,0 +1,23 @@
+[package]
+name = "senzor"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# The `testing` module: helpers that drive the whole window headlessly, for `tests/gui.rs`.
+test-support = ["dep:egui_kittest"]
+
+[dependencies]
+eframe.workspace = true
+egui_kittest = { workspace = true, optional = true }
+humantime.workspace = true
+rfd.workspace = true
+senzor-core.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+# Turns on `test-support` for this package's own tests, so `cargo test` needs no flags.
+senzor = { path = ".", features = ["test-support"] }
+senzor-testkit.workspace = true

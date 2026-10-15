@@ -1,0 +1,42 @@
+[broker]
+host = "localhost"
+port = 1883
+username = "dev"
+password_env = "MQTT_PASSWORD"
+
+[simulation]
+seed = 42
+
+[[templates]]
+id = "office-air"
+interval = "10s"
+qos = 0
+retain = false
+availability = { topic = "b/{{ room }}/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "b/{{ room }}/{{ device_id }}/state"
+payload = '{"co2": {{ co2 | round | int }}, "temp": {{ temp | round(1) }}, "ts": {{ now_ms }}}'
+
+[templates.fields.co2]
+generator = "random_walk"
+start = 600
+min = 400
+max = 2000
+step = 15
+
+[templates.fields.temp]
+generator = "sine"
+center = 22
+amplitude = 1.5
+period = "1h"
+noise = 0.1
+
+[[devices]]
+id = "office"
+template = "office-air"
+count = 5
+instance_id = "office-{{ index }}"
+params = { room = "office" }
+autostart = true
+fields.co2 = { start = 1200 }

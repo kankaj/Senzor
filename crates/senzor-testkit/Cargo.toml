@@ -1,0 +1,11 @@
+[package]
+name = "senzor-testkit"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+rumqttc.workspace = true
+rumqttd.workspace = true
+tokio.workspace = true
+toml.workspace = true
