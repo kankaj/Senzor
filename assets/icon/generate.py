@@ -9,10 +9,18 @@ Needs `rsvg-convert` (librsvg) on the PATH. Writes, next to this script:
 - senzor.ico                          Windows: 16, 20, 24, 32, 40, 48, 64 and 256 px;
 - senzor.icns                         macOS: 16 to 1024 px, from senzor-macos.svg.
 
+and the docs site's icons in website/app/ (Next.js picks them up by name):
+
+- favicon.ico                         16, 32 and 48 px;
+- icon.svg                            a copy of senzor.svg;
+- apple-icon.png                      180 px on the tile colour, without transparent corners.
+
 Run it again after changing a master and commit the results.
 """
 
 import pathlib
+import re
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -20,6 +28,7 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 MASTER = HERE / "senzor.svg"
 MACOS_MASTER = HERE / "senzor-macos.svg"
+WEBSITE_APP = HERE.parent.parent / "website" / "app"
 
 # Sizes drawn by hand (src/senzor-<n>.svg -> senzor-<n>.png); never rendered from the master.
 HAND_TUNED = (16, 20, 22, 24, 32)
@@ -41,11 +50,18 @@ ICNS_TYPES = (
 )
 
 
-def render(svg: pathlib.Path, size: int, out: pathlib.Path) -> None:
-    subprocess.run(
-        ["rsvg-convert", "--width", str(size), "--height", str(size), "--output", str(out), str(svg)],
-        check=True,
-    )
+def render(svg: pathlib.Path, size: int, out: pathlib.Path, background: str | None = None) -> None:
+    command = ["rsvg-convert", "--width", str(size), "--height", str(size), "--output", str(out)]
+    if background:
+        command += ["--background-color", background]
+    subprocess.run(command + [str(svg)], check=True)
+
+
+def tile_colour() -> str:
+    """The fill of the master's first shape, its rounded tile."""
+    match = re.search(r'<rect[^>]*fill="(#[0-9a-fA-F]{6})"', MASTER.read_text())
+    assert match, "senzor.svg starts with a filled <rect>"
+    return match.group(1)
 
 
 def png(size: int) -> bytes:
@@ -91,7 +107,11 @@ def main() -> None:
         render(MASTER, size, HERE / f"senzor-{size}.png")
     write_ico(ICO_SIZES, HERE / "senzor.ico")
     write_icns(HERE / "senzor.icns")
+    write_ico((16, 32, 48), WEBSITE_APP / "favicon.ico")
+    shutil.copyfile(MASTER, WEBSITE_APP / "icon.svg")
+    render(MASTER, 180, WEBSITE_APP / "apple-icon.png", background=tile_colour())
     print("wrote", ", ".join(f"senzor-{s}.png" for s in RENDERED), "senzor.ico and senzor.icns")
+    print("wrote website/app/favicon.ico, icon.svg and apple-icon.png")
 
 
 main()
