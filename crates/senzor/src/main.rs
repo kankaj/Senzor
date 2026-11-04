@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use eframe::egui;
+use senzor::icon::{APP_ID, app_icon};
 use senzor::{NativeDialogs, SenzorApp};
 use senzor_mcp::DEFAULT_HTTP_PORT;
 
@@ -24,6 +25,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Senzor")
+            .with_app_id(APP_ID)
+            .with_icon(app_icon())
             .with_inner_size([1200.0, 760.0]),
         ..Default::default()
     };

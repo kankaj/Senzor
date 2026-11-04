@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Senzor
+GenericName=MQTT sensor simulator
+Comment=Simulate MQTT sensors to test what consumes them
+Exec=senzor %f
+Icon=cz.kankaj.Senzor
+Terminal=false
+Categories=Development;
+Keywords=MQTT;sensor;simulator;IoT;
+StartupWMClass=cz.kankaj.Senzor

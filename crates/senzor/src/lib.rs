@@ -5,6 +5,7 @@ mod buffers;
 mod dialogs;
 mod edits;
 mod format;
+pub mod icon;
 mod preview;
 mod selection;
 #[cfg(any(test, feature = "test-support"))]
