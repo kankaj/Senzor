@@ -1,0 +1,127 @@
+---
+title: Controlling Senzor from an AI agent
+description: Let Claude Code or another MCP client run devices, force values, read the messages and edit the project.
+---
+
+Senzor speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), so an AI agent such as Claude Code can control it. The agent does what you would do in the GUI:
+
+- **Observe**: read the status of every instance, its current values and the messages it published.
+- **Run**: start, stop, kill and restart instances, and pin a field to a value.
+- **Edit**: change the broker settings, devices and templates, or replace the whole project.
+- **Files**: start a new project, open one, and save it.
+
+This makes end-to-end tests something you can ask for in plain words, for example: "Start the office sensors, set CO2 on office-0 to 2500, wait for it to publish, and check that our backend raised an alarm." The [AI agent recipe](/docs/recipes/ai-agent-testing) walks through such a session. Every tool is listed in the [MCP tools reference](/docs/reference/mcp-tools).
+
+## CLI or GUI
+
+Both programs serve the same tools:
+
+| | `senzor-cli mcp` | The GUI with MCP on |
+| --- | --- | --- |
+| Who starts it | The agent starts it, as a background process. | You start the window; the agent connects to it. |
+| Transport | stdio | HTTP on `127.0.0.1` |
+| You see | Nothing, unless you subscribe to the broker. | Every change, live in the window. |
+| Good for | Automated test runs, an agent working on its own. | Working together: you watch, correct and take over. |
+
+## Set up Claude Code with the CLI
+
+Register Senzor as an MCP server, with the project the agent should work on:
+
+```bash
+claude mcp add senzor -- senzor-cli mcp ./project.toml
+```
+
+Everything after `--` is the command Claude Code runs. A relative path starts at the folder Claude Code runs in. Check that the server is up:
+
+```bash
+claude mcp list
+```
+
+`senzor` should show as connected. Ask Claude to "call get_status on senzor" to see the project's instances.
+
+`senzor-cli mcp` opens the project and starts its devices with `autostart = true`, as the GUI does. Add `--no-autostart` to leave every device stopped until the agent starts it:
+
+```bash
+claude mcp add senzor -- senzor-cli mcp ./project.toml --no-autostart
+```
+
+Without a project, it starts with an empty one that the agent can fill and save. When Claude Code ends the session, Senzor stops every instance cleanly. Unsaved changes are then discarded, so ask the agent to save first if you want to keep them. See [the `mcp` command](/docs/reference/cli#mcp) for every detail.
+
+## Set up Claude Code with the GUI
+
+Click **MCP** at the right of the window's top bar. The toggle turns on, and the address agents connect to, `127.0.0.1:18830`, shows next to it. To have MCP on from the start, open the window with `--mcp`:
+
+```bash
+senzor --mcp examples/showcase.toml
+```
+
+Then register the endpoint:
+
+```bash
+claude mcp add --transport http senzor-gui http://127.0.0.1:18830/mcp
+```
+
+To use another port, start the window with `--mcp-port 18900` and use that port in the URL. If the port is taken, a dialog says why MCP could not start and the toggle stays off; hover over it for the reason, and click it to try again.
+
+Click **MCP** again to turn it off. Agents connected at that moment lose their connection; reconnect them once MCP is on again. MCP is off whenever the window starts without `--mcp`.
+
+## Other MCP clients
+
+Most clients read a JSON list of servers. For the CLI, give the command; for the GUI, the URL:
+
+```json
+{
+  "mcpServers": {
+    "senzor": {
+      "command": "senzor-cli",
+      "args": ["mcp", "/path/to/project.toml"]
+    },
+    "senzor-gui": {
+      "type": "http",
+      "url": "http://127.0.0.1:18830/mcp"
+    }
+  }
+}
+```
+
+Use an absolute path when the client does not start servers in your project's folder.
+
+## What the agent can do
+
+The tools follow the GUI:
+
+- **Observe**: `get_status` lists every instance with its status, counters and pins. `get_instance` adds the current value of every field. `get_messages` returns published messages with sequence numbers. The agent passes the last number back to get only newer messages, and can wait for the next matching one.
+- **Run**: `start`, `stop`, `kill` and `restart` take all instances, a list of devices or a list of instances. They wait until the instances are online or stopped and report their status. `pin` and `unpin` force a field's value, as **Pin** does in the [instance view](/docs/gui/instance-view).
+- **Edit**: `get_project` returns the project as TOML. `set_project` replaces it. `put_device`, `put_template` and `set_broker` take the same keys as the project file, and further tools rename and remove devices and templates, or copy a built-in template.
+- **Files**: `new_project`, `open_project` and `save_project`.
+
+Edits change the project in memory, as edits in the GUI do. They never start, stop or restart anything. Running instances keep their settings, and each edit reports the instances that need a restart to use the new ones (see [Editing while running](/docs/concepts/editing-while-running)). The file changes only when the agent calls `save_project`.
+
+The server also gives the agent the [project file](/docs/reference/project-file), [generators](/docs/reference/generators) and [template variables](/docs/reference/template-variables) references and the built-in templates, so it can write templates without guessing.
+
+## Working together in the GUI
+
+While MCP is on, the agent and you work on the same project:
+
+- The agent's changes appear in the window right away: the device tree, the detail panel, the problems and the message log.
+- An edit by the agent marks the project as unsaved, so the title shows `*`, and closing the window asks **Save**, **Discard** or **Cancel** as usual.
+- Text you are still typing into a field is dropped when the agent edits the project, so the window never shows stale values. Finish typing (or press Enter) before you ask the agent to change things.
+- A device or template you have selected stays selected when the agent's edit moves it in the list, and the selection clears if the agent removes it.
+- While a dialog is open, for example **Unsaved changes**, the agent cannot save, open or start a new project. It gets an error asking it to try again after the dialog closes. Its other requests still work.
+
+The window applies the agent's changes while it draws. On Linux (checked on KDE Plasma with Wayland), it keeps doing so while it is minimized. If a desktop stops a minimized window from drawing, reads still work, but a change fails after 10 seconds with an error saying the window did not respond, and it is not applied later. Restore the window and the agent can try again.
+
+## Security
+
+- The endpoint listens on `127.0.0.1` only, so other machines cannot reach it.
+- It answers only requests addressed to `127.0.0.1`, `localhost` or `::1`. A web page that tricks your browser into sending requests to it (DNS rebinding) is refused.
+- It has no password. While MCP is on, any program on your computer can control the window: start devices, change the project and save it to any file you can write. Turn the toggle off when you do not need it.
+- `senzor-cli mcp` opens no port: only the agent that started it can talk to it.
+- Broker passwords never leave Senzor through MCP. `get_project` shows `password = "<redacted>"`, and when the agent sends `<redacted>` back, the stored password is kept. The name in `password_env` is shown, because it is not a secret.
+
+## Limits
+
+- One project at a time, as in the GUI.
+- The agent cannot see or change GUI-only state such as the selection, the panels or the message-log filter.
+- There is no undo for the agent's edits. Keep the project file under version control, or open it again without saving to throw the changes away.
+- `get_messages` sees what the message log sees: the last 1,000 published messages, without the `online` and `offline` availability messages. To check those, subscribe to the broker.

@@ -3,12 +3,17 @@ name = "senzor-core"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# JSON Schemas for the project-file types (used by the MCP server for tool inputs).
+schema = ["dep:schemars"]
+
 [dependencies]
 humantime.workspace = true
 humantime-serde.workspace = true
 minijinja.workspace = true
 rand.workspace = true
 rumqttc.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -1,0 +1,347 @@
+---
+title: MCP tools
+description: Every tool and resource of the Senzor MCP server, with arguments, results and errors.
+---
+
+`senzor-cli mcp` and the GUI with MCP on serve the same tools. For setup, see [Controlling Senzor from an AI agent](/docs/mcp).
+
+## Conventions
+
+- **Results** are JSON objects. Clients that read only text get the same JSON as text.
+- **Errors** come back as a tool result marked as an error, with a one-line message, and nothing changes. Arguments that do not match a tool's input schema fail the same way, with `failed to deserialize parameters: <reason>`. Examples are a missing required argument, a key the project file does not know, or `null` as a pin value.
+- **Times** are RFC 3339 in UTC with milliseconds, for example `2026-11-04T14:02:11.123Z`.
+- **Durations** in project-file keys are strings with a unit, for example `"10s"` or `"500ms"`, as in the [project file](/docs/reference/project-file).
+- **Passwords**: every result shows the broker password as `<redacted>`. When `set_project` or `set_broker` receives `<redacted>` as the password, the stored password is kept.
+- **Waiting for the host.** A tool that changes something waits up to 10 seconds for Senzor to apply it. In the GUI, the window applies changes while it draws frames. When the time runs out, the tool fails with `the Senzor window did not respond within 10s; the request was cancelled and will not be applied`.
+
+### Status values
+
+`status` is an object whose `state` is one of:
+
+| `state` | Other keys | Meaning |
+| --- | --- | --- |
+| `stopped` | | Not running. |
+| `connecting` | | First connection attempt of this run. |
+| `online` | | Connected; publishing on its interval. |
+| `reconnecting` | `attempt`, `last_error` | Retrying after a network error. |
+| `failed` | `reason` | The broker refused the connection, or the instance crashed. Start it again to retry. |
+
+### Instance summary
+
+`get_status` and `get_instance` describe an instance with these keys:
+
+| Key | Meaning |
+| --- | --- |
+| `id` | Instance ID, e.g. `office-3`. |
+| `device` | The `[[devices]]` entry it belongs to. |
+| `status` | See [Status values](#status-values). |
+| `published` | Messages published since the instance started. |
+| `errors` | Messages that could not be rendered or published. |
+| `last_publish` | Time of the last published message, or `null`. |
+| `pinned` | Fields forced to a value with `pin`. |
+| `needs_restart` | Running with older settings than the project's; `restart` applies them. |
+| `orphaned` | Running, but no longer in the project; it disappears once stopped. |
+
+### Edit result
+
+The tools that change the project return:
+
+| Key | Meaning |
+| --- | --- |
+| `changed` | Whether the project changed. Replacing something with an identical copy changes nothing. |
+| `problems` | Every [validation problem](/docs/reference/validation-errors) of the project now, each with `location` (e.g. `` device `office` ``) and `message`. |
+| `blocked` | Devices that cannot start because of problems. |
+| `needs_restart` | Running instances that now need a restart to use the project's settings. |
+| `orphaned` | Running instances that are no longer in the project. |
+
+Edits never start, stop or restart an instance, and they do not write the file: use `save_project`.
+
+## Observing
+
+### `get_status`
+
+The project and every instance. No arguments.
+
+| Key | Meaning |
+| --- | --- |
+| `path` | The project file, or `null` for a project that was never saved. |
+| `dirty` | The project has changes that are not saved. |
+| `broker_host`, `broker_port` | The broker the project connects to. |
+| `problems` | How many validation problems the project has; `get_project` lists them. |
+| `open_error` | Why the last attempt to open a project file failed, or `null`. `senzor-cli mcp` reports a project it could not open at launch here. |
+| `instances` | Every instance, as an [instance summary](#instance-summary), sorted by ID. |
+
+### `get_instance`
+
+One instance with its values.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `instance` | string | Instance ID. Required. |
+
+Returns the [instance summary](#instance-summary) and:
+
+| Key | Meaning |
+| --- | --- |
+| `template` | The template the instance runs, or `null` for an orphan. |
+| `fields` | Every field the instance publishes. |
+| `values` | The latest value of each field: a number, `true`/`false` or a string. Empty before the first publish. |
+
+Errors: `` there is no instance `<id>` ``.
+
+### `get_messages`
+
+Published messages, oldest first. These are the messages your templates define, as in the GUI's [message log](/docs/gui/window#message-log). The log keeps the last 1,000 messages and does not include the `online` and `offline` availability messages.
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `after_seq` | integer | `0` | Only messages with a higher sequence number. Pass the `last_seq` of the previous call to get only new messages. |
+| `instance` | string | | Only messages of this instance. |
+| `device` | string | | Only messages of this device's instances. |
+| `topic_contains` | string | | Only messages whose topic contains this text (case-sensitive). |
+| `limit` | integer | `100` | At most this many, from 1 to 1000. When more match, the newest are returned. |
+| `wait_seconds` | number | `0` | When no message matches yet, wait up to this long (at most 30) for one. The call returns as soon as one arrives. |
+
+| Key | Meaning |
+| --- | --- |
+| `messages` | Each with `seq`, `time`, `instance`, `topic`, `payload`, `qos` and `retain`. |
+| `last_seq` | The highest sequence number assigned so far. Sequence numbers keep growing when another project is opened. |
+| `truncated` | Messages after `after_seq` left the 1,000-message log before they could be read. |
+
+### `list_templates`
+
+The built-in templates, then the project's own. No arguments.
+
+| Key | Meaning |
+| --- | --- |
+| `templates` | Each with `id`, `builtin`, `interval` (e.g. `10s`), `topics`, `fields` (field name to generator, e.g. `random_walk`) and `used_by` (the devices that use it). |
+
+### `get_project`
+
+The project as TOML. No arguments.
+
+| Key | Meaning |
+| --- | --- |
+| `toml` | The project as Save writes it, with the password shown as `<redacted>`. |
+| `path` | The project file, or `null`. |
+| `dirty` | The project has changes that are not saved. |
+| `problems` | Every validation problem, each with `location` and `message`. |
+| `blocked` | Devices that cannot start because of problems. |
+
+## Running devices
+
+`start`, `stop`, `kill` and `restart` take the same arguments. Give exactly one of `all`, `devices` and `instances`.
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `all` | boolean | | `true` for every instance. |
+| `devices` | list of strings | | Device IDs: every instance of each. |
+| `instances` | list of strings | | Instance IDs. |
+| `wait_seconds` | number | `5` | Wait up to this long (at most 60) for the instances to settle. `0` returns at once. |
+
+They return:
+
+| Key | Meaning |
+| --- | --- |
+| `instances` | Each affected instance with its `id` and `status`. The status is `null` for an orphan that left once it stopped. |
+| `timed_out` | Some instances had not settled when the wait ran out. Always `false` with `wait_seconds = 0`. |
+
+Errors, shared by all four:
+
+- `a target is required: give exactly one of all = true, devices or instances`
+- `unknown device id(s): <ids>` or `unknown instance id(s): <ids>`. Nothing is sent when any ID is unknown. For `stop`, `kill` and `restart`, running orphans and their device IDs count as known.
+
+### `start`
+
+Starts stopped and failed instances; running ones are left alone. It waits until each instance is `online`, `failed` or `reconnecting`, so check the returned statuses.
+
+Errors: `` device `<id>` has validation errors and cannot start; get_project lists them ``.
+
+### `stop`
+
+Stops running instances gracefully. Each publishes its `offline` message, if its template has availability, and disconnects, so the broker does not publish its Last Will. It waits until they are `stopped`.
+
+### `kill`
+
+Drops the connections of running instances without a goodbye, as a device that loses power. The broker publishes the Last Will of each instance whose template has availability. It waits until they are `stopped`. See [Simulating a device dropping off](/docs/recipes/device-dropping-off).
+
+### `restart`
+
+Stops running instances gracefully and starts them again with the project's current settings. Stopped instances are started. Orphans are only stopped. It waits until the new run is `online`, `failed` or `reconnecting`.
+
+Errors: the same as `start` for devices with validation errors.
+
+### `pin`
+
+Forces a field of a running instance to a value, as **Pin** does in the [instance view](/docs/gui/instance-view). The instance publishes that value until it is unpinned or stops.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `instance` | string | Instance ID. Required. |
+| `field` | string | Field name, e.g. `co2`. Required. |
+| `value` | number, boolean or string | The value to publish. Required. |
+
+Returns `instance` and `pinned`, the instance's pinned fields.
+
+Errors:
+
+- `` there is no instance `<id>` ``
+- `` instance `<id>` is not running; start it first ``
+- `` instance `<id>` has no field `<field>`; its fields are: <fields> ``
+
+### `unpin`
+
+Lets pinned fields follow their generators again.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `instance` | string | Instance ID. Required. |
+| `field` | string | The field to unpin. Without it, every pinned field of the instance. |
+
+Returns and errors as `pin`.
+
+## Editing the project
+
+All of these return the [edit result](#edit-result).
+
+### `set_project`
+
+Replaces the whole project with TOML text.
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `toml` | string | | The whole project file. Required. |
+| `dry_run` | boolean | `false` | Only report the problems the text would have; change nothing. |
+
+Text with a TOML syntax error or an unknown key is refused, and the project stays as it was. The error lists every problem with its position, for example ``line 2, column 1: unknown field `hots`, expected one of …``. Text that parses but has validation problems is applied; the problems come back in the result.
+
+### `put_device`
+
+Adds a device, or replaces the device with the same `id`. The arguments are the keys of a `[[devices]]` table: `id`, `template`, `count`, `instance_id`, `params`, `autostart`, `interval` and `fields`, with the same defaults as in the [project file](/docs/reference/project-file).
+
+```json
+{ "id": "lab", "template": "temperature", "count": 3, "autostart": false }
+```
+
+### `rename_device`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `from` | string | Current device ID. Required. |
+| `to` | string | New device ID. Required. |
+
+Errors: `` the project has no device `<id>` ``, `` a device `<id>` already exists ``, `the name must not be empty`.
+
+### `remove_device`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Device ID. Required. |
+
+Running instances of the device become orphans: they keep running until stopped. Errors: `` the project has no device `<id>` ``.
+
+### `put_template`
+
+Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`.
+
+```json
+{
+  "id": "door",
+  "interval": "5s",
+  "messages": [{ "topic": "home/{{ device_id }}/contact", "payload": "{{ open }}" }],
+  "fields": { "open": { "generator": "sequence", "values": [true, false] } }
+}
+```
+
+Errors: `` `<id>` is a built-in template id; use another id, or copy_builtin_template ``.
+
+### `rename_template`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `from` | string | Current template ID. Required. |
+| `to` | string | New template ID. Required. |
+
+The devices that use the template are changed to the new ID.
+
+Errors: `` the project has no template `<id>` ``, `` `<id>` is a built-in template; built-ins cannot be changed (copy_builtin_template copies one into the project) ``, `` a template `<id>` already exists ``, `` `<id>` is a built-in template id ``, `the name must not be empty`.
+
+### `remove_template`
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Project template ID. Required. |
+
+Devices that still use the template get a validation problem and cannot start. Errors as `rename_template` for unknown and built-in IDs.
+
+### `copy_builtin_template`
+
+Copies a built-in template into the project, so it can be changed.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `builtin` | string | `co2`, `temperature` or `humidity`. Required. |
+| `new_id` | string | The copy's ID. Required. |
+
+Errors: `` unknown built-in template `<id>` ``, `` a template `<id>` already exists ``, `` `<id>` is a built-in template id ``, `the name must not be empty`.
+
+### `set_broker`
+
+Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the [project file](/docs/reference/project-file#broker). Every running instance needs a restart to use the new settings.
+
+## Files
+
+### `new_project`
+
+Replaces the project with an empty, untitled one.
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `discard_unsaved` | boolean | `false` | Throw away unsaved changes. |
+
+Returns `path` (`null`), `problems`, `blocked` and `instances` (the instance IDs of the project).
+
+Errors: `the project has unsaved changes; save it first, or pass discard_unsaved = true`. In the GUI, while a dialog is open: `the Senzor window is waiting for the user to answer a dialog; try again once it is closed`.
+
+### `open_project`
+
+Opens a project file. The current instances stop gracefully, and the new project's devices with `autostart = true` start once they have stopped, as when you open a project in the GUI.
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `path` | string | | Project file. Required. A relative path starts at Senzor's working directory. |
+| `discard_unsaved` | boolean | `false` | Throw away unsaved changes. |
+| `autostart` | boolean | `true` | Start the devices with `autostart = true`. |
+
+Returns as `new_project`. A file with validation problems opens; its problems come back in the result.
+
+Errors: those of `new_project`, ``cannot read <path>: <reason>``, and the problems of a file with a TOML syntax error or an unknown key. In that case the current project keeps running.
+
+### `save_project`
+
+Writes the project as canonical TOML, the same way **Save** does in the GUI (see [Files](/docs/gui/files)).
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `path` | string | | Save as this file, which then becomes the project's file. `.toml` is added when the name does not end with it. A relative path starts at Senzor's working directory. Without `path`, the project's own file. |
+| `overwrite` | boolean | `false` | Replace an existing file other than the project's own. |
+
+Returns `path`, the absolute path written.
+
+Errors:
+
+- `the project has no file yet; pass a path to save it as`
+- `<path> already exists; pass overwrite = true to replace it`
+- `cannot write <path>: <reason>`
+- In the GUI, while a dialog is open: `the Senzor window is waiting for the user to answer a dialog; try again once it is closed`
+
+## Resources
+
+The server offers these read-only references, so an agent can write templates without guessing:
+
+| URI | Content |
+| --- | --- |
+| `senzor://reference/project-file` | The [project file reference](/docs/reference/project-file). |
+| `senzor://reference/generators` | The [generators reference](/docs/reference/generators). |
+| `senzor://reference/template-variables` | The [template variables reference](/docs/reference/template-variables). |
+| `senzor://reference/builtin-templates` | The built-in templates `co2`, `temperature` and `humidity` as TOML. |

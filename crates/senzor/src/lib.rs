@@ -3,7 +3,6 @@
 mod app;
 mod buffers;
 mod dialogs;
-pub mod document;
 mod edits;
 mod format;
 mod preview;
@@ -13,5 +12,7 @@ pub mod testing;
 mod tree;
 mod ui;
 
-pub use app::SenzorApp;
+pub use app::{McpStatus, SenzorApp};
 pub use dialogs::{FileDialogs, NativeDialogs};
+/// The project being edited; it lives in `senzor-core` so every editor shares it.
+pub use senzor_core::project::document;

@@ -11,7 +11,13 @@ senzor examples/showcase.toml
 
 # Or start with an empty project
 senzor
+
+# Open a project with MCP already on, so AI agents can connect
+senzor --mcp examples/showcase.toml
 ```
+
+`--mcp` turns on the **MCP** toggle in the top bar at launch, and `--mcp-port <PORT>` picks another
+port than 18830 (and turns MCP on too). See [When an agent is connected](#when-an-agent-is-connected).
 
 ![The Senzor window with the showcase project running and instance office-0 selected](/screenshots/window.png)
 
@@ -26,6 +32,7 @@ From left to right:
 - **New**, **Open**, **Save** and **Save as** work on the project file. See [Files](/docs/gui/files).
 - **Start all** and **Stop all** start and stop every device. See [Running devices](/docs/gui/running-devices).
 - **starting devices…** can appear for a moment after you open another project. Hover over it to read **Waiting for the previous project's devices to go offline**: the new project's devices start once the old ones are offline (see [Autostart](/docs/gui/running-devices#autostart)).
+- **MCP** turns the endpoint for AI agents on and off. While it is on, the button is highlighted and the address agents connect to, `127.0.0.1:18830`, shows next to it; hover over it for the full URL. Click it again to turn MCP off, which disconnects connected agents. If the port is taken, a dialog says why, the toggle stays off and its label turns red; hover over it to read the reason, and click to try again.
 
 ## Left panel
 
@@ -90,6 +97,12 @@ device `bad`: unknown template `nope`
 Click a problem to go to it: a device or template problem selects that device or template (switching the left tab if needed), and a broker problem opens the broker settings.
 
 A device with problems cannot start, and neither can the devices of a template with problems. A broker problem stops every device from starting. Instances that were already running keep running with their last valid settings; see [Editing while running](/docs/concepts/editing-while-running). The [validation errors reference](/docs/reference/validation-errors) explains each message.
+
+## When an agent is connected
+
+![The top bar with MCP on, showing the address agents connect to](/screenshots/top-bar-mcp.png)
+
+While MCP is on, an agent such as Claude Code works on the same project as you. Its changes appear in the window right away, and its edits mark the project as unsaved like yours do. Text you are still typing into a field is dropped when the agent edits the project. While a dialog is open, the agent cannot save, open or start a new project. See [Working together in the GUI](/docs/mcp#working-together-in-the-gui).
 
 ## The showcase project
 

@@ -17,8 +17,9 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::wgpu::{WgpuTestRenderer, default_wgpu_setup};
 use image::RgbaImage;
-use senzor::SenzorApp;
 use senzor::testing::{App, FRAME_PAUSE, FakeDialogs, click, wait_online};
+use senzor::{McpStatus, SenzorApp};
+use senzor_mcp::DEFAULT_HTTP_PORT;
 
 const SIZE: egui::Vec2 = egui::vec2(1400.0, 900.0);
 
@@ -45,6 +46,8 @@ const PIN_ROW_TOLERANCE: f32 = 5.0;
 const PANEL_EDGE_ABOVE_TABS: f32 = 3.0;
 /// How much (in points) the `message-log` shot drags the bottom panel taller.
 const LOG_PANEL_GROWTH: f32 = 300.0;
+/// Space (in points) the `top-bar-mcp` shot keeps below the top bar's widgets.
+const TOP_BAR_MARGIN: f32 = 6.0;
 
 /// Every GUI label this program finds a widget by. If the GUI renames one, the program stops at
 /// the shot that uses it.
@@ -75,7 +78,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("rendering failed (no usable wgpu adapter?): {error}");
+            eprintln!("rendering failed: {error}");
             ExitCode::FAILURE
         }
     }
@@ -99,7 +102,10 @@ fn run() -> Result<(), String> {
     wait_online(&mut app, label::INSTANCE);
     run_for(&mut app, WARM_UP);
 
-    let shots = take_shots(&mut app)?;
+    let mut shots = take_shots(&mut app)?;
+    // The next window runs the same devices; this one must not hold their client IDs any more.
+    drop(app);
+    shots.push(("top-bar-mcp", top_bar_mcp(&project.path)?));
     std::fs::create_dir_all(&out).expect("create output folder");
     for (name, image) in shots {
         let path = out.join(format!("{name}.png"));
@@ -127,7 +133,7 @@ fn wgpu_renderer() -> Result<WgpuTestRenderer, String> {
             };
             RenderState::create(&config, &instance, None, RendererOptions::PREDICTABLE).await
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("no usable wgpu adapter? {e}"))?;
     Ok(WgpuTestRenderer::from_render_state(render_state))
 }
 
@@ -296,6 +302,39 @@ fn broker(app: &mut App) -> Result<RgbaImage, String> {
     let button = format!("{}{}:{}", label::BROKER_BUTTON, broker.host, broker.port);
     click(app, &button);
     render(app)
+}
+
+/// `top-bar-mcp`: the top bar of a window started with `--mcp`, showing the address AI agents
+/// connect to. Needs the default MCP port to be free.
+fn top_bar_mcp(project: &Path) -> Result<RgbaImage, String> {
+    let path = project.to_path_buf();
+    let mut app: App = Harness::builder()
+        .with_size(SIZE)
+        .renderer(wgpu_renderer()?)
+        .build_eframe(move |cc| {
+            SenzorApp::new(cc, Some(path), Box::new(FakeDialogs::default()))
+                .with_mcp(DEFAULT_HTTP_PORT)
+        });
+    app.step();
+    let indicator = match app.state().mcp_status() {
+        McpStatus::Listening(address) => address.to_string(),
+        other => {
+            return Err(format!(
+                "the top-bar-mcp shot needs port {DEFAULT_HTTP_PORT} free: {other:?}"
+            ));
+        }
+    };
+    wait_online(&mut app, label::INSTANCE);
+    let image = render(&mut app)?;
+    let corner =
+        app.get_by_label(&indicator).rect().max + egui::vec2(TOP_BAR_MARGIN, TOP_BAR_MARGIN);
+    let pixels =
+        |points: f32, limit: u32| ((points * app.ctx.pixels_per_point()).ceil() as u32).min(limit);
+    let (width, height) = (
+        pixels(corner.x, image.width()),
+        pixels(corner.y, image.height()),
+    );
+    Ok(image::imageops::crop_imm(&image, 0, 0, width, height).to_image())
 }
 
 /// Selects [`label::TEMPLATE`] in the Templates tab.

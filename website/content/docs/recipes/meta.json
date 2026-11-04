@@ -5,6 +5,7 @@
     "home-assistant-statestream",
     "fleet",
     "device-dropping-off",
+    "ai-agent-testing",
     "ci-and-docker"
   ]
 }

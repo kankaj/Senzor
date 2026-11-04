@@ -9,6 +9,7 @@ use crate::value::Value;
 
 /// One field's generator as written in the project file (`generator = "..."` plus parameters).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "generator", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeneratorSpec {
     Constant {
@@ -27,8 +28,10 @@ pub enum GeneratorSpec {
     Sine {
         center: f64,
         amplitude: f64,
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         #[serde(with = "humantime_serde")]
         period: Duration,
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         #[serde(default, with = "humantime_serde")]
         phase: Duration,
         #[serde(default, skip_serializing_if = "Option::is_none")]

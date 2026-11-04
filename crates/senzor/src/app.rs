@@ -14,6 +14,10 @@ use crate::selection::{ProblemTarget, Selection, keep_valid};
 use crate::ui::modals::{self, Outcome, UnsavedChoice};
 use crate::ui::{self, Action, Modal, Pending, UiState};
 
+mod mcp;
+
+pub use mcp::McpStatus;
+
 /// The Senzor window: one document, one engine, and the GUI state around them.
 pub struct SenzorApp {
     runtime: tokio::runtime::Runtime,
@@ -35,6 +39,16 @@ pub struct SenzorApp {
     ctx: egui::Context,
     allow_close: bool,
     window_title: String,
+    /// Counts the engines this window has had, so a replaced engine can be noticed.
+    engine_generation: u64,
+    /// Why the last attempt to open a project file failed, until another project is opened.
+    open_error: Option<String>,
+    /// The MCP endpoint while it runs.
+    mcp: Option<mcp::Mcp>,
+    /// The port turning MCP on uses.
+    mcp_port: u16,
+    /// Why the last attempt to turn MCP on failed.
+    mcp_error: Option<String>,
 }
 
 impl SenzorApp {
@@ -58,6 +72,11 @@ impl SenzorApp {
             ctx: cc.egui_ctx.clone(),
             allow_close: false,
             window_title: String::new(),
+            engine_generation: 0,
+            open_error: None,
+            mcp: None,
+            mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
+            mcp_error: None,
         };
         match path {
             Some(path) => app.open_path(&path),
@@ -99,6 +118,8 @@ impl SenzorApp {
     /// engine has stopped. Commands queued for the old document are dropped.
     fn replace_document(&mut self, doc: Document) {
         self.doc = doc;
+        self.open_error = None;
+        self.engine_generation += 1;
         self.ui.reset();
         let ctx = self.ctx.clone();
         let engine = Engine::spawn(
@@ -158,6 +179,7 @@ impl SenzorApp {
                 if self.engine.is_none() {
                     self.replace_document(Document::new_empty());
                 }
+                self.open_error = Some(senzor_mcp::open_error_text(path, &error));
                 self.ui.modal = Some(Modal::OpenFailed {
                     path: path.display().to_string(),
                     message: error.to_string(),
@@ -315,6 +337,13 @@ impl SenzorApp {
                 });
             }
             Action::OpenBroker => self.ui.broker_open = true,
+            Action::ToggleMcp => {
+                if self.mcp.is_some() {
+                    self.stop_mcp();
+                } else {
+                    self.start_mcp(self.mcp_port);
+                }
+            }
             Action::GoTo(ProblemTarget::Broker) => self.ui.broker_open = true,
             Action::GoTo(ProblemTarget::Select(selection)) => self.reveal(selection),
         }
@@ -365,6 +394,7 @@ impl eframe::App for SenzorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.autostart_when_ready();
+        self.handle_mcp_requests();
         self.state = self.engine().snapshot();
         self.handle_close_request(&ctx);
         // The panels record a rename still being typed again while they draw.
@@ -379,7 +409,7 @@ impl eframe::App for SenzorApp {
         let mut actions = Vec::new();
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
-            ui::top_bar::show(ui, &self.doc, starting, &mut actions);
+            ui::top_bar::show(ui, &self.doc, starting, &self.mcp_status(), &mut actions);
         });
         egui::Panel::bottom("bottom")
             .resizable(true)
@@ -439,12 +469,14 @@ impl eframe::App for SenzorApp {
                 self.apply_modal(outcome);
             }
         }
+        self.publish_view();
     }
 
     /// Waits for the current engine and for replaced ones still stopping: dropping the runtime
     /// would cancel their shutdown halfway, and their devices would disappear through the Last
     /// Will instead of a clean `offline`.
     fn on_exit(&mut self) {
+        self.stop_mcp();
         let engine = self.engine.take();
         let retired = &mut self.retired;
         self.runtime.block_on(async move {

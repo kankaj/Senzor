@@ -11,6 +11,7 @@ description: The senzor-cli commands, options, exit codes, messages and logging.
 ```text
 senzor-cli [OPTIONS] validate <PROJECT>
 senzor-cli [OPTIONS] run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+senzor-cli [OPTIONS] mcp [PROJECT] [--no-autostart]
 senzor-cli help [COMMAND]
 senzor-cli --version
 ```
@@ -67,11 +68,43 @@ senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
    connections that are still open are dropped.
 6. Exits with 0.
 
+## mcp
+
+```text
+senzor-cli mcp [PROJECT] [--no-autostart]
+```
+
+Serves the [Model Context Protocol](/docs/mcp) on stdin and stdout, so that an AI agent can control
+the project. The agent's MCP client starts the command; you do not run it in a terminal yourself.
+The tools are listed in the [MCP tools reference](/docs/reference/mcp-tools).
+
+| Option | Meaning |
+| --- | --- |
+| `[PROJECT]` | The project file to open. Without it, `mcp` starts with an empty project that the agent can fill and save. |
+| `--no-autostart` | Leave every device stopped until the agent starts it. Without it, the devices with `autostart = true` start, as when the GUI opens a project. |
+
+`mcp` does the following:
+
+1. Opens the project. Unlike `run`, a project with validation problems opens: its problems go to
+   stderr as `<PROJECT>: <location>: <message>`, and only the devices with problems are blocked, as
+   in the GUI. If the file cannot be read or has a TOML syntax error, `mcp` prints a warning that
+   names the file and the problem, for example
+   `warning: cannot read project.toml: No such file or directory (os error 2); starting with an empty project`,
+   and starts with an empty project. The agent sees the same reason as `open_error` in `get_status`.
+2. Starts the devices with `autostart = true`, unless `--no-autostart` is given.
+3. Answers the agent's requests until the agent closes stdin (it disconnected), or until Ctrl+C or
+   SIGTERM.
+4. Stops the instances gracefully, as `run` does. If the project has unsaved changes, it prints
+   `warning: the project has unsaved changes; they are discarded`.
+5. Exits with 0.
+
+stdout carries only MCP messages; the log and warnings go to stderr. `-v` works as for `run`.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. Also `--help` and `--version`. |
+| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. `mcp`: the agent disconnected, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
 | `1` | The async runtime could not start. |
 | `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
 
@@ -97,7 +130,8 @@ error: invalid value '30' for '--duration <DURATION>': time unit needed, for exa
 
 ## Output
 
-- stdout gets only the `OK` line of `validate`, and the output of `--help` and `--version`.
+- stdout gets only the `OK` line of `validate`, the MCP messages of `mcp`, and the output of
+  `--help` and `--version`.
 - stderr gets everything else: problems, errors and the log.
 
 ## Logging
@@ -128,7 +162,7 @@ the MQTT client, log only warnings and errors unless `RUST_LOG` says otherwise.
 | `WARN` | `` message on `<topic>` is <size> bytes; the limit is 1048576 `` | A message is larger than 1 MiB. It is skipped and counted as an error. |
 | `WARN` | `publish: <error>` | A message could not be handed to the MQTT client, for example because its queue is full. It is skipped and counted as an error. |
 | `WARN` | `publish online: <error>` | The availability `online` message could not be handed to the MQTT client. |
-| `INFO` | `shutting down` | `run` is stopping. |
+| `INFO` | `shutting down` | `run` or `mcp` is stopping. |
 | `DEBUG` | `publish` with `topic=<topic>` and `payload=<payload>` | One published message. Shown with `-v`. |
 
 When the broker refuses a connection, the reason is

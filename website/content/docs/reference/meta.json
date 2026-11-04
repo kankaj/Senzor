@@ -6,6 +6,7 @@
     "template-variables",
     "builtin-templates",
     "cli",
+    "mcp-tools",
     "validation-errors"
   ]
 }

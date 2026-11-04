@@ -3,9 +3,10 @@ title: Running headless
 description: Validate and run a project from the command line with senzor-cli, for example in CI or a container.
 ---
 
-`senzor-cli` runs the same project file as the GUI, without a window. It has two commands:
-`validate` checks a project, and `run` connects its devices to the broker and publishes until you stop
-it. This page shows how to use them; the [CLI reference](/docs/reference/cli) lists every flag and
+`senzor-cli` runs the same project file as the GUI, without a window. It has three commands:
+`validate` checks a project, `run` connects its devices to the broker and publishes until you stop
+it, and `mcp` lets an AI agent control the project (see [Let an agent drive it](#let-an-agent-drive-it)).
+This page shows how to use them; the [CLI reference](/docs/reference/cli) lists every flag and
 message.
 
 ## Validate a project
@@ -143,6 +144,19 @@ problems. Set `NO_COLOR=1` to turn off the colour codes, which is useful in CI l
 
 `run` exits with 0 even if no instance ever reached the broker. The exit code tells you that the
 simulation ran, not that messages arrived. To check that, subscribe to the topics on the broker.
+
+## Let an agent drive it
+
+`senzor-cli mcp` serves the project to an AI agent over MCP on stdin and stdout, instead of running
+it on its own. The agent starts the command itself, for example after you register it with Claude Code:
+
+```bash
+claude mcp add senzor -- senzor-cli mcp examples/quick-start.toml
+```
+
+The agent can then start, stop and kill devices, pin values, read the published messages and edit
+the project. See [Controlling Senzor from an AI agent](/docs/mcp), and the
+[CLI reference](/docs/reference/cli#mcp) for the command's options.
 
 ## In CI and containers
 

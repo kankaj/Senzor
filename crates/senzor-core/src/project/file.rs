@@ -10,6 +10,7 @@ use crate::value::Value;
 
 /// The project file as written on disk. The GUI edits this; `validate` turns it into a `Project`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ProjectFile {
     #[serde(default)]
@@ -23,11 +24,13 @@ pub struct ProjectFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct BrokerSpec {
     pub host: String,
     pub port: u16,
     pub client_id_prefix: String,
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     #[serde(with = "humantime_serde")]
     pub keep_alive: Duration,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,6 +59,7 @@ impl Default for BrokerSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct TlsSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -67,6 +71,7 @@ pub struct TlsSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SimulationSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,9 +85,11 @@ impl SimulationSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct TemplateSpec {
     pub id: String,
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     #[serde(default = "default_interval", with = "humantime_serde")]
     pub interval: Duration,
     #[serde(default)]
@@ -103,6 +110,7 @@ fn default_interval() -> Duration {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct MessageSpec {
     pub topic: String,
@@ -110,6 +118,7 @@ pub struct MessageSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct AvailabilitySpec {
     pub topic: String,
@@ -118,6 +127,7 @@ pub struct AvailabilitySpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct DeviceSpec {
     pub id: String,
@@ -130,6 +140,7 @@ pub struct DeviceSpec {
     pub params: BTreeMap<String, Value>,
     #[serde(default = "default_autostart")]
     pub autostart: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -137,6 +148,10 @@ pub struct DeviceSpec {
     )]
     pub interval: Option<Duration>,
     /// Partial generator tables merged onto the template's fields (see `validate`).
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "BTreeMap<String, crate::schema::TomlTable>")
+    )]
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, toml::Table>,
 }

@@ -10,6 +10,8 @@ Senzor comes as two programs that read the same project file:
 - `senzor`, a desktop GUI. You edit the project, start and stop devices, force values and watch the messages.
 - `senzor-cli`, a headless runner for terminals, Docker containers and CI pipelines.
 
+An AI agent such as Claude Code can control either of them over MCP.
+
 Senzor does not include a broker. It connects to yours, for example Mosquitto, over MQTT 3.1.1.
 
 This documentation covers Senzor 1.0.0.
@@ -30,6 +32,7 @@ You are building or testing something that reads sensor data over MQTT, and you 
 - **Reproducible runs.** With a seed, every run of a project produces the same random value sequences.
 - **Secured brokers.** Username and password (the password can come from an environment variable), TLS, and client certificates.
 - **Validation.** Senzor checks the whole project when it loads it and lists every problem with its location. A device with problems does not start.
+- **AI agents (MCP).** An agent can start and kill devices, pin values, read the published messages and edit the project, headless with `senzor-cli mcp`, or live in the window once you turn on its **MCP** toggle.
 
 ## What 1.0.0 does not do yet
 
@@ -48,4 +51,5 @@ You are building or testing something that reads sensor data over MQTT, and you 
   <Card title="Quick start" href="/docs/quick-start" description="Run three simulated sensors against a local broker in a few minutes." />
   <Card title="Templates, devices and instances" href="/docs/concepts/templates-devices-instances" description="How one template becomes a fleet of devices." />
   <Card title="Running headless" href="/docs/headless" description="Run projects with senzor-cli in CI and Docker." />
+  <Card title="AI agents" href="/docs/mcp" description="Let Claude Code or another MCP client drive Senzor." />
 </Cards>

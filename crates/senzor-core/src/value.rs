@@ -6,6 +6,7 @@ const MAX_EXACT_INTEGER: f64 = 9.0e15;
 
 /// A field or param value as written in the project file and produced by generators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum Value {
     Bool(bool),

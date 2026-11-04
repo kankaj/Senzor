@@ -1,0 +1,118 @@
+---
+title: Testing a consumer with an AI agent
+description: Let Claude Code start sensors, force a CO2 alarm, drop a device off the network and bring it back, while it checks what your consumer does.
+---
+
+An AI agent with access to Senzor can run a test scenario from a few sentences. It can also check the other side in the same session: your backend's API, its database or its logs, through the agent's other tools. This recipe walks through one scenario on the Quick start project: a CO2 alarm, a sensor that loses power, and its recovery.
+
+## Set up
+
+1. Start a broker as in the [Quick start](/docs/quick-start), and watch the status topics in a second terminal:
+
+   ```bash
+   docker exec mosquitto mosquitto_sub -v -t 'senzor/+/status'
+   ```
+
+2. Register Senzor with Claude Code, with the Quick start project and no autostart, so that nothing publishes until the agent says so:
+
+   ```bash
+   claude mcp add senzor -- senzor-cli mcp examples/quick-start.toml --no-autostart
+   ```
+
+   The project has two CO2 sensors, `office-0` and `office-1`, and a thermometer, `kitchen`. Each publishes every 10 seconds:
+
+   <include lang="toml" meta='title="examples/quick-start.toml"'>../../../../examples/quick-start.toml</include>
+
+To watch the agent work instead, open `examples/quick-start.toml` in the GUI, turn on **MCP** in the top bar, and register it as shown in [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui). The steps below stay the same.
+
+## 1. Start the sensors
+
+> Start all Senzor devices and tell me their status.
+
+The agent calls `start`:
+
+```json
+{ "all": true }
+```
+
+`start` waits until the instances are connected and returns their statuses:
+
+```json
+{
+  "instances": [
+    { "id": "kitchen", "status": { "state": "online" } },
+    { "id": "office-0", "status": { "state": "online" } },
+    { "id": "office-1", "status": { "state": "online" } }
+  ],
+  "timed_out": false
+}
+```
+
+The subscriber prints an `online` for each.
+
+## 2. Force a CO2 alarm
+
+> Set CO2 on office-0 to 2500 and show me the next message it publishes.
+
+The agent pins the field, then waits for the next message of `office-0`:
+
+```json
+{ "instance": "office-0", "field": "co2", "value": 2500 }
+```
+
+```json
+{ "after_seq": 17, "instance": "office-0", "wait_seconds": 15 }
+```
+
+The first call is `pin`, the second `get_messages`. `after_seq` is the `last_seq` of an earlier `get_messages` call, so only newer messages count. Because the interval is 10 seconds, the agent waits up to 15. The result contains the forced value:
+
+```json
+{
+  "messages": [
+    {
+      "seq": 21,
+      "time": "2026-11-04T14:02:11.123Z",
+      "instance": "office-0",
+      "topic": "senzor/office-0/co2",
+      "payload": "{\"co2\": 2500, \"ts\": 1793800931123}",
+      "qos": 0,
+      "retain": false
+    }
+  ],
+  "last_seq": 21,
+  "truncated": false
+}
+```
+
+Now is the time to ask the agent to check your side: "Did the backend raise a CO2 alarm for office-0?"
+
+## 3. Drop the sensor off the network
+
+> Make office-0 drop off the network as if it lost power.
+
+The agent calls `kill`:
+
+```json
+{ "instances": ["office-0"] }
+```
+
+The connection drops without a goodbye, so the broker publishes the sensor's Last Will. The subscriber shows:
+
+```text
+senzor/office-0/status offline
+```
+
+Ask the agent whether your consumer marked `office-0` as unavailable. To compare with a clean shutdown, ask it to `stop` `office-1`: the subscriber sees the same `offline`, but sent by the sensor itself. [Simulating a device dropping off](/docs/recipes/device-dropping-off) explains the difference.
+
+## 4. Bring it back
+
+> Bring office-0 back and confirm it publishes normal values again.
+
+The agent calls `start` for `office-0`. A new run clears the pin, so the agent waits for the next message with `get_messages`, as in step 2, and checks that CO2 is back in the normal range (the built-in `co2` template starts at 600 ppm). The subscriber prints `online`.
+
+## Make it repeatable
+
+- Ask the agent to write the scenario down as a checklist, or as a test script for your project, once it works.
+- Add `[simulation] seed = 1` to the project, so the generated values repeat from run to run (see [Reproducible runs](/docs/concepts/reproducible-runs)).
+- With `--no-autostart`, every run starts from the same state: all instances stopped.
+- The agent can also change the project: "add ten more CO2 sensors in a device called `lab`" becomes a `put_device` call. It saves the file only when you ask. See the [MCP tools reference](/docs/reference/mcp-tools).

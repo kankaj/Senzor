@@ -3,7 +3,7 @@ use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use senzor_core::project::{ProjectError, ProjectFile, Validated};
+use super::{ProjectError, ProjectFile, Validated};
 
 /// Why a project file could not be opened.
 #[derive(Debug, Clone, PartialEq)]
@@ -250,7 +250,7 @@ fn validate_in_folder(file: &ProjectFile, path: Option<&Path>) -> Validated {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use senzor_core::project::DeviceSpec;
+    use crate::project::DeviceSpec;
 
     /// An empty folder for one test.
     fn temp_dir(name: &str) -> PathBuf {

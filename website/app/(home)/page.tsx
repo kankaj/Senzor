@@ -14,6 +14,10 @@ const features = [
     title: 'GUI and headless CLI',
     body: 'Edit and watch live in the GUI, or run the same project in CI.',
   },
+  {
+    title: 'Drive it from an AI agent',
+    body: 'Claude Code and other MCP clients can start devices, force values and read the messages.',
+  },
 ];
 
 export default function HomePage() {
@@ -38,7 +42,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <ul className="grid w-full gap-4 text-left sm:grid-cols-3">
+      <ul className="grid w-full gap-4 text-left sm:grid-cols-2 lg:grid-cols-4">
         {features.map((feature) => (
           <li key={feature.title} className="rounded-xl border bg-fd-card p-5">
             <h2 className="mb-2 font-semibold">{feature.title}</h2>

@@ -51,6 +51,8 @@ pub enum Action {
     AskCopyBuiltin(String),
     OpenBroker,
     GoTo(ProblemTarget),
+    /// Turn the MCP endpoint on or off.
+    ToggleMcp,
 }
 
 /// Order in which a frame's actions are applied: edits, then renames, then removals, then the rest.

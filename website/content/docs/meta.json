@@ -10,6 +10,8 @@
     "...gui",
     "---Headless---",
     "headless",
+    "---AI agents---",
+    "mcp",
     "---Reference---",
     "...reference",
     "---Recipes---",

@@ -287,6 +287,8 @@ impl<'a> Ticker<'a> {
             .map_err(|e| format!("publish: {e}"))?;
         tracing::debug!(instance = %id, topic = %message.topic, payload = %message.payload, "publish");
         Ok(LogEntry {
+            // `record_publish` numbers it.
+            seq: 0,
             time: now,
             instance: id.to_string(),
             topic: message.topic,

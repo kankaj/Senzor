@@ -6,6 +6,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use senzor_core::engine::{Command, Engine, Target};
 use senzor_core::project::{Project, ProjectError, ProjectFile};
+use senzor_mcp::{Session, serve_stdio};
 use tracing_subscriber::EnvFilter;
 
 /// Exit code for an invalid project or invalid arguments.
@@ -35,6 +36,14 @@ enum Cmd {
         #[arg(long, value_parser = humantime::parse_duration)]
         duration: Option<Duration>,
     },
+    /// Serve the Model Context Protocol on stdin/stdout, so an AI agent can control Senzor.
+    Mcp {
+        /// Project file to open; without it, an empty project.
+        project: Option<PathBuf>,
+        /// Do not start the devices with `autostart = true`.
+        #[arg(long)]
+        no_autostart: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -47,6 +56,10 @@ fn main() -> ExitCode {
             only,
             duration,
         } => run(&project, &only, duration),
+        Cmd::Mcp {
+            project,
+            no_autostart,
+        } => mcp(project.as_deref(), !no_autostart),
     }
 }
 
@@ -181,6 +194,33 @@ async fn run_engine(project: Project, devices: Vec<String>, duration: Option<Dur
     }
     tracing::info!("shutting down");
     engine.shutdown().await;
+}
+
+/// Serves MCP until the client disconnects, Ctrl+C or SIGTERM. stdout carries only the protocol.
+fn mcp(path: Option<&Path>, autostart: bool) -> ExitCode {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("error: cannot start the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async {
+        let shutdown = shutdown_signal();
+        let session = Session::new(&tokio::runtime::Handle::current(), path, autostart);
+        match (session.open_error(), path) {
+            (Some(error), _) => eprintln!("warning: {error}; starting with an empty project"),
+            (None, Some(path)) => report(path, &session.document().validated().errors),
+            (None, None) => {}
+        }
+        let session = serve_stdio(session, shutdown).await;
+        if session.document().is_dirty() {
+            eprintln!("warning: the project has unsaved changes; they are discarded");
+        }
+        tracing::info!("shutting down");
+        session.shutdown().await;
+    });
+    ExitCode::SUCCESS
 }
 
 /// Completes on Ctrl+C or, on Unix, SIGTERM (what `docker stop` and systemd send).

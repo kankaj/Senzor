@@ -107,6 +107,7 @@ mod tests {
     fn engine_with_log(count: usize) -> EngineState {
         let log = (0..count)
             .map(|i| LogEntry {
+                seq: i as u64 + 1,
                 time: SystemTime::UNIX_EPOCH,
                 instance: "office".to_string(),
                 topic: format!("topic-{i:03}"),

@@ -1,10 +1,18 @@
 use eframe::egui;
 
-use super::Action;
+use super::{Action, ERROR};
+use crate::app::McpStatus;
 use crate::document::Document;
 
 /// `starting`: devices or commands are waiting for the previous project's engine to stop.
-pub fn show(ui: &mut egui::Ui, doc: &Document, starting: bool, actions: &mut Vec<Action>) {
+/// `mcp`: whether AI agents can connect, shown on the MCP toggle.
+pub fn show(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    starting: bool,
+    mcp: &McpStatus,
+    actions: &mut Vec<Action>,
+) {
     ui.horizontal(|ui| {
         ui.strong(doc.title());
         ui.separator();
@@ -42,6 +50,30 @@ pub fn show(ui: &mut egui::Ui, doc: &Document, starting: bool, actions: &mut Vec
         if starting {
             ui.weak("starting devices…")
                 .on_hover_text("Waiting for the previous project's devices to go offline");
+        }
+        ui.separator();
+        let on = matches!(mcp, McpStatus::Listening(_));
+        let hint = match mcp {
+            McpStatus::Listening(address) => {
+                format!("AI agents can control this window at http://{address}/mcp. Click to stop.")
+            }
+            McpStatus::Off { port, error: None } => {
+                format!("Let AI agents control this window over MCP at http://127.0.0.1:{port}/mcp")
+            }
+            McpStatus::Off {
+                port,
+                error: Some(error),
+            } => format!("MCP could not start: {error}. Click to try port {port} again."),
+        };
+        let mut toggle = egui::Button::new("MCP").selected(on);
+        if matches!(mcp, McpStatus::Off { error: Some(_), .. }) {
+            toggle = egui::Button::new(egui::RichText::new("MCP").color(ERROR));
+        }
+        if ui.add(toggle).on_hover_text(hint).clicked() {
+            actions.push(Action::ToggleMcp);
+        }
+        if let McpStatus::Listening(address) = mcp {
+            ui.label(address.to_string());
         }
     });
 }

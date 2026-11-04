@@ -7,6 +7,7 @@ mod state;
 mod test_support;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
@@ -18,7 +19,8 @@ use instance::{InstanceCmd, STOP_TIMEOUT, run_instance};
 use state::Shared;
 
 pub use state::{
-    EngineState, InstanceState, InstanceStatus, LOG_CAPACITY, LogEntry, NOTIFY_INTERVAL, Notify,
+    EngineState, InstanceState, InstanceStatus, LOG_CAPACITY, LogEntry, LogPage, NOTIFY_INTERVAL,
+    Notify, last_seq,
 };
 
 /// Which instances a command applies to.
@@ -69,17 +71,32 @@ pub enum Command {
 /// waiting; `shutdown` waits until they have stopped.
 pub struct EngineHandle {
     tx: mpsc::UnboundedSender<Command>,
+    sent: AtomicU64,
     shared: Shared,
     task: JoinHandle<()>,
 }
 
 impl EngineHandle {
     pub fn send(&self, command: Command) {
-        let _ = self.tx.send(command);
+        if self.tx.send(command).is_ok() {
+            self.sent.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    /// How many commands were sent to the engine; compare with [`EngineState::commands_handled`].
+    pub fn commands_sent(&self) -> u64 {
+        self.sent.load(Ordering::Acquire)
     }
 
     pub fn snapshot(&self) -> EngineState {
         self.shared.snapshot()
+    }
+
+    /// A read-only view of this engine's state that can be cloned and sent to other threads.
+    pub fn observer(&self) -> EngineObserver {
+        EngineObserver {
+            shared: self.shared.clone(),
+        }
     }
 
     /// Stops every instance gracefully; whatever still runs after 2 s is killed.
@@ -88,6 +105,28 @@ impl EngineHandle {
         // The closed channel tells the supervisor to shut down once it has handled the queue.
         drop(tx);
         let _ = task.await;
+    }
+}
+
+/// Reads an engine's state from anywhere. It keeps working after the engine is shut down and
+/// then shows the state the engine ended with.
+#[derive(Clone)]
+pub struct EngineObserver {
+    shared: Shared,
+}
+
+impl EngineObserver {
+    pub fn snapshot(&self) -> EngineState {
+        self.shared.snapshot()
+    }
+
+    /// Runs `f` on the current state without copying all of it.
+    pub fn read<R>(&self, f: impl FnOnce(&EngineState) -> R) -> R {
+        self.shared.read(f)
+    }
+
+    pub fn instance(&self, id: &str) -> Option<InstanceState> {
+        self.read(|state| state.instances.get(id).cloned())
     }
 }
 
@@ -109,7 +148,12 @@ impl Engine {
         };
         let (tx, rx) = mpsc::unbounded_channel();
         let task = runtime.spawn(supervisor.run(rx, notifier));
-        EngineHandle { tx, shared, task }
+        EngineHandle {
+            tx,
+            sent: AtomicU64::new(0),
+            shared,
+            task,
+        }
     }
 }
 
@@ -135,7 +179,10 @@ impl Supervisor {
         loop {
             tokio::select! {
                 command = rx.recv() => match command {
-                    Some(command) => self.handle(command),
+                    Some(command) => {
+                        self.handle(command);
+                        self.shared.update(|state| state.commands_handled += 1);
+                    }
                     None => {
                         self.shutdown().await;
                         notifier.abort();
@@ -254,8 +301,10 @@ impl Supervisor {
                 broker,
             },
         );
-        self.shared
-            .update_instance(id, |instance| instance.needs_restart = false);
+        self.shared.update_instance(id, |instance| {
+            instance.needs_restart = false;
+            instance.runs += 1;
+        });
     }
 
     fn finished(&mut self, result: Result<(Id, ()), JoinError>) {
@@ -717,6 +766,70 @@ count = 2
             ["sv/a-0/status", "sv/a-1/status", "sv/b/status"],
             "one offline each, no Last Will"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sequence_numbers_keep_growing_across_engines() {
+        let port = start_broker();
+        let mut seqs = Vec::new();
+        for _ in 0..2 {
+            let engine = spawn(project(port, TWO_DEVICES));
+            let observer = engine.observer();
+            engine.send(Command::Start(Target::Instance("b".into())));
+            wait_until(&engine, "b published", |s| s.instances["b"].published > 0).await;
+            engine.shutdown().await;
+            seqs.extend(observer.snapshot().log.iter().map(|e| e.seq));
+        }
+        assert!(seqs.windows(2).all(|w| w[0] < w[1]), "{seqs:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handled_commands_catch_up_with_sent_ones() {
+        let port = start_broker();
+        let engine = spawn(project(port, TWO_DEVICES));
+        engine.send(Command::Stop(Target::All));
+        engine.send(Command::ReplaceProject(project(port, "")));
+        assert_eq!(engine.commands_sent(), 2);
+        wait_until(&engine, "both handled", |s| s.commands_handled == 2).await;
+        assert!(
+            engine.snapshot().instances.is_empty(),
+            "the replaced project is in the state"
+        );
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn each_start_counts_as_a_run() {
+        let port = start_broker();
+        let engine = spawn(project(port, TWO_DEVICES));
+        assert_eq!(engine.snapshot().instances["b"].runs, 0);
+        start_online(&engine, "b").await;
+        assert_eq!(engine.snapshot().instances["b"].runs, 1);
+
+        engine.send(Command::Restart(Target::Instance("b".into())));
+        wait_until(&engine, "b online again", |s| {
+            s.instances["b"].runs == 2 && status(s, "b") == InstanceStatus::Online
+        })
+        .await;
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_observer_outlives_the_engine() {
+        let port = start_broker();
+        let engine = spawn(project(port, TWO_DEVICES));
+        let observer = engine.observer();
+        start_online(&engine, "b").await;
+        assert_eq!(
+            observer.instance("b").unwrap().status,
+            InstanceStatus::Online
+        );
+        engine.shutdown().await;
+        assert_eq!(
+            observer.instance("b").unwrap().status,
+            InstanceStatus::Stopped
+        );
+        assert!(observer.instance("missing").is_none());
     }
 
     #[tokio::test(start_paused = true)]
