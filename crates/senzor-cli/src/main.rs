@@ -6,13 +6,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use senzor_core::engine::{Command, Engine, Target};
+use senzor_core::engine::{Command, Engine, EngineState, InstanceStatus, Target};
 use senzor_core::project::{Project, ProjectError, ProjectFile};
 use senzor_mcp::{Session, serve_stdio};
 use tracing_subscriber::EnvFilter;
 
 /// Exit code for an invalid project or invalid arguments.
 const INVALID: u8 = 2;
+/// Exit code for a `run` that ended with at least one instance Failed.
+const INSTANCE_FAILED: u8 = 3;
 
 #[derive(Parser)]
 #[command(name = "senzor-cli", version, about = "Headless MQTT sensor simulator")]
@@ -186,12 +188,25 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(run_engine(project, devices, duration));
-    ExitCode::SUCCESS
+    let failed = runtime.block_on(run_engine(project, devices, duration));
+    if failed.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    eprintln!(
+        "error: {} failed: {}",
+        count_noun(failed.len(), "instance"),
+        failed.join(", ")
+    );
+    ExitCode::from(INSTANCE_FAILED)
 }
 
 /// Starts `devices`, waits for Ctrl+C, SIGTERM or `duration`, then shuts the engine down.
-async fn run_engine(project: Project, devices: Vec<String>, duration: Option<Duration>) {
+/// Returns the IDs of the instances that ended Failed.
+async fn run_engine(
+    project: Project,
+    devices: Vec<String>,
+    duration: Option<Duration>,
+) -> Vec<String> {
     let shutdown = shutdown_signal();
     tracing::info!(
         "connecting with MQTT {}",
@@ -211,7 +226,20 @@ async fn run_engine(project: Project, devices: Vec<String>, duration: Option<Dur
         None => shutdown.await,
     }
     tracing::info!("shutting down");
+    let observer = engine.observer();
     engine.shutdown().await;
+    observer.read(failed_instances)
+}
+
+/// IDs of the instances whose status is Failed, in ID order. An instance that is still
+/// reconnecting when the run ends stops normally and is not among them.
+fn failed_instances(state: &EngineState) -> Vec<String> {
+    state
+        .instances
+        .iter()
+        .filter(|(_, instance)| matches!(instance.status, InstanceStatus::Failed { .. }))
+        .map(|(id, _)| id.clone())
+        .collect()
 }
 
 /// Serves MCP until the client disconnects, Ctrl+C or SIGTERM. stdout carries only the protocol.
@@ -261,6 +289,8 @@ fn shutdown_signal() -> impl Future<Output = ()> {
 
 #[cfg(test)]
 mod tests {
+    use senzor_core::engine::InstanceState;
+
     use super::*;
 
     #[test]
@@ -270,5 +300,39 @@ mod tests {
         assert!(!log_colours(true, Some(OsString::from("1"))));
         assert!(!log_colours(false, None));
         assert!(!log_colours(false, Some(OsString::new())));
+    }
+
+    #[test]
+    fn failed_instances_are_those_whose_status_is_failed() {
+        let mut state = EngineState::default();
+        for (id, status) in [
+            ("a-0", InstanceStatus::Stopped),
+            (
+                "a-1",
+                InstanceStatus::Failed {
+                    reason: "refused".into(),
+                },
+            ),
+            ("b", InstanceStatus::Online),
+            (
+                "c",
+                InstanceStatus::Reconnecting {
+                    attempt: 3,
+                    last_error: "refused".into(),
+                },
+            ),
+            (
+                "d",
+                InstanceStatus::Failed {
+                    reason: "panic".into(),
+                },
+            ),
+        ] {
+            let mut instance = InstanceState::new(id);
+            instance.status = status;
+            state.instances.insert(id.to_string(), instance);
+        }
+        assert_eq!(failed_instances(&state), ["a-1", "d"]);
+        assert!(failed_instances(&EngineState::default()).is_empty());
     }
 }

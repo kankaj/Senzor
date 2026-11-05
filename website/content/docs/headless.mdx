@@ -85,7 +85,7 @@ interval, so instances started together do not publish in lockstep (see
 If the broker cannot be reached, an instance keeps retrying: it waits 1 s, then 2 s, 4 s and so on,
 up to 30 s between attempts. You can start `senzor-cli` before the broker is up. If the broker
 answers but refuses the connection, for example because of wrong credentials, that instance fails
-and does not retry; the other instances keep running. See
+and does not retry; the other instances keep running, and `run` exits with code 3 when it stops. See
 [Availability and Last Will](/docs/concepts/availability) for the details.
 
 ## Stop
@@ -107,7 +107,8 @@ senzor-cli run examples/quick-start.toml --duration 10m
 On stop, `senzor-cli` logs `shutting down` and stops every instance gracefully: each online instance
 publishes its `offline` message, if its template has availability, and then disconnects cleanly, so
 the broker does not send its Last Will. Senzor waits up to 2 seconds for the instances to finish,
-then drops any connection that is still open, and exits with code 0.
+then drops any connection that is still open, and exits with code 0. If any instance had failed, it
+prints `error: <n> instances failed: <ids>` instead and exits with code 3.
 
 ## Logging
 
@@ -145,12 +146,14 @@ text. Set `NO_COLOR=1` to turn the colours off in a terminal too.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: stopped by Ctrl+C, SIGTERM or `--duration`. |
+| `0` | `validate`: the project is valid. `run`: stopped by Ctrl+C, SIGTERM or `--duration`, and no instance failed. |
 | `1` | The async runtime could not start. |
 | `2` | The file cannot be read, the project has problems, the arguments are invalid, or there are no devices to start. |
+| `3` | `run`: stopped by Ctrl+C, SIGTERM or `--duration`, and at least one instance had failed, for example because the broker refused a wrong password. |
 
-`run` exits with 0 even if no instance ever reached the broker. The exit code tells you that the
-simulation ran, not that messages arrived. To check that, subscribe to the topics on the broker.
+An instance that cannot reach the broker keeps retrying and does not count as failed: `run` exits
+with 0 even if no instance ever reached the broker. To check that messages arrived, subscribe to the
+topics on the broker.
 
 ## Let an agent drive it
 

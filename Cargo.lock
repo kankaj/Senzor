@@ -4604,6 +4604,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "humantime",
+ "rumqttc",
  "senzor-core",
  "senzor-mcp",
  "senzor-testkit",

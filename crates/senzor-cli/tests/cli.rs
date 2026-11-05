@@ -6,7 +6,8 @@ use std::process::Output;
 use std::time::Duration;
 
 use assert_cmd::Command;
-use senzor_testkit::{Subscriber, free_port, start_broker};
+use rumqttc::ConnectReturnCode;
+use senzor_testkit::{Subscriber, free_port, refusing_broker, start_broker};
 
 const BIN: &str = "senzor-cli";
 
@@ -253,6 +254,23 @@ fn run_against_an_unreachable_broker_keeps_going_and_exits_0() {
     let output = run_cli("run", &path, &["--duration", "1s"]);
     assert_exit(&output, 0);
     assert!(stderr(&output).contains("reconnecting"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_exits_3_and_names_the_instances_the_broker_refused() {
+    let port = refusing_broker(ConnectReturnCode::BadUserNamePassword).await;
+    let path = write_project("refused", &project_toml(port, true));
+    let output = run_cli_async("run", path.to_path_buf(), &["--duration", "1s"]).await;
+    assert_exit(&output, 3);
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("failed: broker refused the connection: BadUserNamePassword"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.ends_with("error: 2 instances failed: dev-0, dev-1\n"),
+        "{stderr}"
+    );
 }
 
 #[test]

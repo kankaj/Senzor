@@ -67,7 +67,8 @@ senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
 5. Logs `shutting down` and stops the instances gracefully: each online instance publishes its
    availability `offline` message, if its template has availability, and disconnects. After 2 seconds,
    connections that are still open are dropped.
-6. Exits with 0.
+6. Exits with 0 if no instance ended **Failed**. If any did, it prints
+   `error: <n> instances failed: <ids>` to stderr and exits with 3.
 
 ## mcp
 
@@ -105,15 +106,20 @@ stdout carries only MCP messages; the log and warnings go to stderr. `-v` works 
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
+| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and no instance ended **Failed**. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
 | `1` | The async runtime could not start. |
 | `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
+| `3` | `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and at least one instance had ended **Failed**: the broker refused its connection, for example because of a wrong password or because the broker does not support MQTT 5, or the instance hit an internal error. |
 
-`run` exits with 0 even when instances could not connect or failed while running.
+An instance that cannot reach the broker keeps retrying until `run` stops, and then stops normally,
+so it does not make `run` exit with 3. If the broker was never reachable, `run` exits with 0. To
+check that messages arrived, subscribe to the topics on the broker. `mcp` never exits with 3, even
+when instances failed.
 
 ## Messages
 
-`senzor-cli` prints these errors to stderr itself, before anything runs.
+`senzor-cli` prints these errors to stderr itself. All but the last are printed before anything
+runs.
 
 | Message | Exit code | Cause |
 | --- | --- | --- |
@@ -122,6 +128,7 @@ stdout carries only MCP messages; the log and warnings go to stderr. `-v` works 
 | `error: --only names no devices` | 2 | `--only` contains only commas or spaces. |
 | `error: unknown device id(s): <ids>` | 2 | `--only` names IDs that are not devices of the project, listed with a comma and a space. |
 | `error: cannot start the async runtime: <reason>` | 1 | `run` or `mcp` could not create the runtime that drives the instances. |
+| `error: <n> instances failed: <ids>` | 3 | `run` stopped, and these instances had ended **Failed**. The IDs are listed with a comma and a space, sorted as text (`dev-10` before `dev-2`); a count of 1 takes the singular, as in `error: 1 instance failed: kitchen`. The reason for each is in the log, in its `failed: <reason>` line. |
 
 Invalid arguments are reported by the argument parser and exit with 2, for example:
 

@@ -29,15 +29,14 @@ Choose the duration with the interval in mind. Each instance publishes its first
 
 | Code | When |
 | --- | --- |
-| `0` | The run ended: `--duration` passed, or the process got Ctrl+C or SIGTERM. |
+| `0` | The run ended: `--duration` passed, or the process got Ctrl+C or SIGTERM. No instance failed. |
 | `1` | The async runtime could not start. |
 | `2` | The file cannot be read, the project has problems, the arguments are invalid, or no device is set to start. |
+| `3` | The run ended as for `0`, but at least one instance failed: the broker refused its connection, for example because of a wrong password or because the broker does not support MQTT 5, or the instance hit an internal error. A failed instance stops as **Failed** at once and does not retry; the others keep running. |
 
-<Callout type="warn" title="Exit code 0 does not mean messages arrived">
-`run` exits with 0 even if no instance ever reached the broker: an instance that cannot reach the broker keeps retrying until the run ends, and one the broker refuses, for example because of a wrong password or because the broker does not support MQTT 5, stops as **Failed**. Check in your tests that the messages arrived, not only that `senzor-cli` succeeded.
-</Callout>
+With code 3, `senzor-cli` prints which instances failed as its last line, for example `error: 2 instances failed: ci-co2-0, ci-co2-1`, and the log has a `failed: <reason>` line for each.
 
-The retrying also means the broker does not have to be ready when `senzor-cli` starts: an instance tries again after 1 s, 2 s, 4 s and so on, up to 30 s between attempts. [CLI reference](/docs/reference/cli) lists every message and code.
+An instance that cannot reach the broker at all is not counted as failed: it keeps retrying until the run ends, after 1 s, 2 s, 4 s and so on, up to 30 s between attempts. So the broker does not have to be ready when `senzor-cli` starts, but code 0 does not prove that messages arrived; your tests check that. [CLI reference](/docs/reference/cli) lists every message and code.
 
 ## The password from a CI secret
 
@@ -47,7 +46,7 @@ The retrying also means the broker does not have to be ready when `senzor-cli` s
 headless-ci.toml: broker: environment variable `MQTT_PASSWORD` (password_env) is not set
 ```
 
-An empty variable counts as set. The password is then empty, and because the MQTT client leaves an empty password out of the connect message, Senzor connects with the username only. In GitHub Actions, a secret that does not exist [expands to an empty string](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), so a missing secret does not fail validation; the broker rejects the connection instead, if it checks passwords.
+An empty variable counts as set. The password is then empty, and because the MQTT client leaves an empty password out of the connect message, Senzor connects with the username only. In GitHub Actions, a secret that does not exist [expands to an empty string](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), so a missing secret does not fail validation; the broker rejects the connection instead, if it checks passwords, and `run` exits with 3.
 
 ## A GitHub Actions job
 
@@ -90,7 +89,7 @@ jobs:
 - The installation step is up to you; see [Installation](/docs/installation).
 - `senzor-cli run` runs in the background while your tests run. Each instance publishes its first reading up to one interval after it connects, 10 seconds for the `co2` template, so let your tests wait at least that long for the first message.
 - When the tests are done, `kill` sends SIGTERM, so the instances publish `offline` and disconnect cleanly. GitHub runs the step with `bash -e`, which stops at the first failing command. If `senzor-cli` has already stopped, `kill` finds no process and fails; `2>/dev/null || true` keeps that from failing the step.
-- `wait` returns the exit code of `senzor-cli`: 0 after SIGTERM or after `--duration`, so the step fails only if `senzor-cli` could not run the project. If the tests fail, the step fails at once with their exit code.
+- `wait` returns the exit code of `senzor-cli`: 0 after SIGTERM or after `--duration`, or 3 if an instance failed, so the step fails if `senzor-cli` could not run the project or an instance failed. If the tests fail, the step fails at once with their exit code.
 - `--duration` stops `senzor-cli` after a time limit, also when the step never reaches `kill`. Set it longer than your tests can take: when it runs out, the sensors go offline, even if the tests are still running.
 - The service's [`command`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) starts Mosquitto with `/mosquitto-no-auth.conf`, a configuration that ships with the image, as in the Quick start. It opens port 1883 to every client without checking the username and password, which is enough for a throwaway broker.
 
@@ -120,5 +119,5 @@ The Quick start broker does not check passwords either, so any value works.
 
 If you build your own image that runs `senzor-cli`, make it the container's main process (see [Running headless](/docs/headless)). Then:
 
-- `docker stop` sends SIGTERM: the instances publish `offline` and disconnect cleanly, and `senzor-cli` exits with 0.
+- `docker stop` sends SIGTERM: the instances publish `offline` and disconnect cleanly, and `senzor-cli` exits with 0, or with 3 if an instance had failed.
 - `docker kill` sends SIGKILL: the connections drop, and the broker publishes each instance's Last Will. [Simulating a device dropping off](/docs/recipes/device-dropping-off) shows what that looks like.
