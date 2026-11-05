@@ -1,6 +1,7 @@
 //! `senzor-cli mcp`: the MCP server on stdin/stdout, driven with raw JSON-RPC.
 
-use std::path::PathBuf;
+mod support;
+
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -33,12 +34,9 @@ count = 2
     )
 }
 
-fn write_project(name: &str, content: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("senzor-cli-mcp-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("project.toml");
-    std::fs::write(&path, content).unwrap();
-    path
+/// Writes `content` to a project file in a fresh temp folder, removed when the result is dropped.
+fn write_project(name: &str, content: &str) -> support::TempProject {
+    support::TempProject::new("senzor-cli-mcp", name, content)
 }
 
 struct Server {

@@ -1,3 +1,5 @@
+mod support;
+
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -36,13 +38,18 @@ autostart = false
     )
 }
 
-/// Writes `content` to a fresh file under the system temp dir and returns its path.
-fn write_project(name: &str, content: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("senzor-cli-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("project.toml");
-    std::fs::write(&path, content).unwrap();
-    path
+/// Writes `content` to a project file in a fresh temp folder, removed when the result is dropped.
+fn write_project(name: &str, content: &str) -> support::TempProject {
+    support::TempProject::new("senzor-cli", name, content)
+}
+
+#[test]
+fn a_test_project_folder_is_removed_when_the_test_is_done() {
+    let project = write_project("cleanup", "");
+    let dir = project.dir().to_path_buf();
+    assert!(project.exists());
+    drop(project);
+    assert!(!dir.exists(), "{} was left behind", dir.display());
 }
 
 /// Runs `senzor-cli <command> <project> <args>` to completion.
@@ -204,7 +211,7 @@ async fn run_publishes_until_duration_elapses_then_goes_offline() {
     let mut sub = Subscriber::connect(port, "cli/#").await;
     let path = write_project("run", &project_toml(port, true));
 
-    let output = run_cli_async("run", path, &["--duration", "1s"]).await;
+    let output = run_cli_async("run", path.to_path_buf(), &["--duration", "1s"]).await;
     assert_exit(&output, 0);
 
     let messages = sub.collect(Duration::from_millis(300)).await;
@@ -228,7 +235,12 @@ async fn run_only_accepts_ids_with_spaces() {
     let mut sub = Subscriber::connect(port, "cli/#").await;
     let path = write_project("only-spaces", &project_toml(port, false));
 
-    let output = run_cli_async("run", path, &["--only", "other, dev", "--duration", "1s"]).await;
+    let output = run_cli_async(
+        "run",
+        path.to_path_buf(),
+        &["--only", "other, dev", "--duration", "1s"],
+    )
+    .await;
     assert_exit(&output, 0);
     let messages = sub.collect(Duration::from_millis(300)).await;
     assert!(messages.iter().any(|m| m.topic == "cli/other/state"));
@@ -287,7 +299,7 @@ async fn sigterm_shuts_down_gracefully_and_exits_0() {
     let path = write_project("sigterm", &project_toml(port, true));
     let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
         .arg("run")
-        .arg(&path)
+        .arg(&*path)
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
