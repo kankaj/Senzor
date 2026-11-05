@@ -16,5 +16,6 @@ pub use file::{
     SimulationSpec, TemplateSpec, TlsSpec,
 };
 pub use model::{
-    BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, TlsConfig, Validated,
+    BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, SharedTemplates, TlsConfig,
+    Validated,
 };

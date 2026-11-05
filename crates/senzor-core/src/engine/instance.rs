@@ -13,9 +13,7 @@ use super::mqtt::{
 use super::state::{InstanceStatus, LogEntry, Shared};
 use crate::generator::{TickContext, ValueSource};
 use crate::project::{BrokerConfig, InstanceConfig, MqttVersion, mqtt_seconds};
-use crate::render::{
-    Context, InstanceTemplates, MessageProperties, RenderedMessage, base_context, tick_context,
-};
+use crate::render::{Context, MessageProperties, RenderedMessage, base_context, tick_context};
 use crate::rng::instance_rng;
 use crate::value::Value;
 
@@ -107,9 +105,9 @@ async fn run(
     shared: &Shared,
 ) -> Result<(), String> {
     let id = config.id.as_str();
-    let templates = InstanceTemplates::compile(&config.messages, config.availability.as_ref())?;
     let base = base_context(id, config.index, &config.template_id, &config.params);
-    let availability = templates
+    let availability = config
+        .templates
         .availability_topic(&base)?
         .zip(config.availability.as_ref())
         .map(|(topic, spec)| Availability {
@@ -120,7 +118,7 @@ async fn run(
         });
     let will = availability.as_ref().map(Availability::last_will);
     let (client, mut connection) = connect(broker, id, will, REQUEST_QUEUE_CAPACITY);
-    let mut ticker = Ticker::new(config, templates, base);
+    let mut ticker = Ticker::new(config, base);
     let mut timer = ticker.timer();
 
     shared.set_status(id, InstanceStatus::Connecting);
@@ -196,7 +194,6 @@ async fn run(
 /// Per-run state that produces and publishes one tick.
 struct Ticker<'a> {
     config: &'a InstanceConfig,
-    templates: InstanceTemplates,
     base: Context,
     sources: BTreeMap<String, Box<dyn ValueSource>>,
     pins: BTreeMap<String, Value>,
@@ -208,10 +205,9 @@ struct Ticker<'a> {
 }
 
 impl<'a> Ticker<'a> {
-    fn new(config: &'a InstanceConfig, templates: InstanceTemplates, base: Context) -> Self {
+    fn new(config: &'a InstanceConfig, base: Context) -> Self {
         Self {
             config,
-            templates,
             base,
             sources: config
                 .fields
@@ -265,7 +261,7 @@ impl<'a> Ticker<'a> {
         shared.update_instance(id, |instance| instance.values = values);
         self.seq += 1;
 
-        for rendered in self.templates.render_messages(&render_ctx) {
+        for rendered in self.config.templates.render_messages(&render_ctx) {
             let published = rendered
                 .map_err(|e| format!("render: {e}"))
                 .and_then(|message| self.publish(client, message, now));
@@ -595,6 +591,16 @@ fields.co2 = {{ generator = "constant", value = 600 }}
     }
 
     fn big_payload_project(port: u16, version: MqttVersion, payload_len: usize) -> Project {
+        big_payload_project_with(port, version, payload_len, "")
+    }
+
+    /// [`big_payload_project`] with `message_keys` added to the message's table.
+    fn big_payload_project_with(
+        port: u16,
+        version: MqttVersion,
+        payload_len: usize,
+        message_keys: &str,
+    ) -> Project {
         let blob = "x".repeat(payload_len);
         let version = version.label();
         let src = format!(
@@ -607,7 +613,7 @@ mqtt_version = "{version}"
 [[templates]]
 id = "big"
 interval = "100ms"
-messages = [{{ topic = "big/{{{{ device_id }}}}/state", payload = "{{{{ blob }}}}" }}]
+messages = [{{ topic = "big/{{{{ device_id }}}}/state", payload = "{{{{ blob }}}}"{message_keys} }}]
 fields.blob = {{ generator = "constant", value = "{blob}" }}
 
 [[devices]]
@@ -821,16 +827,9 @@ params = {{ room = "office" }}
     async fn properties_count_toward_the_size_limit() {
         let (_, port) = broker(MqttVersion::V5);
         // Topic and payload fit; the user property pushes the message over 1 MiB.
-        let mut project = big_payload_project(port, MqttVersion::V5, MAX_MESSAGE_BYTES - 200);
-        for instance in project
-            .devices
-            .iter_mut()
-            .flat_map(|d| d.instances.iter_mut())
-        {
-            instance.messages[0]
-                .user_properties
-                .insert("note".into(), "x".repeat(400));
-        }
+        let note = format!(", user_properties = {{ note = \"{}\" }}", "x".repeat(400));
+        let project =
+            big_payload_project_with(port, MqttVersion::V5, MAX_MESSAGE_BYTES - 200, &note);
         let running = spawn(&project, "d");
         wait_status(&running, "d", |s| *s == InstanceStatus::Online).await;
         tokio::time::sleep(Duration::from_millis(400)).await;

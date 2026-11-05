@@ -3,22 +3,22 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::broker::{EnvLookup, broker_config, needs_mqtt5, resolve_broker, whole_seconds};
-use super::builtin::{builtin_templates, is_builtin};
+use super::builtin::{builtin_compiled, builtin_templates, is_builtin};
 use super::error::ProjectError;
 use super::file::{
     BrokerSpec, DeviceSpec, MqttVersion, ProjectFile, TemplateSpec, default_instance_id_pattern,
 };
-use super::model::{DeviceConfig, InstanceConfig, Project, Validated};
+use super::model::{DeviceConfig, InstanceConfig, Project, SharedTemplates, Validated};
 use crate::generator::GeneratorSpec;
 use crate::render::{
-    CompiledTemplate, InstanceTemplates, base_context, instance_id_context, is_reserved,
-    tick_context,
+    CompiledTemplate, base_context, instance_id_context, is_reserved, tick_context,
 };
 use crate::value::Value;
 
 /// Whether devices can use a template.
 enum TemplateStatus<'a> {
-    Usable(&'a TemplateSpec),
+    /// With its messages compiled once for all the devices that use it.
+    Usable(&'a TemplateSpec, SharedTemplates),
     /// The template has errors; its devices are blocked without an error of their own.
     Broken,
 }
@@ -68,7 +68,8 @@ impl ProjectFile {
     ) -> HashMap<String, TemplateStatus<'a>> {
         let mut templates: HashMap<String, TemplateStatus<'a>> = builtin_templates()
             .iter()
-            .map(|t| (t.id.clone(), TemplateStatus::Usable(t)))
+            .zip(builtin_compiled())
+            .map(|(t, compiled)| (t.id.clone(), TemplateStatus::Usable(t, compiled.clone())))
             .collect();
         for template in &self.templates {
             if is_builtin(&template.id) {
@@ -89,17 +90,17 @@ impl ProjectFile {
                 templates.insert(template.id.clone(), TemplateStatus::Broken);
                 continue;
             }
-            let messages = check_template(template, &self.broker);
-            let status = if messages.is_empty() {
-                TemplateStatus::Usable(template)
-            } else {
-                TemplateStatus::Broken
+            let status = match check_template(template, &self.broker) {
+                Ok(compiled) => TemplateStatus::Usable(template, compiled),
+                Err(messages) => {
+                    errors.extend(
+                        messages
+                            .into_iter()
+                            .map(|m| ProjectError::template(&template.id, m)),
+                    );
+                    TemplateStatus::Broken
+                }
             };
-            errors.extend(
-                messages
-                    .into_iter()
-                    .map(|m| ProjectError::template(&template.id, m)),
-            );
             templates.insert(template.id.clone(), status);
         }
         templates
@@ -159,12 +160,12 @@ fn resolve_entry(
     instance_owners: &HashMap<String, String>,
     seed: Option<u64>,
 ) -> Result<DeviceConfig, Vec<String>> {
-    let template = match templates.get(spec.template.as_str()) {
-        Some(TemplateStatus::Usable(template)) => *template,
+    let (template, compiled) = match templates.get(spec.template.as_str()) {
+        Some(TemplateStatus::Usable(template, compiled)) => (*template, compiled),
         Some(TemplateStatus::Broken) => return Err(Vec::new()),
         None => return Err(vec![format!("unknown template `{}`", spec.template)]),
     };
-    let device = resolve_device(spec, template, seed)?;
+    let device = resolve_device(spec, template, compiled, seed)?;
     match instance_clash(&device, instance_owners) {
         Some(message) => Err(vec![message]),
         None => Ok(device),
@@ -183,7 +184,11 @@ fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Op
     })
 }
 
-fn check_template(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<String> {
+/// Checks `template` and compiles its messages; `Err` lists its problems.
+fn check_template(
+    template: &TemplateSpec,
+    broker: &BrokerSpec,
+) -> Result<SharedTemplates, Vec<String>> {
     let mut messages = check_properties(template, broker);
     if template.messages.is_empty() {
         messages.push("at least one message is required".to_string());
@@ -205,15 +210,20 @@ fn check_template(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<String> {
             messages.push(format!("field `{name}`: {e}"));
         }
     }
-    if let Err(e) = InstanceTemplates::compile(&template.messages, template.availability.as_ref()) {
-        messages.push(e);
+    match SharedTemplates::compile(&template.messages, template.availability.as_ref()) {
+        Ok(compiled) if messages.is_empty() => Ok(compiled),
+        Ok(_) => Err(messages),
+        Err(e) => {
+            messages.push(e);
+            Err(messages)
+        }
     }
-    messages
 }
 
 fn resolve_device(
     spec: &DeviceSpec,
     template: &TemplateSpec,
+    compiled: &SharedTemplates,
     seed: Option<u64>,
 ) -> Result<DeviceConfig, Vec<String>> {
     let mut messages = check_device(spec, template);
@@ -235,6 +245,7 @@ fn resolve_device(
             template_id: template.id.clone(),
             messages: template.messages.clone(),
             availability: template.availability.clone(),
+            templates: compiled.clone(),
             qos: template.qos,
             retain: template.retain,
             interval: spec.interval.unwrap_or(template.interval),
@@ -388,7 +399,7 @@ fn merge_fields(
 
 /// Renders every template once for index 0 with sample values, so errors show up at load time.
 fn sample_render(instance: &InstanceConfig) -> Result<(), String> {
-    let templates = InstanceTemplates::compile(&instance.messages, instance.availability.as_ref())?;
+    let templates = &instance.templates;
     let base = base_context(
         &instance.id,
         instance.index,
@@ -439,6 +450,59 @@ fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, st
         validate(&format!(
             "{TEMPLATE}\n[[devices]]\nid = \"d\"\ntemplate = \"air\"\nparams = {{ room = \"a\" }}\n{lines}"
         ))
+    }
+
+    /// Params differ per instance but are not part of the compiled messages, so every instance
+    /// of a template shares one compile.
+    #[test]
+    fn instances_of_a_template_share_its_compiled_messages() {
+        let src = format!(
+            "{TEMPLATE}
+[[devices]]
+id = \"d\"
+template = \"air\"
+count = 2
+params = {{ room = \"a\" }}
+
+[[devices]]
+id = \"e\"
+template = \"air\"
+params = {{ room = \"b\" }}
+
+[[devices]]
+id = \"c\"
+template = \"co2\"
+count = 2
+"
+        );
+        let validated = validate(&src);
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(&validated)
+        );
+        let templates = |device: &str| -> Vec<SharedTemplates> {
+            validated
+                .project
+                .device(device)
+                .unwrap()
+                .instances
+                .iter()
+                .map(|i| i.templates.clone())
+                .collect()
+        };
+        let air: Vec<_> = templates("d").into_iter().chain(templates("e")).collect();
+        let co2 = templates("c");
+        assert!(air.iter().all(|t| t.is_shared_with(&air[0])));
+        assert!(co2[1].is_shared_with(&co2[0]));
+        assert!(!co2[0].is_shared_with(&air[0]));
+
+        let again = validate(&src);
+        let co2_again = &again.project.device("c").unwrap().instances[0].templates;
+        assert!(
+            co2_again.is_shared_with(&co2[0]),
+            "built-in templates compile once for all validations"
+        );
     }
 
     #[test]

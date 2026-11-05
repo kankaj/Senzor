@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Deref;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::error::ProjectError;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
 use crate::generator::GeneratorSpec;
+use crate::render::InstanceTemplates;
 use crate::value::Value;
 
 /// The result of `ProjectFile::validate`: what can run, what is wrong, and which devices are blocked.
@@ -56,6 +59,9 @@ pub struct InstanceConfig {
     pub template_id: String,
     pub messages: Vec<MessageSpec>,
     pub availability: Option<AvailabilitySpec>,
+    /// `messages` and `availability` compiled at validation; changing those two afterwards does
+    /// not recompile them.
+    pub templates: SharedTemplates,
     pub qos: u8,
     pub retain: bool,
     pub interval: Duration,
@@ -63,6 +69,47 @@ pub struct InstanceConfig {
     pub fields: BTreeMap<String, GeneratorSpec>,
     pub params: BTreeMap<String, Value>,
     pub seed: Option<u64>,
+}
+
+/// A template's messages and availability topic, compiled once and shared by every instance of
+/// the template. It is made from an instance's `messages` and `availability` alone, which the
+/// instance compares itself, so it takes no part in the comparison: any two are equal.
+#[derive(Clone)]
+pub struct SharedTemplates(Arc<InstanceTemplates>);
+
+impl SharedTemplates {
+    pub fn compile(
+        messages: &[MessageSpec],
+        availability: Option<&AvailabilitySpec>,
+    ) -> Result<Self, String> {
+        InstanceTemplates::compile(messages, availability).map(|t| Self(Arc::new(t)))
+    }
+
+    /// Whether both are the same compiled templates, not just equal ones.
+    #[cfg(test)]
+    pub(crate) fn is_shared_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Deref for SharedTemplates {
+    type Target = InstanceTemplates;
+
+    fn deref(&self) -> &InstanceTemplates {
+        &self.0
+    }
+}
+
+impl PartialEq for SharedTemplates {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for SharedTemplates {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SharedTemplates")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

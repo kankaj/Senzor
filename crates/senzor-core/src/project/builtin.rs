@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 
 use super::file::TemplateSpec;
+use super::model::SharedTemplates;
 
 #[derive(Deserialize)]
 struct BuiltinFile {
@@ -19,6 +20,21 @@ pub fn builtin_templates() -> &'static [TemplateSpec] {
         let file: BuiltinFile =
             toml::from_str(include_str!("builtin.toml")).expect("builtin.toml is valid");
         file.templates
+    })
+}
+
+/// The built-in templates' messages compiled, in the order of [`builtin_templates`]. Compiled on
+/// first use and shared by every validation and instance afterwards.
+pub(crate) fn builtin_compiled() -> &'static [SharedTemplates] {
+    static COMPILED: OnceLock<Vec<SharedTemplates>> = OnceLock::new();
+    COMPILED.get_or_init(|| {
+        builtin_templates()
+            .iter()
+            .map(|t| {
+                SharedTemplates::compile(&t.messages, t.availability.as_ref())
+                    .expect("built-in templates compile")
+            })
+            .collect()
     })
 }
 
@@ -41,6 +57,11 @@ mod tests {
         assert_eq!(ids, ["co2", "temperature", "humidity"]);
         assert!(is_builtin("co2"));
         assert!(!is_builtin("office-air"));
+    }
+
+    #[test]
+    fn every_built_in_template_compiles() {
+        assert_eq!(builtin_compiled().len(), builtin_templates().len());
     }
 
     #[test]

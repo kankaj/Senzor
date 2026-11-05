@@ -119,6 +119,8 @@ impl InstanceTemplates {
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, String> {
+        #[cfg(test)]
+        compile_count::record(messages);
         let mut env = strict_environment();
         let mut compiled = Vec::with_capacity(messages.len());
         for (i, message) in messages.iter().enumerate() {
@@ -288,6 +290,36 @@ fn check_topic(topic: &str) -> Result<(), String> {
         Err(format!("topic `{topic}` contains a wildcard (+ or #)"))
     } else {
         Ok(())
+    }
+}
+
+/// Counts [`InstanceTemplates::compile`] calls by the first message's topic, so a test that gives
+/// its template a topic of its own sees only its compiles, whatever runs beside it.
+#[cfg(test)]
+pub(crate) mod compile_count {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    use crate::project::file::MessageSpec;
+
+    fn counts() -> &'static Mutex<HashMap<String, usize>> {
+        static COUNTS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+        COUNTS.get_or_init(Mutex::default)
+    }
+
+    pub(crate) fn record(messages: &[MessageSpec]) {
+        if let Some(first) = messages.first() {
+            *counts()
+                .lock()
+                .unwrap()
+                .entry(first.topic.clone())
+                .or_default() += 1;
+        }
+    }
+
+    /// How often templates whose first message has `topic` were compiled.
+    pub(crate) fn of(topic: &str) -> usize {
+        counts().lock().unwrap().get(topic).copied().unwrap_or(0)
     }
 }
 

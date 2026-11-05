@@ -954,6 +954,54 @@ count = 2
         engine.shutdown().await;
     }
 
+    /// Validation compiles a template once for all its devices and instances; starting and
+    /// restarting them compiles nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_template_compiles_once_at_validation_and_not_per_start() {
+        use crate::render::compile_count;
+        const TOPIC: &str = "compile-once/{{ device_id }}/state";
+        let port = start_broker();
+        let src = format!(
+            r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+
+[[templates]]
+id = "air"
+interval = "100ms"
+availability = {{ topic = "compile-once/{{{{ device_id }}}}/status", online = "on", offline = "off" }}
+messages = [{{ topic = "{TOPIC}", payload = "{{{{ v }}}}" }}]
+fields.v = {{ generator = "constant", value = 1 }}
+{TWO_DEVICES}"#
+        );
+        let engine = spawn(valid_project(&src));
+        let validated = compile_count::of(TOPIC);
+
+        engine.send(Command::Start(Target::All));
+        wait_until(&engine, "all online", |s| {
+            all_in(s, &InstanceStatus::Online)
+        })
+        .await;
+        let started = compile_count::of(TOPIC);
+
+        engine.send(Command::Restart(Target::All));
+        wait_until(&engine, "all online again", |s| {
+            s.instances
+                .values()
+                .all(|i| i.runs == 2 && i.status == InstanceStatus::Online)
+        })
+        .await;
+        let restarted = compile_count::of(TOPIC);
+
+        assert_eq!(
+            (validated, started, restarted),
+            (1, 1, 1),
+            "compiles after validation, start, restart"
+        );
+        engine.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn the_observer_outlives_the_engine() {
         let port = start_broker();
