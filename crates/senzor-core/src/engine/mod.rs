@@ -248,13 +248,23 @@ impl Supervisor {
             .collect()
     }
 
-    /// IDs of running instances matching `target`, orphans included.
+    /// IDs of running instances matching `target`, orphans included. An instance belongs to the
+    /// device the state shows: the current project's, which a rename that keeps instance IDs
+    /// changes, or for an orphan the one it was started with.
     fn running_targets(&self, target: &Target) -> Vec<String> {
-        self.running
-            .iter()
-            .filter(|(id, running)| target.matches(id, &running.config.device))
-            .map(|(id, _)| id.clone())
-            .collect()
+        self.shared.read(|state| {
+            self.running
+                .iter()
+                .filter(|(id, running)| {
+                    let device = state
+                        .instances
+                        .get(*id)
+                        .map_or(&running.config.device, |instance| &instance.device);
+                    target.matches(id, device)
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
     }
 
     /// The latest command wins: a `Stop` or `Kill` after a `Restart` leaves the instance stopped.
@@ -738,6 +748,77 @@ count = 2
         .await;
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(!engine.snapshot().instances.contains_key("b"));
+        engine.shutdown().await;
+    }
+
+    /// A device rename keeps the instance IDs when `instance_id` does not use `{{ id }}`. The
+    /// running instances then belong to the renamed device, as the state shows them, and device
+    /// commands under the new name reach them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn device_commands_reach_running_instances_after_a_rename_that_keeps_their_ids() {
+        let port = start_broker();
+        let device = |id: &str| {
+            project(
+                port,
+                &format!(
+                    "[[devices]]\nid = \"{id}\"\ntemplate = \"air\"\ncount = 2\n\
+                     instance_id = \"room-{{{{ index }}}}\"\n"
+                ),
+            )
+        };
+        let engine = spawn(device("a"));
+        engine.send(Command::Start(Target::Device("a".into())));
+        wait_until(&engine, "room-* online", |s| {
+            all_in(s, &InstanceStatus::Online)
+        })
+        .await;
+
+        engine.send(Command::ReplaceProject(device("z")));
+        wait_until(&engine, "room-* moved to z", |s| {
+            s.instances
+                .values()
+                .all(|i| i.device == "z" && i.needs_restart)
+        })
+        .await;
+
+        engine.send(Command::Restart(Target::Device("z".into())));
+        wait_until(&engine, "room-* restarted as z", |s| {
+            s.instances
+                .values()
+                .all(|i| i.runs == 2 && i.status == InstanceStatus::Online && !i.needs_restart)
+        })
+        .await;
+
+        engine.send(Command::Stop(Target::Device("z".into())));
+        wait_until(&engine, "room-* stopped", |s| {
+            all_in(s, &InstanceStatus::Stopped)
+        })
+        .await;
+        engine.shutdown().await;
+    }
+
+    /// Kill takes the same path; checked on its own so a pass is not just Restart's stop.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn kill_by_device_reaches_running_instances_after_a_rename_that_keeps_their_ids() {
+        let port = start_broker();
+        let device = |id: &str| {
+            project(
+                port,
+                &format!(
+                    "[[devices]]\nid = \"{id}\"\ntemplate = \"air\"\ninstance_id = \"room\"\n"
+                ),
+            )
+        };
+        let engine = spawn(device("a"));
+        start_online(&engine, "room").await;
+        engine.send(Command::ReplaceProject(device("z")));
+        wait_until(&engine, "room moved to z", |s| {
+            s.instances["room"].device == "z"
+        })
+        .await;
+
+        engine.send(Command::Kill(Target::Device("z".into())));
+        wait_for_status(&engine, "room", InstanceStatus::Stopped).await;
         engine.shutdown().await;
     }
 

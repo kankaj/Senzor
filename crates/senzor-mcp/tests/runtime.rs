@@ -174,6 +174,37 @@ async fn restart_returns_once_the_new_run_is_online() {
     agent.finish().await;
 }
 
+/// With an `instance_id` that does not use `{{ id }}`, a renamed device keeps its running
+/// instance, and restart and stop by the new device name reach it.
+#[tokio::test(flavor = "multi_thread")]
+async fn device_targets_reach_a_running_instance_after_its_device_is_renamed() {
+    let agent = Agent::with_project("rename-running").await;
+    agent
+        .ok(
+            "put_device",
+            json!({"id": "lab", "template": "air", "autostart": false, "instance_id": "room"}),
+        )
+        .await;
+    agent.ok("start", json!({"instances": ["room"]})).await;
+    agent
+        .ok("rename_device", json!({"from": "lab", "to": "bench"}))
+        .await;
+
+    let out = agent
+        .ok("restart", json!({"devices": ["bench"], "wait_seconds": 2}))
+        .await;
+    assert_eq!(out["timed_out"], false, "{out:#}");
+    assert_eq!(out["instances"][0]["id"], "room");
+    assert_eq!(state(&out["instances"][0]["status"]), "online");
+
+    let out = agent
+        .ok("stop", json!({"devices": ["bench"], "wait_seconds": 2}))
+        .await;
+    assert_eq!(out["timed_out"], false, "{out:#}");
+    assert_eq!(state(&out["instances"][0]["status"]), "stopped");
+    agent.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pin_is_published_and_unpinning_all_restores_the_generators() {
     let agent = Agent::with_project("pin").await;
