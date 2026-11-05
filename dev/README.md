@@ -40,10 +40,12 @@ dev/gui.sh shot                           # → target/gui-driver/shot.png
 dev/gui.sh click 55 85                    # coordinates are pixels in the screenshot
 dev/gui.sh type 127.0.0.1                 # into the focused field
 dev/gui.sh key ctrl+a Return              # xdotool key names
-dev/gui.sh stop
+dev/gui.sh close                          # close like the window's × (the app saves its settings)
+dev/gui.sh stop                           # kill the app and the display
 ```
 
 `dev/gui.sh help` lists every command. The app runs with a scratch `HOME` and its own D-Bus
 session under `target/gui-driver/`, so file dialogs open on the virtual display and nothing is
-written to the real home folder. Edits are not saved unless you click **Save**, so an example
+written to the real home folder; its saved settings land in `target/gui-driver/home/.local/share/`.
+`close` needs Python's Xlib (`python-xlib`), and a running build uses `CARGO_TARGET_DIR` if set. Edits are not saved unless you click **Save**, so an example
 project opened this way stays unchanged.

@@ -12,6 +12,7 @@ screenshots = ["test-support", "egui_kittest/wgpu", "dep:image"]
 [dependencies]
 clap.workspace = true
 eframe.workspace = true
+egui-phosphor.workspace = true
 egui_kittest = { workspace = true, optional = true }
 humantime.workspace = true
 # Must match egui_kittest's image version: `render()` returns its RgbaImage, which needs `png` to save.
@@ -19,6 +20,7 @@ image = { version = "0.25.10", default-features = false, features = ["png"], opt
 rfd.workspace = true
 senzor-core.workspace = true
 senzor-mcp.workspace = true
+serde.workspace = true
 tokio.workspace = true
 toml.workspace = true
 

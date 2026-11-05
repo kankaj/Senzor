@@ -6,6 +6,8 @@ pub mod device;
 pub mod instance;
 pub mod left_panel;
 pub mod modals;
+pub mod settings;
+pub mod switch;
 pub mod template;
 pub mod top_bar;
 
@@ -22,6 +24,7 @@ use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{Removal, Rename, ValueKind, parse_value};
 use crate::selection::{ProblemTarget, Selection};
+use crate::settings::Theme;
 
 pub const ERROR: Color32 = Color32::from_rgb(220, 70, 70);
 pub const WARNING: Color32 = Color32::from_rgb(220, 160, 40);
@@ -50,6 +53,8 @@ pub enum Action {
     AddTemplate,
     AskCopyBuiltin(String),
     OpenBroker,
+    OpenSettings,
+    SetTheme(Theme),
     GoTo(ProblemTarget),
     /// Turn the MCP endpoint on or off.
     ToggleMcp,
@@ -160,6 +165,7 @@ pub struct UiState {
     /// A frozen copy of the log while it is paused.
     pub log_frozen: Option<VecDeque<LogEntry>>,
     pub broker_open: bool,
+    pub settings_open: bool,
     pub modal: Option<Modal>,
 }
 
@@ -422,6 +428,45 @@ pub fn errors_at(ui: &mut egui::Ui, doc: &Document, location: &Location) -> bool
         any
     })
     .inner
+}
+
+/// Sets `ctx`'s fonts: egui's text fonts, and Phosphor as the only icon font, a fallback after the
+/// text font, so the constants in [`egui_phosphor::regular`] can go into any label or button.
+pub fn install_icon_font(ctx: &egui::Context) {
+    ctx.set_fonts(fonts());
+}
+
+fn fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    for emoji in ["NotoEmoji-Regular", "emoji-icon-font"] {
+        fonts.font_data.remove(emoji);
+        for names in fonts.families.values_mut() {
+            names.retain(|name| name != emoji);
+        }
+    }
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    fonts
+}
+
+#[cfg(test)]
+mod font_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    /// Phosphor is the only icon font: egui's emoji fonts are left out, so every icon has the
+    /// same style.
+    #[test]
+    fn the_fonts_are_the_text_fonts_and_phosphor() {
+        let fonts = fonts();
+        let loaded: BTreeSet<&str> = fonts.font_data.keys().map(String::as_str).collect();
+        assert_eq!(loaded, BTreeSet::from(["Hack", "Ubuntu-Light", "phosphor"]));
+        for (family, names) in &fonts.families {
+            for name in names {
+                assert!(fonts.font_data.contains_key(name), "{family:?} uses {name}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]

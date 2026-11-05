@@ -13,7 +13,9 @@ senzor-testkit = { path = "crates/senzor-testkit" }
 assert_cmd = "2.2.2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 clap = { version = "4.6.7", features = ["derive"] }
-eframe = "0.36.2"
+eframe = { version = "0.36.2", features = ["persistence"] }
+# Icons for the GUI: one icon font (Phosphor, MIT) instead of egui's mixed emoji fonts.
+egui-phosphor = "0.14.0"
 egui_kittest = { version = "0.36.2", features = ["eframe"] }
 rfd = "0.17.2"
 humantime = "2.4.0"

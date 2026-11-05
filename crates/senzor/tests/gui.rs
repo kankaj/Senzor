@@ -569,3 +569,61 @@ fn the_bottom_panel_keeps_its_height_while_there_are_no_problems() {
     click(&mut app, "Message log");
     assert_eq!(bottom_tabs_top(&app), top, "back on the log");
 }
+
+#[test]
+fn the_settings_button_opens_the_settings_window() {
+    let mut harness = app(None, FakeDialogs::default());
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(harness.query_by_label(version).is_none());
+
+    click(&mut harness, "Settings");
+    assert!(harness.query_by_label(version).is_some());
+}
+
+#[test]
+fn the_settings_button_is_a_cog_at_the_right_end_of_the_top_bar() {
+    let harness = app(None, FakeDialogs::default());
+    let button = harness.get_by_label("Settings");
+    let window_right = 1400.0;
+    assert!(
+        button.rect().right() > window_right - 20.0,
+        "the button ends at x = {}",
+        button.rect().right()
+    );
+    assert!(
+        harness.query_by_label("⚙").is_none(),
+        "the cog's label is Settings"
+    );
+}
+
+#[test]
+fn the_settings_window_opens_in_the_middle_of_the_window() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    // The window measures itself in its first frame and moves to the middle in the next.
+    harness.run();
+    let version = harness.get_by_label(env!("CARGO_PKG_VERSION")).rect();
+    // The app window is 1400 × 900; the settings window is a few hundred pixels across.
+    assert!(
+        (500.0..900.0).contains(&version.center().x)
+            && (250.0..650.0).contains(&version.center().y),
+        "the settings window is around {:?}",
+        version.center()
+    );
+}
+
+#[test]
+fn choosing_a_theme_in_settings_applies_it_and_keeps_it_for_the_next_launch() {
+    use senzor::settings::Theme;
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+
+    click(&mut harness, "Light");
+    assert_eq!(harness.ctx.theme(), egui::Theme::Light);
+    assert_eq!(harness.state().settings().theme, Theme::Light);
+
+    click(&mut harness, "Dark");
+    assert_eq!(harness.ctx.theme(), egui::Theme::Dark);
+    assert_eq!(harness.state().settings().theme, Theme::Dark);
+}

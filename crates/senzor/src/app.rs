@@ -11,6 +11,7 @@ use crate::dialogs::{FileDialogs, project_file_path};
 use crate::document::Document;
 use crate::edits;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
+use crate::settings::AppSettings;
 use crate::ui::modals::{self, Outcome, UnsavedChoice};
 use crate::ui::{self, Action, Modal, Pending, UiState};
 
@@ -49,6 +50,8 @@ pub struct SenzorApp {
     mcp_port: u16,
     /// Why the last attempt to turn MCP on failed.
     mcp_error: Option<String>,
+    /// The app's own settings, saved between launches.
+    settings: AppSettings,
 }
 
 impl SenzorApp {
@@ -58,6 +61,9 @@ impl SenzorApp {
         path: Option<PathBuf>,
         dialogs: Box<dyn FileDialogs>,
     ) -> Self {
+        ui::install_icon_font(&cc.egui_ctx);
+        let settings = AppSettings::load(cc.storage);
+        cc.egui_ctx.set_theme(settings.theme.preference());
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime starts");
         let mut app = Self {
             runtime,
@@ -77,12 +83,18 @@ impl SenzorApp {
             mcp: None,
             mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
             mcp_error: None,
+            settings,
         };
         match path {
             Some(path) => app.open_path(&path),
             None => app.replace_document(Document::new_empty()),
         }
         app
+    }
+
+    /// The app's own settings, saved between launches.
+    pub fn settings(&self) -> &AppSettings {
+        &self.settings
     }
 
     pub fn document(&self) -> &Document {
@@ -337,6 +349,11 @@ impl SenzorApp {
                 });
             }
             Action::OpenBroker => self.ui.broker_open = true,
+            Action::OpenSettings => self.ui.settings_open = true,
+            Action::SetTheme(theme) => {
+                self.settings.theme = theme;
+                self.ctx.set_theme(theme.preference());
+            }
             Action::ToggleMcp => {
                 if self.mcp.is_some() {
                     self.stop_mcp();
@@ -391,6 +408,10 @@ impl SenzorApp {
 }
 
 impl eframe::App for SenzorApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.settings.save(storage);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.autostart_when_ready();
@@ -409,7 +430,7 @@ impl eframe::App for SenzorApp {
         let mut actions = Vec::new();
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
-            ui::top_bar::show(ui, &self.doc, starting, &self.mcp_status(), &mut actions);
+            ui::top_bar::show(ui, &self.doc, starting, &mut actions);
         });
         egui::Panel::bottom("bottom")
             .resizable(true)
@@ -455,6 +476,10 @@ impl eframe::App for SenzorApp {
         });
         if self.ui.broker_open {
             ui::broker::show(&ctx, &self.doc, &mut self.ui, &mut actions);
+        }
+        if self.ui.settings_open {
+            let mcp = self.mcp_status();
+            ui::settings::show(&ctx, &mut self.ui, &self.settings, &mcp, &mut actions);
         }
 
         // Edits, then renames, then removals, then the rest (see `ui::phase`).

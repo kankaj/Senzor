@@ -22,6 +22,8 @@ Usage: dev/gui.sh <command> [args]
   scroll X Y up|down [n]                  scroll n steps (default 3) over X Y
   type TEXT                               type text into the focused widget
   key KEY...                              press keys, e.g. Return, Tab, ctrl+s, ctrl+a BackSpace
+  close                                   ask the app to close, as the window's close button does,
+                                          and wait for it to exit (it saves its settings)
   log                                     the app's output so far
   status                                  whether the display and the app are running
   stop                                    close the app and the display
@@ -58,7 +60,7 @@ start() {
   mkdir -p "$STATE/home"
   env -u WAYLAND_DISPLAY DISPLAY=$X XDG_SESSION_TYPE=x11 HOME="$STATE/home" \
     XDG_CONFIG_HOME="$STATE/home/.config" XDG_DATA_HOME="$STATE/home/.local/share" \
-    dbus-run-session -- "$ROOT/target/debug/senzor" "${project[@]}" "$@" \
+    dbus-run-session -- "${CARGO_TARGET_DIR:-$ROOT/target}/debug/senzor" "${project[@]}" "$@" \
     >"$STATE/app.log" 2>&1 &
   echo $! >"$STATE/app.pid"
 
@@ -72,7 +74,9 @@ start() {
   done
   [[ -n $win ]] || { echo "no window after 10 s; see dev/gui.sh log" >&2; exit 1; }
   # With no window manager nothing gives the window keyboard focus, and typing goes nowhere.
-  xdo windowmove "$win" 0 0 windowsize "$win" "${SIZE%x*}" "${SIZE#*x}" windowfocus --sync "$win"
+  # The window can be found before it is viewable; focusing it then fails, so retry.
+  xdo windowmove "$win" 0 0 windowsize "$win" "${SIZE%x*}" "${SIZE#*x}"
+  for _ in $(seq 50); do xdo windowfocus --sync "$win" 2>/dev/null && break; sleep 0.1; done
   sleep 1
   echo "running on $X (window $win)"
 }
@@ -109,6 +113,24 @@ case $cmd in
     xdo mousemove "$1" "$2" click --repeat "${4:-3}" --delay 50 "$b" ;;
   type) need_app; xdo type --delay 20 -- "$*" ;;
   key) need_app; xdo key --delay 50 "$@" ;;
+  close)
+    need_app
+    # With no window manager, xdotool windowquit reaches nobody: send WM_DELETE_WINDOW directly.
+    DISPLAY=$X python3 -I - "$(DISPLAY=$X xdotool search --name '^Senzor' | head -1)" <<'PY'
+import sys
+from Xlib import X, display, protocol
+d = display.Display()
+w = d.create_resource_object("window", int(sys.argv[1]))
+event = protocol.event.ClientMessage(
+    window=w, client_type=d.intern_atom("WM_PROTOCOLS"),
+    data=(32, [d.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0]))
+w.send_event(event, event_mask=X.NoEventMask)
+d.flush()
+PY
+    for _ in $(seq 100); do pid_alive "$STATE/app.pid" || break; sleep 0.1; done
+    if pid_alive "$STATE/app.pid"; then echo "still running: a prompt may be open; see shot" >&2; exit 1; fi
+    rm -f "$STATE/app.pid"
+    echo closed ;;
   log) cat "$STATE/app.log" ;;
   status)
     pid_alive "$STATE/xvfb.pid" && echo "display $X: running" || echo "display $X: stopped"

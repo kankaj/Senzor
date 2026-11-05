@@ -1,0 +1,41 @@
+---
+title: Settings
+description: The app's own settings, its theme and the MCP endpoint, and where Senzor keeps them.
+---
+
+The settings belong to the app, not to a project: they are the same whichever project you open, and they are never written to a project file. To open them, click the gear at the right end of the top bar; hovering over it reads **Settings**. The **Settings** window opens in the middle of the window. Close it with the **×** in its title bar.
+
+![The Settings window with MCP on, showing the address agents connect to](/screenshots/settings.png)
+
+## Theme
+
+**Theme** chooses the colours of the window:
+
+- **System** follows your operating system's light or dark setting. This is the default.
+- **Light** and **Dark** use those colours whatever the system uses.
+
+The window changes as soon as you click, and Senzor uses the same theme the next time it starts.
+
+## MCP
+
+The **MCP** switch, **let AI agents control this window**, turns on the endpoint AI agents such as Claude Code connect to. While it is on, the **Address** row shows where agents connect, `127.0.0.1:18830`. Hover over the switch for the full URL. Turn the switch off to stop the endpoint, which disconnects connected agents.
+
+If the port is taken, a dialog says why, unless another dialog is already open, and the switch stays off. The reason also shows in red under the switch, after **Could not start:**. Click the switch to try again.
+
+MCP is not remembered: it is off whenever the window starts without `--mcp` or `--mcp-port`. See [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui).
+
+## Version
+
+**Version** shows the version of Senzor you are running.
+
+## Where Senzor keeps them
+
+Senzor saves its settings when you close the window, and every 30 seconds while it runs. It also remembers the size of its window and, where the desktop allows it, its position. Everything goes into one file, `app.ron`:
+
+| System  | File                                                    |
+| ------- | ------------------------------------------------------- |
+| Linux   | `~/.local/share/cz.kankaj.senzor/app.ron`               |
+| macOS   | `~/Library/Application Support/cz.kankaj.Senzor/app.ron` |
+| Windows | `%APPDATA%\cz.kankaj.Senzor\data\app.ron`               |
+
+On Linux, if `XDG_DATA_HOME` is set to an absolute path, the folder is `$XDG_DATA_HOME/cz.kankaj.senzor` instead. To go back to the defaults, close Senzor and delete the file.

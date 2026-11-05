@@ -564,12 +564,14 @@ mod tests {
     }
 
     #[test]
-    fn the_endpoint_listens_on_loopback_and_shows_in_the_top_bar() {
-        let h = window("mcp-endpoint", &three_devices(1));
+    fn the_endpoint_listens_on_loopback_and_shows_in_the_settings_window() {
+        let mut h = window("mcp-endpoint", &three_devices(1));
         let McpStatus::Listening(address) = h.state().mcp_status() else {
             panic!("not listening: {:?}", h.state().mcp_status());
         };
         assert!(address.ip().is_loopback());
+        assert!(h.query_by_label("MCP").is_none(), "not in the top bar");
+        crate::testing::click(&mut h, "Settings");
         assert!(h.query_by_label("MCP").is_some());
         assert!(h.query_by_label(&address.to_string()).is_some());
         assert_eq!(initialize_over_http(address, &address.to_string()), 200);
@@ -585,6 +587,16 @@ mod tests {
         });
         h.run_steps(2);
         h
+    }
+
+    /// Clicks the MCP toggle in the settings window, opening the window first if needed.
+    fn toggle_mcp(h: &mut App) {
+        if h.query_by_label("MCP").is_none() {
+            crate::testing::click(h, "Settings");
+        }
+        // The window re-centres a frame after it opens or its rows change; click once it is there.
+        h.run();
+        crate::testing::click(h, "MCP");
     }
 
     /// Whether anything accepts connections on `address` within a second.
@@ -611,14 +623,14 @@ mod tests {
         );
         assert!(h.state().mcp_server().is_none());
 
-        crate::testing::click(&mut h, "MCP");
+        toggle_mcp(&mut h);
         let McpStatus::Listening(address) = h.state().mcp_status() else {
             panic!("not listening: {:?}", h.state().mcp_status());
         };
         assert!(h.query_by_label(&address.to_string()).is_some());
         assert_eq!(initialize_over_http(address, &address.to_string()), 200);
 
-        crate::testing::click(&mut h, "MCP");
+        toggle_mcp(&mut h);
         assert!(matches!(
             h.state().mcp_status(),
             McpStatus::Off { error: None, .. }
@@ -652,7 +664,7 @@ mod tests {
     #[test]
     fn turning_mcp_off_closes_connections_that_are_already_open() {
         let mut h = window_with_mcp_off("mcp-open-connection", 0);
-        crate::testing::click(&mut h, "MCP");
+        toggle_mcp(&mut h);
         let McpStatus::Listening(address) = h.state().mcp_status() else {
             panic!("not listening: {:?}", h.state().mcp_status());
         };
@@ -671,7 +683,7 @@ mod tests {
             String::from_utf8_lossy(&first)
         );
 
-        crate::testing::click(&mut h, "MCP");
+        toggle_mcp(&mut h);
         let second = runtime.block_on(async {
             // Writing may already fail on a closed connection; either way nothing may come back.
             let _ = stream.write_all(request.as_bytes()).await;
@@ -700,7 +712,6 @@ mod tests {
             panic!("not off with an error: {:?}", h.state().mcp_status());
         };
         assert!(error.contains(&port.to_string()), "{error}");
-        assert!(h.query_by_label("MCP").is_some());
         assert!(matches!(h.state().ui.modal, Some(Modal::Error(_))));
         assert_eq!(
             h.state().document().file().devices.len(),
@@ -714,7 +725,7 @@ mod tests {
         let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = taken.local_addr().unwrap().port();
         let mut h = window_with_mcp_off("mcp-toggle-taken", port);
-        crate::testing::click(&mut h, "MCP");
+        toggle_mcp(&mut h);
         assert!(matches!(
             h.state().mcp_status(),
             McpStatus::Off { error: Some(_), .. }

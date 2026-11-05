@@ -8,6 +8,7 @@ mod format;
 pub mod icon;
 mod preview;
 mod selection;
+pub mod settings;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 mod tree;

@@ -46,8 +46,6 @@ const PIN_ROW_TOLERANCE: f32 = 5.0;
 const PANEL_EDGE_ABOVE_TABS: f32 = 3.0;
 /// How much (in points) the `message-log` shot drags the bottom panel taller.
 const LOG_PANEL_GROWTH: f32 = 300.0;
-/// Space (in points) the `top-bar-mcp` shot keeps below the top bar's widgets.
-const TOP_BAR_MARGIN: f32 = 6.0;
 
 /// Every GUI label this program finds a widget by. If the GUI renames one, the program stops at
 /// the shot that uses it.
@@ -72,6 +70,8 @@ mod label {
     pub const PROBLEMS_TAB: &str = "Problems";
     /// The top bar's broker button, followed by `<host>:<port>`.
     pub const BROKER_BUTTON: &str = "Broker: ";
+    /// The top bar's cog, which opens the settings window.
+    pub const SETTINGS: &str = "Settings";
 }
 
 fn main() -> ExitCode {
@@ -105,7 +105,7 @@ fn run() -> Result<(), String> {
     let mut shots = take_shots(&mut app)?;
     // The next window runs the same devices; this one must not hold their client IDs any more.
     drop(app);
-    shots.push(("top-bar-mcp", top_bar_mcp(&project.path)?));
+    shots.push(("settings", settings(&project.path)?));
     std::fs::create_dir_all(&out).expect("create output folder");
     for (name, image) in shots {
         let path = out.join(format!("{name}.png"));
@@ -305,9 +305,9 @@ fn broker(app: &mut App) -> Result<RgbaImage, String> {
     render(app)
 }
 
-/// `top-bar-mcp`: the top bar of a window started with `--mcp`, showing the address AI agents
-/// connect to. Needs the default MCP port to be free.
-fn top_bar_mcp(project: &Path) -> Result<RgbaImage, String> {
+/// `settings`: the settings window of a window started with `--mcp`, showing the address AI
+/// agents connect to. Needs the default MCP port to be free.
+fn settings(project: &Path) -> Result<RgbaImage, String> {
     let path = project.to_path_buf();
     let mut app: App = Harness::builder()
         .with_size(SIZE)
@@ -317,25 +317,19 @@ fn top_bar_mcp(project: &Path) -> Result<RgbaImage, String> {
                 .with_mcp(DEFAULT_HTTP_PORT)
         });
     app.step();
-    let indicator = match app.state().mcp_status() {
-        McpStatus::Listening(address) => address.to_string(),
-        other => {
-            return Err(format!(
-                "the top-bar-mcp shot needs port {DEFAULT_HTTP_PORT} free: {other:?}"
-            ));
-        }
-    };
+    if !matches!(app.state().mcp_status(), McpStatus::Listening(_)) {
+        return Err(format!(
+            "the settings shot needs port {DEFAULT_HTTP_PORT} free: {:?}",
+            app.state().mcp_status()
+        ));
+    }
     wait_online(&mut app, label::INSTANCE);
-    let image = render(&mut app)?;
-    let corner =
-        app.get_by_label(&indicator).rect().max + egui::vec2(TOP_BAR_MARGIN, TOP_BAR_MARGIN);
-    let pixels =
-        |points: f32, limit: u32| ((points * app.ctx.pixels_per_point()).ceil() as u32).min(limit);
-    let (width, height) = (
-        pixels(corner.x, image.width()),
-        pixels(corner.y, image.height()),
-    );
-    Ok(image::imageops::crop_imm(&image, 0, 0, width, height).to_image())
+    run_for(&mut app, WARM_UP);
+    click(&mut app, label::INSTANCE);
+    click(&mut app, label::SETTINGS);
+    // The window measures itself in its first frame and moves to the middle in the next.
+    app.run();
+    render(&mut app)
 }
 
 /// Selects [`label::TEMPLATE`] in the Templates tab.
