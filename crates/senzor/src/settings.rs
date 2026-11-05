@@ -35,10 +35,21 @@ impl Theme {
 
 /// Everything the settings window changes. A field missing from the stored settings, for
 /// example one added in a later version, takes its default.
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
     pub theme: Theme,
+    /// How large everything is drawn: 1.0 is 100 %.
+    pub zoom: f32,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: Theme::default(),
+            zoom: 1.0,
+        }
+    }
 }
 
 impl AppSettings {
@@ -53,6 +64,12 @@ impl AppSettings {
 
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, Self::KEY, self);
+    }
+
+    /// Sets the theme and zoom of `ctx` to these settings.
+    pub fn apply(&self, ctx: &egui::Context) {
+        ctx.set_theme(self.theme.preference());
+        ctx.set_zoom_factor(self.zoom);
     }
 }
 
@@ -86,6 +103,7 @@ mod tests {
         let mut storage = MemoryStorage::default();
         let settings = AppSettings {
             theme: Theme::Light,
+            zoom: 1.3,
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);
@@ -107,5 +125,35 @@ mod tests {
             .0
             .insert(AppSettings::KEY.into(), "not ron at all".into());
         assert_eq!(AppSettings::load(Some(&storage)), AppSettings::default());
+    }
+
+    #[test]
+    fn settings_saved_before_zoom_existed_load_at_100_percent() {
+        let mut storage = MemoryStorage::default();
+        storage
+            .0
+            .insert(AppSettings::KEY.into(), "(theme:Dark)".into());
+        let settings = AppSettings::load(Some(&storage));
+        assert_eq!(settings.theme, Theme::Dark);
+        assert_eq!(settings.zoom, 1.0);
+        assert_eq!(AppSettings::default().zoom, 1.0);
+    }
+
+    #[test]
+    fn applying_settings_sets_the_theme_and_the_zoom() {
+        let ctx = egui::Context::default();
+        AppSettings {
+            theme: Theme::Light,
+            zoom: 1.5,
+        }
+        .apply(&ctx);
+        // egui changes the zoom when the next frame begins.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert_eq!(ctx.zoom_factor(), 1.5);
+        assert_eq!(
+            ctx.options(|o| o.theme_preference),
+            egui::ThemePreference::Light
+        );
     }
 }

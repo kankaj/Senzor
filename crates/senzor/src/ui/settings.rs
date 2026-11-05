@@ -26,6 +26,7 @@ pub fn show(
                 .num_columns(2)
                 .show(ui, |ui| {
                     theme_row(ui, settings.theme, actions);
+                    zoom_row(ui);
                     mcp_row(ui, mcp, actions);
 
                     ui.label("Version");
@@ -59,6 +60,59 @@ fn theme_row(ui: &mut egui::Ui, current: Theme, actions: &mut Vec<Action>) {
             if button.clicked() && !chosen {
                 actions.push(Action::SetTheme(theme));
             }
+        }
+    });
+    ui.end_row();
+}
+
+/// egui's zoom limits, which its zoom functions clamp to.
+const MIN_ZOOM: f32 = 0.2;
+const MAX_ZOOM: f32 = 5.0;
+
+/// Zoom out, the zoom in percent, zoom in and reset, in egui's 10 % steps; the same as
+/// Ctrl + −, Ctrl + + and Ctrl + 0.
+fn zoom_row(ui: &mut egui::Ui) {
+    use egui::gui_zoom::{self, kb_shortcuts};
+
+    ui.label("Zoom");
+    ui.horizontal(|ui| {
+        let ctx = ui.ctx().clone();
+        let zoom = ctx.zoom_factor();
+        let button = |ui: &mut egui::Ui, enabled: bool, text: &str, name: &str, shortcut| {
+            let response = ui
+                .add_enabled(enabled, egui::Button::new(text))
+                .on_hover_text(format!("{name} ({})", ctx.format_shortcut(shortcut)));
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+            response.clicked()
+        };
+        if button(
+            ui,
+            zoom > MIN_ZOOM,
+            icons::MINUS,
+            "Zoom out",
+            &kb_shortcuts::ZOOM_OUT,
+        ) {
+            gui_zoom::zoom_out(&ctx);
+        }
+        ui.label(format!("{:.0} %", zoom * 100.0));
+        if button(
+            ui,
+            zoom < MAX_ZOOM,
+            icons::PLUS,
+            "Zoom in",
+            &kb_shortcuts::ZOOM_IN,
+        ) {
+            gui_zoom::zoom_in(&ctx);
+        }
+        if button(
+            ui,
+            zoom != 1.0,
+            "Reset",
+            "Reset zoom",
+            &kb_shortcuts::ZOOM_RESET,
+        ) {
+            ctx.set_zoom_factor(1.0);
         }
     });
     ui.end_row();

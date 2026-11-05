@@ -63,7 +63,7 @@ impl SenzorApp {
     ) -> Self {
         ui::install_icon_font(&cc.egui_ctx);
         let settings = AppSettings::load(cc.storage);
-        cc.egui_ctx.set_theme(settings.theme.preference());
+        settings.apply(&cc.egui_ctx);
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime starts");
         let mut app = Self {
             runtime,
@@ -414,6 +414,8 @@ impl eframe::App for SenzorApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // The zoom changes through egui as well, with Ctrl + +, Ctrl + − and Ctrl + 0.
+        self.settings.zoom = ctx.zoom_factor();
         self.autostart_when_ready();
         self.handle_mcp_requests();
         self.state = self.engine().snapshot();

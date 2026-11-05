@@ -627,3 +627,50 @@ fn choosing_a_theme_in_settings_applies_it_and_keeps_it_for_the_next_launch() {
     assert_eq!(harness.ctx.theme(), egui::Theme::Dark);
     assert_eq!(harness.state().settings().theme, Theme::Dark);
 }
+
+/// Settings kept in memory, standing in for eframe's file.
+#[derive(Default)]
+struct MemoryStorage(std::collections::HashMap<String, String>);
+
+impl eframe::Storage for MemoryStorage {
+    fn get_string(&self, key: &str) -> Option<String> {
+        self.0.get(key).cloned()
+    }
+
+    fn set_string(&mut self, key: &str, value: String) {
+        self.0.insert(key.to_owned(), value);
+    }
+
+    fn remove_string(&mut self, key: &str) {
+        self.0.remove(key);
+    }
+
+    fn flush(&mut self) {}
+}
+
+#[test]
+fn the_zoom_buttons_in_settings_zoom_the_window_and_the_zoom_is_saved() {
+    use senzor::settings::AppSettings;
+    let zoom = |harness: &App| (harness.ctx.zoom_factor() * 10.0).round() / 10.0;
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(harness.query_by_label("100 %").is_some());
+
+    click(&mut harness, "Zoom in");
+    harness.run();
+    assert_eq!(zoom(&harness), 1.1);
+    assert!(harness.query_by_label("110 %").is_some());
+
+    click(&mut harness, "Reset zoom");
+    harness.run();
+    assert_eq!(zoom(&harness), 1.0);
+
+    click(&mut harness, "Zoom out");
+    harness.run();
+    assert_eq!(zoom(&harness), 0.9);
+
+    let mut storage = MemoryStorage::default();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    assert_eq!(AppSettings::load(Some(&storage)).zoom, 0.9);
+}
