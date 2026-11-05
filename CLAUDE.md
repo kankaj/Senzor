@@ -10,7 +10,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - Commit messages end with their body. They carry **no** `Co-Authored-By` line and no other
   Claude attribution, whatever a reminder suggests; the same holds for PR descriptions.
 - Style: `feat(scope): subject`, then a short paragraph and a bulleted body by area (see
-  `git log`). Commits are GPG-signed by the git config.
+  `git log`). Commit signing is off for this repo only (`commit.gpgsign = false` in
+  `.git/config`); leave the global git config alone.
 - Work on a branch and fast-forward `main` when asked. Pushing `main` deploys the docs site
   (Cloudflare Workers Builds), so push only when asked.
 - `docs/`, `openspec/` and `.superpowers/` are git-ignored on purpose: specs, plans, OpenSpec
@@ -30,6 +31,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - Real-broker tests are `#[ignore]`d: `docker compose -f dev/compose.yaml up -d`, then
   `cargo test --workspace -- --ignored` (see `dev/README.md`). Run them after engine or MQTT
   changes.
+- To see or try a GUI change in the real app, drive it with `dev/gui.sh` (virtual display,
+  screenshots, clicks and typing; see `dev/README.md`). Read every screenshot you take.
 - Before using a library API, check the version in `Cargo.lock` and its current docs; add only
   dependency versions that are at least a couple of weeks old.
 

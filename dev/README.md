@@ -27,3 +27,23 @@ Watch what Senzor publishes, with MQTT 5 properties:
 docker compose -f dev/compose.yaml exec mosquitto \
   mosquitto_sub -V mqttv5 -t '#' -F '%t %p %P'
 ```
+
+# Driving the GUI
+
+`gui.sh` runs the real GUI on a virtual X display (Xvfb), so it can be screenshotted and clicked
+from a shell without opening a window on the desktop. It needs `Xvfb`, `xdotool`, ImageMagick's
+`import` and `dbus-run-session`.
+
+```bash
+dev/gui.sh start examples/showcase.toml   # build, launch at 1200×760
+dev/gui.sh shot                           # → target/gui-driver/shot.png
+dev/gui.sh click 55 85                    # coordinates are pixels in the screenshot
+dev/gui.sh type 127.0.0.1                 # into the focused field
+dev/gui.sh key ctrl+a Return              # xdotool key names
+dev/gui.sh stop
+```
+
+`dev/gui.sh help` lists every command. The app runs with a scratch `HOME` and its own D-Bus
+session under `target/gui-driver/`, so file dialogs open on the virtual display and nothing is
+written to the real home folder. Edits are not saved unless you click **Save**, so an example
+project opened this way stays unchanged.
