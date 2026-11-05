@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -67,10 +69,21 @@ fn init_logging(verbose: u8) {
     let level = if verbose == 0 { "info" } else { "debug" };
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(format!("warn,senzor_core={level},senzor_cli={level}")));
+    let colours = log_colours(
+        std::io::stderr().is_terminal(),
+        std::env::var_os("NO_COLOR"),
+    );
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
+        .with_ansi(colours)
         .init();
+}
+
+/// Colours only for a terminal, and not when `NO_COLOR` is set to a non-empty value
+/// (<https://no-color.org>), so CI logs and `docker logs` get plain text.
+fn log_colours(stderr_is_terminal: bool, no_color: Option<OsString>) -> bool {
+    stderr_is_terminal && no_color.is_none_or(|value| value.is_empty())
 }
 
 fn report(path: &Path, errors: &[ProjectError]) {
@@ -243,5 +256,19 @@ fn shutdown_signal() -> impl Future<Output = ()> {
             return;
         }
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_log_is_coloured_only_on_a_terminal_without_no_color() {
+        assert!(log_colours(true, None));
+        assert!(log_colours(true, Some(OsString::new())));
+        assert!(!log_colours(true, Some(OsString::from("1"))));
+        assert!(!log_colours(false, None));
+        assert!(!log_colours(false, Some(OsString::new())));
     }
 }

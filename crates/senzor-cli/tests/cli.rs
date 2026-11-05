@@ -256,6 +256,23 @@ fn run_against_an_unreachable_broker_keeps_going_and_exits_0() {
 }
 
 #[test]
+fn the_log_has_no_colour_codes_when_stderr_is_not_a_terminal() {
+    let path = write_project("no-colour", &project_toml(free_port(), true));
+    let output = Command::cargo_bin(BIN)
+        .unwrap()
+        .arg("run")
+        .arg(&*path)
+        .args(["--duration", "1s"])
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    assert_exit(&output, 0);
+    let stderr = stderr(&output);
+    assert!(stderr.contains("connecting with MQTT 5"), "{stderr}");
+    assert!(!stderr.contains("\x1b["), "{stderr:?}");
+}
+
+#[test]
 fn verbose_logs_every_publish() {
     let port = start_broker();
     let path = write_project("verbose", &project_toml(port, true));

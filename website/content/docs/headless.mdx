@@ -136,7 +136,10 @@ senzor-cli run examples/quick-start.toml -v
 ```
 
 The `RUST_LOG` environment variable replaces both defaults. For example, `RUST_LOG=warn` logs only
-problems. Set `NO_COLOR=1` to turn off the colour codes, which is useful in CI logs.
+problems.
+
+The log is in colour only when stderr is a terminal, so CI logs, `docker logs` and files get plain
+text. Set `NO_COLOR=1` to turn the colours off in a terminal too.
 
 ## Exit codes
 

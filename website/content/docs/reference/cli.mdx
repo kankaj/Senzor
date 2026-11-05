@@ -143,7 +143,8 @@ The log goes to stderr, one line per event:
 2026-10-15T15:53:14.229242Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=1
 ```
 
-The time is UTC. Lines about an instance carry `instance=<instance ID>`. Other libraries, such as
+The time is UTC. Lines about an instance carry `instance=<instance ID>`. The log is in colour only
+when stderr is a terminal and `NO_COLOR` is unset or empty; otherwise it is plain text. Other libraries, such as
 the MQTT client, log only warnings and errors unless `RUST_LOG` says otherwise.
 
 | Setting | Filter |
@@ -180,5 +181,5 @@ supports only MQTT 3.1.1, the reason is `the broker does not support MQTT 5; set
 | Variable | Effect |
 | --- | --- |
 | `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored; an empty value logs only errors. |
-| `NO_COLOR` | Any non-empty value turns off colours in the log. |
+| `NO_COLOR` | Any non-empty value turns off colours in the log, also when stderr is a terminal. |
 | The name in `password_env` | The broker password. Needed by `validate`, `run` and `mcp`. |

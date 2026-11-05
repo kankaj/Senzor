@@ -70,7 +70,6 @@ jobs:
         command: mosquitto -c /mosquitto-no-auth.conf
     env:
       MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
-      NO_COLOR: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +92,6 @@ jobs:
 - When the tests are done, `kill` sends SIGTERM, so the instances publish `offline` and disconnect cleanly. GitHub runs the step with `bash -e`, which stops at the first failing command. If `senzor-cli` has already stopped, `kill` finds no process and fails; `2>/dev/null || true` keeps that from failing the step.
 - `wait` returns the exit code of `senzor-cli`: 0 after SIGTERM or after `--duration`, so the step fails only if `senzor-cli` could not run the project. If the tests fail, the step fails at once with their exit code.
 - `--duration` stops `senzor-cli` after a time limit, also when the step never reaches `kill`. Set it longer than your tests can take: when it runs out, the sensors go offline, even if the tests are still running.
-- `NO_COLOR=1` turns off the colour codes in the log, which CI logs would show as raw text.
 - The service's [`command`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) starts Mosquitto with `/mosquitto-no-auth.conf`, a configuration that ships with the image, as in the Quick start. It opens port 1883 to every client without checking the username and password, which is enough for a throwaway broker.
 
 The log of the run step starts like this:
