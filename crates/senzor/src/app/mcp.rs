@@ -627,6 +627,63 @@ mod tests {
         assert!(refused(address), "the listener is closed");
     }
 
+    /// An initialize request on a kept-alive connection.
+    fn initialize_request(host: &str) -> String {
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
+        format!(
+            "POST /mcp HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Everything `stream` sends within `quiet` of silence, or until it closes.
+    async fn read_for(stream: &mut tokio::net::TcpStream, quiet: Duration) -> Vec<u8> {
+        let mut received = Vec::new();
+        let mut buffer = [0u8; 4096];
+        while let Ok(Ok(n)) = tokio::time::timeout(quiet, stream.read(&mut buffer)).await {
+            if n == 0 {
+                break;
+            }
+            received.extend_from_slice(&buffer[..n]);
+        }
+        received
+    }
+
+    #[test]
+    fn turning_mcp_off_closes_connections_that_are_already_open() {
+        let mut h = window_with_mcp_off("mcp-open-connection", 0);
+        crate::testing::click(&mut h, "MCP");
+        let McpStatus::Listening(address) = h.state().mcp_status() else {
+            panic!("not listening: {:?}", h.state().mcp_status());
+        };
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut stream = runtime
+            .block_on(tokio::net::TcpStream::connect(address))
+            .unwrap();
+        let request = initialize_request(&address.to_string());
+        let first = runtime.block_on(async {
+            stream.write_all(request.as_bytes()).await.unwrap();
+            read_for(&mut stream, Duration::from_millis(500)).await
+        });
+        assert!(
+            String::from_utf8_lossy(&first).starts_with("HTTP/1.1 200"),
+            "{}",
+            String::from_utf8_lossy(&first)
+        );
+
+        crate::testing::click(&mut h, "MCP");
+        let second = runtime.block_on(async {
+            // Writing may already fail on a closed connection; either way nothing may come back.
+            let _ = stream.write_all(request.as_bytes()).await;
+            read_for(&mut stream, Duration::from_secs(1)).await
+        });
+        assert!(
+            second.is_empty(),
+            "the open connection still answers: {}",
+            String::from_utf8_lossy(&second)
+        );
+    }
+
     #[test]
     fn a_port_in_use_turns_mcp_off_and_says_why() {
         let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

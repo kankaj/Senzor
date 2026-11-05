@@ -5,6 +5,9 @@ use super::error::ProjectError;
 use super::file::{BrokerSpec, MqttVersion, TlsSpec};
 use super::model::{BrokerConfig, Credentials, TlsConfig};
 
+/// The longest keep-alive MQTT can carry: 16-bit seconds.
+const MAX_KEEP_ALIVE: Duration = Duration::from_secs(65_535);
+
 /// Looks up an environment variable; injected so tests do not touch the real environment.
 pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
@@ -23,6 +26,16 @@ pub fn resolve_broker(
     }
     if spec.keep_alive < Duration::from_secs(1) {
         errors.push(ProjectError::broker("keep_alive must be at least 1s"));
+    } else if spec.keep_alive.subsec_nanos() != 0 {
+        errors.push(ProjectError::broker(format!(
+            "keep_alive must be whole seconds, got {}",
+            humantime::format_duration(spec.keep_alive)
+        )));
+    } else if spec.keep_alive > MAX_KEEP_ALIVE {
+        // MQTT sends the keep-alive as 16-bit seconds.
+        errors.push(ProjectError::broker(
+            "keep_alive must be at most 65535 seconds (18h 12m 15s)",
+        ));
     }
     if let Err(e) = whole_seconds("session_expiry", spec.session_expiry) {
         errors.push(ProjectError::broker(e));
@@ -233,6 +246,32 @@ mod tests {
                 "use either password or password_env, not both",
             ]
         );
+    }
+
+    #[test]
+    fn keep_alive_must_fit_mqtt_whole_seconds() {
+        for (keep_alive, message) in [
+            (
+                Duration::from_millis(1500),
+                "keep_alive must be whole seconds, got 1s 500ms",
+            ),
+            (
+                Duration::from_secs(65_536),
+                "keep_alive must be at most 65535 seconds (18h 12m 15s)",
+            ),
+        ] {
+            let spec = BrokerSpec {
+                keep_alive,
+                ..BrokerSpec::default()
+            };
+            let errors = resolve_broker(&spec, Path::new("."), &no_env).unwrap_err();
+            assert_eq!(messages(errors), [message]);
+        }
+        let spec = BrokerSpec {
+            keep_alive: Duration::from_secs(65_535),
+            ..BrokerSpec::default()
+        };
+        assert!(resolve_broker(&spec, Path::new("."), &no_env).is_ok());
     }
 
     #[test]

@@ -157,7 +157,12 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
 
 fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<Action>) {
     let target = || Target::Instance(instance.id.clone());
-    if ui.button("Start").clicked() {
+    // An orphan has no settings to start with; it is already running anyway.
+    if ui
+        .add_enabled(!instance.orphaned, Button::new("Start"))
+        .on_disabled_hover_text("This instance is no longer in the project")
+        .clicked()
+    {
         actions.push(Action::Engine(Command::Start(target())));
         ui.close();
     }
@@ -209,7 +214,7 @@ fn templates(
 #[cfg(test)]
 mod tests {
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use senzor_core::engine::InstanceStatus;
 
     use super::*;
@@ -382,6 +387,14 @@ count = 3
         assert!(h.query_by_label("Restart").is_none());
         assert!(h.query_by_label("Stop").is_some());
         assert!(h.query_by_label("Kill").is_some());
+    }
+
+    #[test]
+    fn the_menu_of_an_orphan_cannot_start_it() {
+        let mut h = harness_with(BLOCKED, running_orphan("bad", "bad"));
+        h.get_by_label("bad").click_secondary();
+        h.run();
+        assert!(h.get_by_label("Start").accesskit_node().is_disabled());
     }
 
     #[test]

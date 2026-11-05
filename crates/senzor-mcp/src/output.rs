@@ -59,9 +59,11 @@ pub struct InstanceSummary {
     /// The `[[devices]]` entry the instance belongs to.
     pub device: String,
     pub status: Status,
-    /// Messages published since the instance started.
+    /// Messages published since the project was opened or the instance was added; stopping and
+    /// restarting do not reset it.
     pub published: u64,
-    /// Failed publishes and renders since the instance started.
+    /// Messages that could not be rendered or published, and failed availability `online`
+    /// messages, counted like `published`.
     pub errors: u64,
     pub last_publish: Option<String>,
     /// Fields forced to a value with `pin`.
