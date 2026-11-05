@@ -12,8 +12,9 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - Style: `feat(scope): subject`, then a short paragraph and a bulleted body by area (see
   `git log`). Commit signing is off for this repo only (`commit.gpgsign = false` in
   `.git/config`); leave the global git config alone.
-- Work on a branch and fast-forward `main` when asked. Pushing `main` deploys the docs site
-  (Cloudflare Workers Builds), so push only when asked.
+- Ask the user before every commit and before every merge or push to `main`; a yes covers only
+  the step asked about. Worktrees, branches and uncommitted work need no asking: do the work and
+  run the gates there, then ask. Pushing `main` deploys the docs site (Cloudflare Workers Builds).
 - `docs/`, `openspec/` and `.superpowers/` are git-ignored on purpose: specs, plans, OpenSpec
   changes and work logs stay local.
 
