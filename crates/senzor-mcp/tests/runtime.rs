@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use senzor_testkit::Subscriber;
 use serde_json::json;
-use support::{Agent, WAIT, state};
+use support::{Agent, WAIT, project, state, temp_dir};
 
 const TOOLS: [&str; 23] = [
     "copy_builtin_template",
@@ -234,6 +234,48 @@ async fn pins_are_checked() {
         message.contains("failed to deserialize parameters"),
         "{message}"
     );
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn messages_carry_their_mqtt5_properties_and_omit_unset_ones() {
+    let port = senzor_testkit::start_broker();
+    let dir = temp_dir("properties");
+    let path = dir.join("project.toml");
+    let content = project(port).replace(
+        r#"payload = "{{ v }}/{{ w }}" }]"#,
+        r#"payload = "{{ v }}/{{ w }}", content_type = "text/plain", user_properties = { id = "{{ device_id }}" } }]"#,
+    );
+    assert!(content.contains("user_properties"));
+    std::fs::write(&path, content).unwrap();
+    let agent = Agent::open(Some(&path), true, port, dir).await;
+
+    agent.ok("start", json!({"instances": ["lab"]})).await;
+    let out = agent
+        .ok("get_messages", json!({"device": "lab", "wait_seconds": 5}))
+        .await;
+    let message = &out["messages"][0];
+    assert_eq!(message["content_type"], "text/plain", "{message}");
+    assert_eq!(
+        message["user_properties"],
+        json!({"id": "lab"}),
+        "{message}"
+    );
+    assert!(message.get("message_expiry").is_none(), "{message}");
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn messages_without_properties_have_no_property_keys() {
+    let agent = Agent::with_project("no-properties").await;
+    agent.ok("start", json!({"instances": ["lab"]})).await;
+    let out = agent
+        .ok("get_messages", json!({"device": "lab", "wait_seconds": 5}))
+        .await;
+    let message = out["messages"][0].as_object().unwrap();
+    for key in ["message_expiry", "content_type", "user_properties"] {
+        assert!(!message.contains_key(key), "{key} in {message:?}");
+    }
     agent.finish().await;
 }
 

@@ -16,7 +16,7 @@ senzor-cli validate examples/quick-start.toml
 ```
 
 ```text
-examples/quick-start.toml: OK (2 devices, 3 instances)
+examples/quick-start.toml: OK (2 devices, 3 instances, MQTT 5)
 ```
 
 `validate` reads the file and runs the same checks as the GUI. It also resolves the broker settings:
@@ -111,6 +111,7 @@ then drops any connection that is still open, and exits with code 0.
 
 `senzor-cli` logs to stderr. By default it logs at `info` level:
 
+- the MQTT version, once at startup: `connecting with MQTT 5`;
 - status changes of each instance: `Connecting`, `Online`, `reconnecting: <error>`, `Stopped`;
 - problems: a warning for every message that cannot be rendered or published, and an error when an
   instance fails.
@@ -118,6 +119,7 @@ then drops any connection that is still open, and exits with code 0.
 This is a short run of one device, `kitchen`, while the broker is not running (the timestamps are UTC):
 
 ```text
+2026-10-15T15:53:14.228512Z  INFO senzor_cli: connecting with MQTT 5
 2026-10-15T15:53:14.229095Z  INFO senzor_core::engine::state: Connecting instance=kitchen
 2026-10-15T15:53:14.229242Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=1
 2026-10-15T15:53:15.230419Z  INFO senzor_core::engine::state: reconnecting: I/O: Connection refused (os error 111) instance=kitchen attempt=2

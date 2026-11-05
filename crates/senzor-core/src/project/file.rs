@@ -41,6 +41,36 @@ pub struct BrokerSpec {
     pub password_env: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<TlsSpec>,
+    /// The MQTT protocol version every instance of the project connects with.
+    pub mqtt_version: MqttVersion,
+    /// MQTT 5 session expiry interval. Above zero, instances reconnect without a clean start, so
+    /// a reconnect within `availability.will_delay` cancels the Last Will.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[serde(with = "humantime_serde", skip_serializing_if = "Duration::is_zero")]
+    pub session_expiry: Duration,
+}
+
+/// The MQTT protocol version of a project's connections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum MqttVersion {
+    #[default]
+    #[serde(rename = "5")]
+    V5,
+    #[serde(rename = "3.1.1")]
+    V311,
+}
+
+impl MqttVersion {
+    pub const ALL: [MqttVersion; 2] = [MqttVersion::V5, MqttVersion::V311];
+
+    /// The version as written in the project file and shown to people: `5` or `3.1.1`.
+    pub fn label(self) -> &'static str {
+        match self {
+            MqttVersion::V5 => "5",
+            MqttVersion::V311 => "3.1.1",
+        }
+    }
 }
 
 impl Default for BrokerSpec {
@@ -54,6 +84,8 @@ impl Default for BrokerSpec {
             password: None,
             password_env: None,
             tls: None,
+            mqtt_version: MqttVersion::default(),
+            session_expiry: Duration::ZERO,
         }
     }
 }
@@ -115,6 +147,40 @@ fn default_interval() -> Duration {
 pub struct MessageSpec {
     pub topic: String,
     pub payload: String,
+    /// MQTT 5 message expiry interval, in whole seconds.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "humantime_serde"
+    )]
+    pub message_expiry: Option<Duration>,
+    /// MQTT 5 content type, sent as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// MQTT 5 user properties. Values are templates with the variables of the topic and payload.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub user_properties: BTreeMap<String, String>,
+}
+
+impl MessageSpec {
+    /// A message without MQTT 5 properties.
+    pub fn new(topic: impl Into<String>, payload: impl Into<String>) -> Self {
+        Self {
+            topic: topic.into(),
+            payload: payload.into(),
+            message_expiry: None,
+            content_type: None,
+            user_properties: BTreeMap::new(),
+        }
+    }
+
+    /// Whether the message sets any MQTT 5 property.
+    pub fn has_properties(&self) -> bool {
+        self.message_expiry.is_some()
+            || self.content_type.is_some()
+            || !self.user_properties.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,6 +190,14 @@ pub struct AvailabilitySpec {
     pub topic: String,
     pub online: String,
     pub offline: String,
+    /// MQTT 5 Last Will delay, in whole seconds; needs a broker `session_expiry` at least as long.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "humantime_serde"
+    )]
+    pub will_delay: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -292,5 +366,64 @@ template = "t"
         let file = ProjectFile::parse(EXAMPLE).unwrap();
         let written = file.to_toml_string();
         assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+    }
+
+    #[test]
+    fn mqtt_version_defaults_to_5_and_reads_3_1_1() {
+        assert_eq!(
+            ProjectFile::parse("").unwrap().broker.mqtt_version,
+            MqttVersion::V5
+        );
+        let file = ProjectFile::parse("[broker]\nmqtt_version = \"3.1.1\"\n").unwrap();
+        assert_eq!(file.broker.mqtt_version, MqttVersion::V311);
+    }
+
+    #[test]
+    fn unknown_mqtt_version_names_the_accepted_values() {
+        let errors = ProjectFile::parse("[broker]\nmqtt_version = \"4\"\n").unwrap_err();
+        assert_eq!(
+            errors[0].location,
+            Location::Toml {
+                line: 2,
+                column: 16
+            }
+        );
+        assert!(
+            errors[0].message.contains("`5`") && errors[0].message.contains("`3.1.1`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn mqtt_version_is_written_and_zero_session_expiry_is_not() {
+        let written = ProjectFile::default().to_toml_string();
+        assert!(written.contains("mqtt_version = \"5\""), "{written}");
+        assert!(!written.contains("session_expiry"), "{written}");
+    }
+
+    #[test]
+    fn mqtt5_properties_round_trip_and_are_omitted_when_unset() {
+        let src = r#"
+[broker]
+session_expiry = "1m"
+
+[[templates]]
+id = "t"
+availability = { topic = "s", online = "on", offline = "off", will_delay = "5s" }
+messages = [
+    { topic = "a", payload = "p", message_expiry = "60s", content_type = "application/json", user_properties = { room = "{{ room }}" } },
+    { topic = "b", payload = "p" },
+]
+fields.v = { generator = "constant", value = 1 }
+"#;
+        let file = ProjectFile::parse(src).unwrap();
+        let message = &file.templates[0].messages[0];
+        assert_eq!(message.message_expiry, Some(Duration::from_secs(60)));
+        assert_eq!(message.user_properties["room"], "{{ room }}");
+        assert!(!file.templates[0].messages[1].has_properties());
+        let written = file.to_toml_string();
+        assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+        assert_eq!(written.matches("message_expiry").count(), 1, "{written}");
     }
 }

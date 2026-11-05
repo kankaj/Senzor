@@ -102,10 +102,11 @@ fn validate(path: &Path) -> ExitCode {
     match load(path) {
         Ok(project) => {
             println!(
-                "{}: OK ({}, {})",
+                "{}: OK ({}, {}, MQTT {})",
                 path.display(),
                 count_noun(project.devices.len(), "device"),
-                count_noun(project.instances().count(), "instance")
+                count_noun(project.instances().count(), "instance"),
+                project.broker.mqtt_version.label()
             );
             ExitCode::SUCCESS
         }
@@ -179,6 +180,10 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>) -> ExitCode {
 /// Starts `devices`, waits for Ctrl+C, SIGTERM or `duration`, then shuts the engine down.
 async fn run_engine(project: Project, devices: Vec<String>, duration: Option<Duration>) {
     let shutdown = shutdown_signal();
+    tracing::info!(
+        "connecting with MQTT {}",
+        project.broker.mqtt_version.label()
+    );
     let engine = Engine::spawn(project, &tokio::runtime::Handle::current(), Arc::new(|| {}));
     for id in devices {
         engine.send(Command::Start(Target::Device(id)));

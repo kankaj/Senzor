@@ -15,7 +15,7 @@ A project file has up to five parts. Each is optional; a part you leave out take
 
 | Section | What it holds |
 | --- | --- |
-| `[broker]` | Where and how to connect: `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, and `password` or `password_env`. Without it, Senzor connects to `localhost:1883`. |
+| `[broker]` | Where and how to connect: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, and `password` or `password_env`. Without it, Senzor connects to `localhost:1883` with MQTT 5. |
 | `[broker.tls]` | TLS settings: `ca_file`, and `client_cert` with `client_key` for a client certificate. Without this table, the connection is plain TCP. |
 | `[simulation]` | `seed`, which makes generated values repeat from run to run. See [Reproducible runs](/docs/concepts/reproducible-runs). |
 | `[[templates]]` | Your templates, one entry each: messages, fields, interval, QoS, retain and availability. |

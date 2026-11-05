@@ -44,10 +44,10 @@ pub fn add_template(file: &mut ProjectFile) -> usize {
         qos: 0,
         retain: false,
         availability: None,
-        messages: vec![MessageSpec {
-            topic: NEW_MESSAGE_TOPIC.into(),
-            payload: r#"{"value": {{ value | round(1) }}}"#.into(),
-        }],
+        messages: vec![MessageSpec::new(
+            NEW_MESSAGE_TOPIC,
+            r#"{"value": {{ value | round(1) }}}"#,
+        )],
         fields: BTreeMap::from([(
             "value".to_string(),
             default_generator(GeneratorKind::RandomWalk),
@@ -58,10 +58,7 @@ pub fn add_template(file: &mut ProjectFile) -> usize {
 
 /// A message to add to a template: field `value` on the topic new templates use.
 pub fn new_message() -> MessageSpec {
-    MessageSpec {
-        topic: NEW_MESSAGE_TOPIC.into(),
-        payload: "{{ value }}".into(),
-    }
+    MessageSpec::new(NEW_MESSAGE_TOPIC, "{{ value }}")
 }
 
 /// The availability topic and payloads a template starts with when availability is turned on.
@@ -70,6 +67,7 @@ pub fn new_availability() -> AvailabilitySpec {
         topic: "senzor/{{ device_id }}/status".into(),
         online: "online".into(),
         offline: "offline".into(),
+        will_delay: None,
     }
 }
 

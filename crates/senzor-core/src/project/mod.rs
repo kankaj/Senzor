@@ -7,12 +7,13 @@ pub mod file;
 pub mod model;
 mod resolve;
 
-pub use broker::EnvLookup;
+pub(crate) use broker::mqtt_seconds;
+pub use broker::{EnvLookup, NEEDS_MQTT5};
 pub use document::{Document, OpenError};
 pub use error::{Location, ProjectError};
 pub use file::{
-    AvailabilitySpec, BrokerSpec, DeviceSpec, MessageSpec, ProjectFile, SimulationSpec,
-    TemplateSpec, TlsSpec,
+    AvailabilitySpec, BrokerSpec, DeviceSpec, MessageSpec, MqttVersion, ProjectFile,
+    SimulationSpec, TemplateSpec, TlsSpec,
 };
 pub use model::{
     BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, TlsConfig, Validated,

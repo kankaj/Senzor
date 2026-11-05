@@ -224,6 +224,118 @@ async fn a_broker_change_flags_every_running_instance() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn set_broker_sets_the_mqtt_version_and_defaults_it_to_5() {
+    let agent = Agent::with_project("mqtt-version").await;
+    let broker = |extra: Value| {
+        let mut args = json!({"host": "127.0.0.1", "port": agent.port});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        args
+    };
+    agent
+        .ok("set_broker", broker(json!({"mqtt_version": "3.1.1"})))
+        .await;
+    let toml = agent.ok("get_project", json!({})).await["toml"].clone();
+    assert!(
+        toml.as_str().unwrap().contains(r#"mqtt_version = "3.1.1""#),
+        "{toml}"
+    );
+
+    agent.ok("set_broker", broker(json!({}))).await;
+    let toml = agent.ok("get_project", json!({})).await["toml"].clone();
+    assert!(
+        toml.as_str().unwrap().contains(r#"mqtt_version = "5""#),
+        "{toml}"
+    );
+
+    let error = agent
+        .err("set_broker", broker(json!({"mqtt_version": "4"})))
+        .await;
+    assert!(error.contains("3.1.1"), "{error}");
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn put_template_stores_mqtt5_properties_and_reports_them_on_3_1_1() {
+    let agent = Agent::with_project("template-properties").await;
+    let template = json!({
+        "id": "props",
+        "interval": "5s",
+        "availability": {"topic": "s/{{ device_id }}", "online": "on", "offline": "off", "will_delay": "5s"},
+        "messages": [{
+            "topic": "a/{{ device_id }}",
+            "payload": "{{ v }}",
+            "message_expiry": "60s",
+            "content_type": "application/json",
+            "user_properties": {"room": "{{ device_id }}"}
+        }],
+        "fields": {"v": {"generator": "constant", "value": 1}}
+    });
+    let out = agent.ok("put_template", template).await;
+    let toml = agent.ok("get_project", json!({})).await["toml"].clone();
+    let toml = toml.as_str().unwrap();
+    for key in [
+        "message_expiry",
+        "content_type",
+        "user_properties",
+        "will_delay",
+    ] {
+        assert!(toml.contains(key), "{key} missing in {toml}");
+    }
+    let problems = out["problems"].to_string();
+    assert!(problems.contains("session_expiry"), "{problems}");
+
+    let out = agent
+        .ok(
+            "set_broker",
+            json!({"host": "127.0.0.1", "port": agent.port, "mqtt_version": "3.1.1"}),
+        )
+        .await;
+    let problems = out["problems"].to_string();
+    assert!(problems.contains("content_type needs MQTT 5"), "{problems}");
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_input_schemas_describe_the_mqtt5_keys() {
+    let agent = Agent::with_project("mqtt5-schemas").await;
+    let tools = agent.client.list_all_tools().await.unwrap();
+    let schema = |name: &str| {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        serde_json::to_string(&tool.input_schema).unwrap()
+    };
+    let description = tools
+        .iter()
+        .find(|t| t.name == "set_broker")
+        .and_then(|t| t.description.as_deref())
+        .unwrap_or_default();
+    for key in ["mqtt_version", "session_expiry"] {
+        assert!(description.contains(key), "{key} missing in: {description}");
+    }
+    let broker = schema("set_broker");
+    for key in ["mqtt_version", "\"3.1.1\"", "\"5\"", "session_expiry"] {
+        assert!(
+            broker.contains(key),
+            "{key} missing in set_broker: {broker}"
+        );
+    }
+    let template = schema("put_template");
+    for key in [
+        "message_expiry",
+        "content_type",
+        "user_properties",
+        "will_delay",
+    ] {
+        assert!(
+            template.contains(key),
+            "{key} missing in put_template: {template}"
+        );
+    }
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn passwords_never_leave_and_survive_a_round_trip() {
     let agent = Agent::with_project("password").await;
     agent

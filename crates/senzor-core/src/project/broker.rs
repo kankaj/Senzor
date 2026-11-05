@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::error::ProjectError;
-use super::file::{BrokerSpec, TlsSpec};
+use super::file::{BrokerSpec, MqttVersion, TlsSpec};
 use super::model::{BrokerConfig, Credentials, TlsConfig};
 
 /// Looks up an environment variable; injected so tests do not touch the real environment.
@@ -23,6 +23,12 @@ pub fn resolve_broker(
     }
     if spec.keep_alive < Duration::from_secs(1) {
         errors.push(ProjectError::broker("keep_alive must be at least 1s"));
+    }
+    if let Err(e) = whole_seconds("session_expiry", spec.session_expiry) {
+        errors.push(ProjectError::broker(e));
+    }
+    if spec.mqtt_version == MqttVersion::V311 && !spec.session_expiry.is_zero() {
+        errors.push(ProjectError::broker(needs_mqtt5("session_expiry")));
     }
     let credentials = resolve_credentials(spec, env).unwrap_or_else(|e| {
         errors.push(e);
@@ -56,7 +62,36 @@ pub fn broker_config(
         keep_alive: spec.keep_alive,
         credentials,
         tls,
+        mqtt_version: spec.mqtt_version,
+        session_expiry: spec.session_expiry,
     }
+}
+
+/// `duration` as MQTT's whole seconds (a `u32`), or the problem with it, naming `key`.
+pub(crate) fn whole_seconds(key: &str, duration: Duration) -> Result<u32, String> {
+    if duration.subsec_nanos() != 0 {
+        return Err(format!(
+            "{key} must be whole seconds, got {}",
+            humantime::format_duration(duration)
+        ));
+    }
+    u32::try_from(duration.as_secs())
+        .map_err(|_| format!("{key} must be at most {} seconds", u32::MAX))
+}
+
+/// Why an MQTT 5 setting cannot be used: the end of every such validation problem, and the note
+/// the GUI shows next to disabled MQTT 5 settings.
+pub const NEEDS_MQTT5: &str = "needs MQTT 5; the broker settings use MQTT 3.1.1";
+
+/// The problem for an MQTT 5 setting `key` in a project that uses MQTT 3.1.1.
+pub(crate) fn needs_mqtt5(key: &str) -> String {
+    format!("{key} {NEEDS_MQTT5}")
+}
+
+/// `duration` in MQTT's whole seconds. Validation ([`whole_seconds`]) rejects durations that do
+/// not fit, so the clamp to `u32::MAX` only guards projects that skipped it.
+pub(crate) fn mqtt_seconds(duration: Duration) -> u32 {
+    u32::try_from(duration.as_secs()).unwrap_or(u32::MAX)
 }
 
 fn resolve_credentials(

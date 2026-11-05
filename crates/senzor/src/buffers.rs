@@ -40,6 +40,11 @@ impl Buffers {
         buffer
     }
 
+    /// Forgets `key`'s text; the next `get` starts from the model again.
+    pub fn remove(&mut self, key: &str) {
+        self.0.remove(key);
+    }
+
     pub fn clear(&mut self) {
         self.0.clear();
     }

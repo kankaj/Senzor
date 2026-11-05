@@ -91,7 +91,23 @@ fn validate_accepts_a_valid_project() {
     let path = write_project("valid", &project_toml(1883, true));
     let output = run_cli("validate", &path, &[]);
     assert_exit(&output, 0);
-    assert!(String::from_utf8_lossy(&output.stdout).contains("OK (2 devices, 3 instances)"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("OK (2 devices, 3 instances, MQTT 5)")
+    );
+}
+
+#[test]
+fn validate_names_mqtt_3_1_1_when_the_project_uses_it() {
+    let content =
+        project_toml(1883, true).replace("[broker]\n", "[broker]\nmqtt_version = \"3.1.1\"\n");
+    let path = write_project("v311", &content);
+    let output = run_cli("validate", &path, &[]);
+    assert_exit(&output, 0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("OK (2 devices, 3 instances, MQTT 3.1.1)"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -115,7 +131,10 @@ template = "cli"
     let output = run_cli("validate", &path, &[]);
     assert_exit(&output, 0);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("OK (1 device, 1 instance)"), "{stdout}");
+    assert!(
+        stdout.contains("OK (1 device, 1 instance, MQTT 5)"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -233,6 +252,29 @@ fn verbose_logs_every_publish() {
     let stderr = stderr(&output);
     assert!(
         stderr.contains("publish") && stderr.contains("cli/dev-0/state"),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr.matches("connecting with MQTT 5").count(),
+        1,
+        "{stderr}"
+    );
+}
+
+#[test]
+fn verbose_logs_the_mqtt5_properties_of_a_publish() {
+    let port = start_broker();
+    let content = project_toml(port, true).replace(
+        r#"payload = "{{ v }}" }]"#,
+        r#"payload = "{{ v }}", user_properties = { room = "lab" } }]"#,
+    );
+    assert!(content.contains("user_properties"));
+    let path = write_project("verbose-properties", &content);
+    let output = run_cli("run", &path, &["--duration", "1s", "-v"]);
+    assert_exit(&output, 0);
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("properties") && stderr.contains(r#"("room", "lab")"#),
         "{stderr}"
     );
 }

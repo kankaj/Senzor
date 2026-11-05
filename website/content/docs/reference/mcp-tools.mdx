@@ -104,7 +104,7 @@ Published messages, oldest first. These are the messages your templates define, 
 
 | Key | Meaning |
 | --- | --- |
-| `messages` | Each with `seq`, `time`, `instance`, `topic`, `payload`, `qos` and `retain`. |
+| `messages` | Each with `seq`, `time`, `instance`, `topic`, `payload`, `qos` and `retain`, plus the MQTT 5 properties the message was sent with: `message_expiry` (seconds), `content_type` and `user_properties` (an object of rendered values). Properties the message did not set are left out. |
 | `last_seq` | The highest sequence number assigned so far. Sequence numbers keep growing when another project is opened. |
 | `truncated` | Messages after `after_seq` left the 1,000-message log before they could be read. |
 
@@ -242,7 +242,7 @@ Running instances of the device become orphans: they keep running until stopped.
 
 ### `put_template`
 
-Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`.
+Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`. Messages can set the MQTT 5 keys `message_expiry`, `content_type` and `user_properties`, and `availability` can set `will_delay`, as in the [project file](/docs/reference/project-file#messages).
 
 ```json
 {
@@ -287,7 +287,7 @@ Errors: `` unknown built-in template `<id>` ``, `` a template `<id>` already exi
 
 ### `set_broker`
 
-Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the [project file](/docs/reference/project-file#broker). Every running instance needs a restart to use the new settings.
+Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Pass the current `mqtt_version` and `session_expiry` from `get_project` to keep them: an omitted `mqtt_version` is `"5"`. Omitted keys take their defaults, as in the [project file](/docs/reference/project-file#broker). Every running instance needs a restart to use the new settings.
 
 ## Files
 

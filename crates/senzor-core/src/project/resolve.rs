@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::time::SystemTime;
 
-use super::broker::{EnvLookup, broker_config, resolve_broker};
+use super::broker::{EnvLookup, broker_config, needs_mqtt5, resolve_broker, whole_seconds};
 use super::builtin::{builtin_templates, is_builtin};
 use super::error::ProjectError;
-use super::file::{DeviceSpec, ProjectFile, TemplateSpec, default_instance_id_pattern};
+use super::file::{
+    BrokerSpec, DeviceSpec, MqttVersion, ProjectFile, TemplateSpec, default_instance_id_pattern,
+};
 use super::model::{DeviceConfig, InstanceConfig, Project, Validated};
 use crate::generator::GeneratorSpec;
 use crate::render::{
@@ -87,7 +89,7 @@ impl ProjectFile {
                 templates.insert(template.id.clone(), TemplateStatus::Broken);
                 continue;
             }
-            let messages = check_template(template);
+            let messages = check_template(template, &self.broker);
             let status = if messages.is_empty() {
                 TemplateStatus::Usable(template)
             } else {
@@ -181,8 +183,8 @@ fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Op
     })
 }
 
-fn check_template(template: &TemplateSpec) -> Vec<String> {
-    let mut messages = Vec::new();
+fn check_template(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<String> {
+    let mut messages = check_properties(template, broker);
     if template.messages.is_empty() {
         messages.push("at least one message is required".to_string());
     }
@@ -296,6 +298,54 @@ fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
         ids.push(id);
     }
     Ok(ids)
+}
+
+/// Checks the MQTT 5 properties of `template`'s messages and availability against `broker`.
+fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mqtt5 = broker.mqtt_version == MqttVersion::V5;
+    for (i, message) in template.messages.iter().enumerate() {
+        let key = |name: &str| format!("messages[{}].{name}", i + 1);
+        if let Some(expiry) = message.message_expiry {
+            match whole_seconds(&key("message_expiry"), expiry) {
+                Err(e) => problems.push(e),
+                Ok(0) => problems.push(format!("{} must be at least 1s", key("message_expiry"))),
+                Ok(_) => {}
+            }
+        }
+        if message.content_type.as_deref() == Some("") {
+            problems.push(format!("{} must not be empty", key("content_type")));
+        }
+        if !mqtt5 {
+            if message.message_expiry.is_some() {
+                problems.push(needs_mqtt5(&key("message_expiry")));
+            }
+            if message.content_type.is_some() {
+                problems.push(needs_mqtt5(&key("content_type")));
+            }
+            if !message.user_properties.is_empty() {
+                problems.push(needs_mqtt5(&key("user_properties")));
+            }
+        }
+    }
+    let Some(delay) = template.availability.as_ref().and_then(|a| a.will_delay) else {
+        return problems;
+    };
+    if let Err(e) = whole_seconds("availability.will_delay", delay) {
+        problems.push(e);
+    } else if !mqtt5 {
+        problems.push(needs_mqtt5("availability.will_delay"));
+    } else if delay > broker.session_expiry {
+        let show = |d| humantime::format_duration(d).to_string();
+        problems.push(format!(
+            "availability.will_delay {} is longer than the broker's session_expiry {}; \
+             set session_expiry to at least {}",
+            show(delay),
+            show(broker.session_expiry),
+            show(delay)
+        ));
+    }
+    problems
 }
 
 /// Applies device overrides: with `generator` the override replaces the field, otherwise keys merge.
@@ -729,5 +779,154 @@ params = {{ room = \"a\" }}
         assert_eq!(validated.errors[0].location, Location::Broker);
         assert!(validated.project.devices.is_empty());
         assert!(validated.blocked.contains("d"));
+    }
+
+    /// A project with template `t` (one message, availability) and device `d` (`room = "a"`).
+    /// `broker` lines go into `[broker]`, `message` and `availability` are extra inline-table keys.
+    fn properties_project(broker: &str, message: &str, availability: &str) -> Validated {
+        validate(&format!(
+            r#"
+[broker]
+{broker}
+
+[[templates]]
+id = "t"
+availability = {{ topic = "s/{{{{ device_id }}}}", online = "on", offline = "off"{availability} }}
+messages = [{{ topic = "t/{{{{ device_id }}}}", payload = "p"{message} }}]
+fields.v = {{ generator = "constant", value = 1 }}
+
+[[devices]]
+id = "d"
+template = "t"
+params = {{ room = "a" }}
+"#
+        ))
+    }
+
+    #[test]
+    fn mqtt5_properties_are_valid_and_reach_the_instance() {
+        let validated = properties_project(
+            r#"session_expiry = "60s""#,
+            r#", message_expiry = "60s", content_type = "application/json", user_properties = { room = "{{ room }}" }"#,
+            r#", will_delay = "5s""#,
+        );
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(&validated)
+        );
+        let instance = validated.project.instance("d").unwrap();
+        assert_eq!(
+            instance.messages[0].message_expiry,
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            instance.availability.as_ref().unwrap().will_delay,
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            validated.project.broker.session_expiry,
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn message_expiry_must_be_whole_seconds_and_at_least_one() {
+        let half = properties_project("", r#", message_expiry = "1500ms""#, "");
+        assert_eq!(
+            error_strings(&half),
+            ["template `t`: messages[1].message_expiry must be whole seconds, got 1s 500ms"]
+        );
+        assert!(half.blocked.contains("d"));
+        let zero = properties_project("", r#", message_expiry = "0s""#, "");
+        assert_eq!(
+            error_strings(&zero),
+            ["template `t`: messages[1].message_expiry must be at least 1s"]
+        );
+    }
+
+    #[test]
+    fn content_type_must_not_be_empty() {
+        let validated = properties_project("", r#", content_type = """#, "");
+        assert_eq!(
+            error_strings(&validated),
+            ["template `t`: messages[1].content_type must not be empty"]
+        );
+    }
+
+    #[test]
+    fn properties_with_mqtt_3_1_1_are_problems_on_the_template() {
+        let validated = properties_project(
+            r#"mqtt_version = "3.1.1""#,
+            r#", message_expiry = "60s", content_type = "text/plain", user_properties = { a = "b" }"#,
+            r#", will_delay = "5s""#,
+        );
+        assert_eq!(
+            error_strings(&validated),
+            [
+                "template `t`: messages[1].message_expiry needs MQTT 5; the broker settings use MQTT 3.1.1",
+                "template `t`: messages[1].content_type needs MQTT 5; the broker settings use MQTT 3.1.1",
+                "template `t`: messages[1].user_properties needs MQTT 5; the broker settings use MQTT 3.1.1",
+                "template `t`: availability.will_delay needs MQTT 5; the broker settings use MQTT 3.1.1",
+            ]
+        );
+        assert!(validated.blocked.contains("d"));
+    }
+
+    #[test]
+    fn session_expiry_with_mqtt_3_1_1_is_a_broker_problem() {
+        let validated =
+            properties_project("mqtt_version = \"3.1.1\"\nsession_expiry = \"60s\"", "", "");
+        assert_eq!(
+            error_strings(&validated),
+            ["broker: session_expiry needs MQTT 5; the broker settings use MQTT 3.1.1"]
+        );
+        assert!(validated.project.devices.is_empty());
+    }
+
+    #[test]
+    fn will_delay_longer_than_session_expiry_is_a_problem() {
+        let validated = properties_project("", "", r#", will_delay = "30s""#);
+        assert_eq!(
+            error_strings(&validated),
+            [
+                "template `t`: availability.will_delay 30s is longer than the broker's \
+                 session_expiry 0s; set session_expiry to at least 30s"
+            ]
+        );
+    }
+
+    #[test]
+    fn will_delay_must_be_whole_seconds() {
+        let validated = properties_project(
+            r#"session_expiry = "60s""#,
+            "",
+            r#", will_delay = "2500ms""#,
+        );
+        assert_eq!(
+            error_strings(&validated),
+            ["template `t`: availability.will_delay must be whole seconds, got 2s 500ms"]
+        );
+    }
+
+    #[test]
+    fn session_expiry_must_be_whole_seconds() {
+        let validated = properties_project(r#"session_expiry = "1500ms""#, "", "");
+        assert_eq!(
+            error_strings(&validated),
+            ["broker: session_expiry must be whole seconds, got 1s 500ms"]
+        );
+    }
+
+    #[test]
+    fn a_user_property_that_does_not_render_is_reported_like_a_payload() {
+        let validated = properties_project("", r#", user_properties = { room = "{{ rom }}" }"#, "");
+        let errors = error_strings(&validated);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].starts_with("device `d`: messages[1].user_properties.room: undefined value"),
+            "{}",
+            errors[0]
+        );
     }
 }

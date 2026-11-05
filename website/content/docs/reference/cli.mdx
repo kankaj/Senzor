@@ -38,8 +38,9 @@ Loads and validates a project and prints every problem. It resolves the broker s
 does: it reads the environment variable named in `password_env` and the TLS files, relative to the
 folder of the project file. It does not connect to the broker.
 
-- **Valid**: prints `<PROJECT>: OK (<n> devices, <m> instances)` to stdout and exits with 0. A
-  count of 1 takes the singular, for example `examples/headless-ci.toml: OK (1 device, 10 instances)`.
+- **Valid**: prints `<PROJECT>: OK (<n> devices, <m> instances, MQTT <version>)` to stdout and exits
+  with 0. A count of 1 takes the singular, for example
+  `examples/headless-ci.toml: OK (1 device, 10 instances, MQTT 5)`.
 - **Invalid**: prints each problem to stderr as `<PROJECT>: <location>: <message>` and exits with 2.
   See [Validation errors](/docs/reference/validation-errors).
 
@@ -153,6 +154,7 @@ the MQTT client, log only warnings and errors unless `RUST_LOG` says otherwise.
 
 | Level | Message | Meaning |
 | --- | --- | --- |
+| `INFO` | `connecting with MQTT <version>` | Once, when `run` starts: the project's MQTT version. |
 | `INFO` | `Connecting` | The instance started and is connecting to the broker. |
 | `INFO` | `Online` | The broker accepted the connection. |
 | `INFO` | `reconnecting: <error>` with `attempt=<n>` | The connection failed or dropped. The instance tries again after 1 s, 2 s, 4 s, …, at most 30 s apart. |

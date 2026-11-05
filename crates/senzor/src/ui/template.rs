@@ -4,11 +4,11 @@ use std::time::SystemTime;
 use eframe::egui::{self, DragValue, RichText, TextEdit};
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
-use senzor_core::project::{Location, MessageSpec, ProjectFile, TemplateSpec};
+use senzor_core::project::{Location, MessageSpec, MqttVersion, ProjectFile, TemplateSpec};
 
 use super::{
-    Action, ERROR, ParsedEdit, UiState, duration_edit, errors_at, name_edit, replace_if_unchanged,
-    value_edit,
+    Action, ERROR, ParsedEdit, UiState, duration_edit, errors_at, mqtt5_control, name_edit,
+    optional_duration_edit, optional_text, replace_if_unchanged, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -49,6 +49,7 @@ pub fn show_user(
             index,
             file: doc.file(),
         }),
+        uses_mqtt5(doc),
         ui_state,
         actions,
     );
@@ -84,6 +85,7 @@ pub fn show_builtin(
             &mut template,
             &format!("builtin/{id}"),
             None,
+            uses_mqtt5(doc),
             ui_state,
             &mut ignored,
         );
@@ -99,19 +101,30 @@ struct Renamable<'a> {
     file: &'a ProjectFile,
 }
 
+fn uses_mqtt5(doc: &Document) -> bool {
+    doc.file().broker.mqtt_version == MqttVersion::V5
+}
+
 /// Edits `template` in place. With `renamable`, the ID and field names are name boxes that push
-/// [`Rename`]s; without, they are plain labels.
+/// [`Rename`]s; without, they are plain labels. MQTT 5 settings are usable when `mqtt5`.
 fn editor(
     ui: &mut egui::Ui,
     template: &mut TemplateSpec,
     key: &str,
     renamable: Option<Renamable>,
+    mqtt5: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    settings_grid(ui, template, key, renamable, ui_state, actions);
+    settings_grid(ui, template, key, renamable, mqtt5, ui_state, actions);
     ui.add_space(6.0);
-    messages_editor(ui, &mut template.messages, key);
+    messages_editor(
+        ui,
+        &mut template.messages,
+        key,
+        mqtt5,
+        &mut ui_state.buffers,
+    );
     ui.add_space(6.0);
     fields_editor(ui, &mut template.fields, key, renamable, ui_state, actions);
 }
@@ -142,6 +155,7 @@ fn settings_grid(
     template: &mut TemplateSpec,
     key: &str,
     renamable: Option<Renamable>,
+    mqtt5: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
@@ -213,11 +227,29 @@ fn settings_grid(
                     .labelled_by(label.id);
                     ui.end_row();
                 }
+                let label = ui.label("  Will delay");
+                let has_value = availability.will_delay.is_some();
+                mqtt5_control(ui, mqtt5, has_value, |ui| {
+                    optional_duration_edit(
+                        ui,
+                        &mut ui_state.buffers,
+                        &format!("{key}/availability/will_delay"),
+                        &mut availability.will_delay,
+                    )
+                    .labelled_by(label.id)
+                });
+                ui.end_row();
             }
         });
 }
 
-fn messages_editor(ui: &mut egui::Ui, messages: &mut Vec<MessageSpec>, key: &str) {
+fn messages_editor(
+    ui: &mut egui::Ui,
+    messages: &mut Vec<MessageSpec>,
+    key: &str,
+    mqtt5: bool,
+    buffers: &mut Buffers,
+) {
     ui.strong("Messages");
     let mut remove = None;
     for (i, message) in messages.iter_mut().enumerate() {
@@ -244,6 +276,17 @@ fn messages_editor(ui: &mut egui::Ui, messages: &mut Vec<MessageSpec>, key: &str
                     .desired_width(f32::INFINITY),
             )
             .labelled_by(label.id);
+            let has_properties = message.has_properties();
+            egui::CollapsingHeader::new("MQTT 5 properties")
+                .id_salt(format!("{key}/message/{i}/properties"))
+                .default_open(has_properties)
+                .show(ui, |ui| {
+                    mqtt5_control(ui, mqtt5, has_properties, |ui| {
+                        ui.vertical(|ui| {
+                            properties_editor(ui, message, &format!("{key}/message/{i}"), buffers);
+                        });
+                    });
+                });
         });
     }
     if let Some(i) = remove {
@@ -251,6 +294,97 @@ fn messages_editor(ui: &mut egui::Ui, messages: &mut Vec<MessageSpec>, key: &str
     }
     if ui.button("Add message").clicked() {
         messages.push(new_message());
+    }
+}
+
+/// Message expiry, content type and user properties of one message.
+fn properties_editor(
+    ui: &mut egui::Ui,
+    message: &mut MessageSpec,
+    key: &str,
+    buffers: &mut Buffers,
+) {
+    egui::Grid::new(format!("{key}/properties"))
+        .num_columns(2)
+        .show(ui, |ui| {
+            let label = ui.label("Message expiry");
+            optional_duration_edit(
+                ui,
+                buffers,
+                &format!("{key}/message_expiry"),
+                &mut message.message_expiry,
+            )
+            .labelled_by(label.id);
+            ui.end_row();
+
+            let label = ui.label("Content type");
+            optional_text(ui, &mut message.content_type, "none").labelled_by(label.id);
+            ui.end_row();
+        });
+    ui.label("User properties");
+    let names: Vec<String> = message.user_properties.keys().cloned().collect();
+    let mut rename = None;
+    let mut remove = None;
+    // Name boxes whose text was committed or dropped; their buffers start over.
+    let mut settled = Vec::new();
+    for (name, value) in &mut message.user_properties {
+        ui.horizontal(|ui| {
+            // Keyed by the committed name, so the box keeps focus while a new name is typed.
+            let id = format!("{key}/user_property/{name}");
+            let name_key = format!("{id}/name");
+            let buffer = buffers.get(&name_key, name);
+            let response = ui.add(
+                TextEdit::singleline(&mut buffer.text)
+                    .id_salt(&name_key)
+                    .hint_text("name")
+                    .desired_width(90.0),
+            );
+            let typed = buffer.text.trim();
+            let problem = if typed.is_empty() {
+                Some("a name is required".to_string())
+            } else if typed != name && names.iter().any(|n| n == typed) {
+                Some(format!("`{typed}` is used already"))
+            } else {
+                None
+            };
+            ui.label("=");
+            ui.add(
+                TextEdit::singleline(value)
+                    .id_salt(format!("{id}/value"))
+                    .hint_text("value, e.g. {{ room }}")
+                    .desired_width(150.0),
+            );
+            if ui.button("Remove property").clicked() {
+                remove = Some(name.clone());
+                settled.push(name_key.clone());
+            }
+            if response.has_focus() {
+                if let Some(problem) = &problem {
+                    ui.colored_label(ERROR, problem);
+                }
+            } else if buffer.text != *name {
+                // Left the box: apply a valid new name, otherwise go back to the old one.
+                if problem.is_none() && typed != name {
+                    rename = Some((name.clone(), typed.to_string()));
+                }
+                settled.push(name_key);
+            }
+        });
+    }
+    for name_key in settled {
+        buffers.remove(&name_key);
+    }
+    if let Some((from, to)) = rename
+        && let Some(value) = message.user_properties.remove(&from)
+    {
+        message.user_properties.insert(to, value);
+    }
+    if let Some(name) = remove {
+        message.user_properties.remove(&name);
+    }
+    if ui.button("Add user property").clicked() {
+        let name = unique_name("name", message.user_properties.keys());
+        message.user_properties.insert(name, String::new());
     }
 }
 
@@ -414,6 +548,16 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
             Ok(message) => {
                 ui.label(RichText::new(&message.topic).monospace().strong());
                 ui.label(RichText::new(&message.payload).monospace());
+                let properties = &message.properties;
+                if let Some(content_type) = &properties.content_type {
+                    ui.weak(format!("content type: {content_type}"));
+                }
+                if let Some(expiry) = properties.message_expiry {
+                    ui.weak(format!("message expiry: {expiry} s"));
+                }
+                for (name, value) in &properties.user_properties {
+                    ui.weak(format!("user property: {name} = {value}"));
+                }
             }
             Err(e) => {
                 ui.colored_label(ERROR, format!("message {}: {e}", i + 1));
@@ -427,7 +571,7 @@ mod tests {
     use std::time::Duration;
 
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use senzor_core::value::Value;
 
     use super::*;
@@ -462,6 +606,241 @@ template = "air"
                 show_user(ui, 0, &fx.doc, &mut fx.ui, &mut fx.actions);
             }
         })
+    }
+
+    /// `SRC` with `params.room = "office"` on the device and `properties` on the message.
+    fn src_with_properties(broker: &str, properties: &str) -> String {
+        format!(
+            "{broker}\n{}",
+            src_replacing(
+                r#"payload = "{{ co2 }}" }]"#,
+                &format!(r#"payload = "{{{{ co2 }}}}"{properties} }}]"#),
+            )
+            .replace(
+                "template = \"air\"\n",
+                "template = \"air\"\nparams = { room = \"office\" }\n"
+            )
+        )
+    }
+
+    #[test]
+    fn the_preview_shows_rendered_mqtt5_properties() {
+        let h = user_harness_with(&src_with_properties(
+            "",
+            r#", message_expiry = "60s", content_type = "application/json", user_properties = { room = "{{ room }}" }"#,
+        ));
+        assert!(h.query_by_label("user property: room = office").is_some());
+        assert!(h.query_by_label("content type: application/json").is_some());
+        assert!(h.query_by_label("message expiry: 60 s").is_some());
+    }
+
+    #[test]
+    fn adding_and_removing_a_user_property_edits_the_message() {
+        let mut h = user_harness();
+        h.get_by_label("MQTT 5 properties").click();
+        h.run();
+        h.get_by_label("Add user property").click();
+        h.run();
+        let message = &h.state().doc.file().templates[0].messages[0];
+        assert_eq!(
+            message.user_properties.get("name").map(String::as_str),
+            Some("")
+        );
+        assert!(h.state().doc.is_dirty());
+
+        h.get_by_label("Remove property").click();
+        h.run();
+        assert!(
+            h.state().doc.file().templates[0].messages[0]
+                .user_properties
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_user_property_is_renamed_when_its_name_box_is_left() {
+        let mut h = user_harness_with(&src_with_properties(
+            "",
+            r#", user_properties = { zone = "{{ room }}" }"#,
+        ));
+        // The box and its text both carry the value; the box comes first.
+        h.query_all_by_value("zone").next().unwrap().focus();
+        h.run();
+        h.key_press(egui::Key::End);
+        type_per_frame(&mut h, &["d"]);
+        let properties = &h.state().doc.file().templates[0].messages[0].user_properties;
+        assert!(
+            properties.contains_key("zone"),
+            "not renamed while typing: {properties:?}"
+        );
+
+        h.key_press(egui::Key::Tab);
+        h.run();
+        h.run();
+        let properties = &h.state().doc.file().templates[0].messages[0].user_properties;
+        assert_eq!(
+            properties.get("zoned").map(String::as_str),
+            Some("{{ room }}")
+        );
+        assert!(!properties.contains_key("zone"));
+    }
+
+    /// Focuses the name box of user property `name`, replaces its text with `typed`, and leaves it.
+    fn rename_user_property(h: &mut Harness<'static, Fixture>, name: &str, typed: &str) {
+        // The box and its text both carry the value; the box comes first.
+        h.query_all_by_value(name).next().unwrap().focus();
+        h.run();
+        for _ in 0..name.len() {
+            h.key_press(egui::Key::Backspace);
+            h.run();
+        }
+        let keys: Vec<String> = typed.chars().map(String::from).collect();
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        type_per_frame(h, &keys);
+        h.key_press(egui::Key::Tab);
+        h.run();
+        h.run();
+    }
+
+    fn user_properties(h: &Harness<'static, Fixture>) -> Vec<String> {
+        h.state().doc.file().templates[0].messages[0]
+            .user_properties
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn adding_after_a_rename_starts_with_a_fresh_name_box() {
+        let mut h = user_harness();
+        h.get_by_label("MQTT 5 properties").click();
+        h.run();
+        h.get_by_label("Add user property").click();
+        h.run();
+        rename_user_property(&mut h, "name", "room");
+        assert_eq!(user_properties(&h), ["room"]);
+
+        h.get_by_label("Add user property").click();
+        h.run();
+        h.run();
+        assert_eq!(user_properties(&h), ["name", "room"]);
+        // Before the fix, the new property's box showed the stale `room` and an error.
+        assert!(
+            h.query_all_by_value("name").next().is_some(),
+            "the new name box shows `name`"
+        );
+        assert_eq!(
+            h.query_all_by_value("room").count(),
+            2,
+            "only `room`'s own box"
+        );
+    }
+
+    #[test]
+    fn renaming_back_and_forth_settles() {
+        let mut h = user_harness_with(&src_with_properties(
+            "",
+            r#", user_properties = { a = "1" }"#,
+        ));
+        rename_user_property(&mut h, "a", "b");
+        rename_user_property(&mut h, "b", "a");
+        for _ in 0..5 {
+            assert_eq!(user_properties(&h), ["a"], "the editor keeps renaming");
+            h.run();
+        }
+    }
+
+    #[test]
+    fn a_name_used_already_is_dropped_when_the_box_is_left() {
+        let mut h = user_harness_with(&src_with_properties(
+            "",
+            r#", user_properties = { a = "1", b = "2" }"#,
+        ));
+        rename_user_property(&mut h, "a", "b");
+        assert_eq!(user_properties(&h), ["a", "b"]);
+        assert!(
+            h.query_all_by_value("a").next().is_some(),
+            "the box shows `a` again"
+        );
+    }
+
+    #[test]
+    fn user_property_names_are_trimmed() {
+        let mut h = user_harness_with(&src_with_properties(
+            "",
+            r#", user_properties = { a = "1" }"#,
+        ));
+        rename_user_property(&mut h, "a", "room ");
+        assert_eq!(user_properties(&h), ["room"]);
+    }
+
+    #[test]
+    fn typing_a_content_type_and_a_message_expiry_sets_them() {
+        let mut h = user_harness();
+        h.get_by_label("MQTT 5 properties").click();
+        h.run();
+        type_into_label(&mut h, "Content type", "text/plain");
+        type_into_label(&mut h, "Message expiry", "60s");
+        let message = &h.state().doc.file().templates[0].messages[0];
+        assert_eq!(message.content_type.as_deref(), Some("text/plain"));
+        assert_eq!(message.message_expiry, Some(Duration::from_secs(60)));
+        assert!(
+            h.state()
+                .doc
+                .file()
+                .to_toml_string()
+                .contains(r#"content_type = "text/plain""#)
+        );
+    }
+
+    #[test]
+    fn a_will_delay_is_set_under_availability() {
+        let mut h = user_harness_with(&src_replacing(
+            "interval = \"10s\"\n",
+            "interval = \"10s\"\navailability = { topic = \"s/{{ device_id }}\", online = \"on\", offline = \"off\" }\n",
+        ));
+        type_into_label(&mut h, "  Will delay", "5s");
+        let availability = h.state().doc.file().templates[0]
+            .availability
+            .clone()
+            .unwrap();
+        assert_eq!(availability.will_delay, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn on_mqtt_3_1_1_a_set_content_type_shows_the_reason_and_can_be_cleared() {
+        let mut h = user_harness_with(&src_with_properties(
+            "[broker]\nmqtt_version = \"3.1.1\"\n",
+            r#", content_type = "text/plain""#,
+        ));
+        assert!(h.query_by_label(crate::ui::NEEDS_MQTT5).is_some());
+        h.get_by_label("Content type").focus();
+        h.run();
+        for _ in 0.."text/plain".len() {
+            h.key_press(egui::Key::Backspace);
+            h.run();
+        }
+        assert_eq!(
+            h.state().doc.file().templates[0].messages[0].content_type,
+            None
+        );
+    }
+
+    #[test]
+    fn on_mqtt_3_1_1_empty_properties_are_disabled() {
+        let mut h = user_harness_with(&format!("[broker]\nmqtt_version = \"3.1.1\"\n{SRC}"));
+        h.get_by_label("MQTT 5 properties").click();
+        h.run();
+        assert!(
+            h.get_by_label("Content type")
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert!(
+            h.get_by_label("Add user property")
+                .accesskit_node()
+                .is_disabled()
+        );
     }
 
     #[test]

@@ -124,6 +124,15 @@ pub struct Message {
     pub payload: String,
     pub qos: u8,
     pub retain: bool,
+    /// MQTT 5 message expiry in seconds, when the message set one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_expiry: Option<u32>,
+    /// MQTT 5 content type, when the message set one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// MQTT 5 user properties as rendered for this message, when it set any.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub user_properties: BTreeMap<String, String>,
 }
 
 impl From<&LogEntry> for Message {
@@ -136,6 +145,9 @@ impl From<&LogEntry> for Message {
             payload: entry.payload.clone(),
             qos: entry.qos,
             retain: entry.retain,
+            message_expiry: entry.properties.message_expiry,
+            content_type: entry.properties.content_type.clone(),
+            user_properties: entry.properties.user_properties.iter().cloned().collect(),
         }
     }
 }

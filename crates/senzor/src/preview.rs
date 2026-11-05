@@ -97,6 +97,7 @@ fields.co2 = { value = 1200 }
             vec![Ok(RenderedMessage {
                 topic: "b/kitchen/office-0".into(),
                 payload: r#"{"co2": 1200, "ts": 5}"#.into(),
+                properties: Default::default(),
             })]
         );
     }

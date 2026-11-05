@@ -73,6 +73,8 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `` cannot read tls.<key> `<path>`: <reason> `` | A TLS file (`ca_file`, `client_cert` or `client_key`) cannot be read. Relative paths start at the folder of the project file. |
 | `tls.client_cert and tls.client_key must be set together` | Set both, or neither. |
 | `tls.client_cert requires tls.ca_file` | Add `ca_file` when you use a client certificate. |
+| `session_expiry must be whole seconds, got <duration>` | Write `session_expiry` in whole seconds, such as `"60s"`. |
+| `session_expiry needs MQTT 5; the broker settings use MQTT 3.1.1` | Set `session_expiry` to `"0s"` (or remove it), or switch `mqtt_version` to `"5"`. |
 
 ## Templates
 
@@ -86,7 +88,13 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `interval must be greater than 0` | `interval` is `"0s"`. |
 | `` field `<name>` uses a reserved name `` | Rename the field; see [reserved names](/docs/reference/template-variables#reserved-names). |
 | `` field `<name>`: <problem> `` | The field's generator breaks a rule; see [Generator problems](#generator-problems). |
-| `syntax error: <details> (in <template>:<line>)` | A topic or payload is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload` or `availability.topic`, with messages counted from 1. |
+| `syntax error: <details> (in <template>:<line>)` | A topic, payload or user property is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload`, `messages[<n>].user_properties.<name>` or `availability.topic`, with messages counted from 1. |
+| `messages[<n>].message_expiry must be whole seconds, got <duration>` | Write the expiry in whole seconds, such as `"60s"`. |
+| `messages[<n>].message_expiry must be at least 1s` | Remove `message_expiry` for no expiry, or set `"1s"` or more. |
+| `messages[<n>].content_type must not be empty` | Remove `content_type`, or give it a value such as `"application/json"`. |
+| `<key> needs MQTT 5; the broker settings use MQTT 3.1.1` | `<key>` is `messages[<n>].message_expiry`, `messages[<n>].content_type`, `messages[<n>].user_properties` or `availability.will_delay`. Remove it, or switch `mqtt_version` to `"5"`. |
+| `availability.will_delay must be whole seconds, got <duration>` | Write the delay in whole seconds, such as `"30s"`. |
+| `availability.will_delay <delay> is longer than the broker's session_expiry <expiry>; set session_expiry to at least <delay>` | MQTT 5 brokers may send the Last Will when the session ends, before the delay passes. Raise `session_expiry` in `[broker]`. |
 
 A syntax error is reported for the first broken template string only. For example, a payload
 `{{ v ` without the closing braces gives
@@ -128,7 +136,7 @@ It reports the first failure.
 
 | Message | Meaning and fix |
 | --- | --- |
-| `` undefined value: `<name>` is undefined (in <template>:<line>) `` | A template uses a variable that does not exist here: a typo, a param this device does not set, or a variable this template string cannot see. |
+| `` undefined value: `<name>` is undefined (in <template>:<line>) `` | A template uses a variable that does not exist here: a typo, a param this device does not set, or a variable this template string cannot see. For a user property the message starts with `messages[<n>].user_properties.<name>: `. |
 | `availability topic: topic is empty` | The availability topic renders to nothing. |
 | `` availability topic: topic `<topic>` contains a wildcard (+ or #) `` | The rendered availability topic contains `+` or `#`, maybe from a param. |
 | `message <n> topic: topic is empty` | Message `<n>` (counted from 1) has a topic that renders to nothing. |

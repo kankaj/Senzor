@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 use super::error::ProjectError;
-use super::file::{AvailabilitySpec, MessageSpec};
+use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
 use crate::generator::GeneratorSpec;
 use crate::value::Value;
 
@@ -73,6 +73,9 @@ pub struct BrokerConfig {
     pub keep_alive: Duration,
     pub credentials: Option<Credentials>,
     pub tls: Option<TlsConfig>,
+    pub mqtt_version: MqttVersion,
+    /// MQTT 5 session expiry; zero means a clean start on every connect.
+    pub session_expiry: Duration,
 }
 
 #[derive(Clone, PartialEq)]

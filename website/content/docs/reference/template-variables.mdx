@@ -3,7 +3,7 @@ title: Template variables
 description: The variables each template string can use, the reserved names, and how values render.
 ---
 
-Topics, payloads, the availability topic and `instance_id` are templates in Jinja syntax, rendered
+Topics, payloads, the values of `user_properties`, the availability topic and `instance_id` are templates in Jinja syntax, rendered
 with [MiniJinja](https://docs.rs/minijinja/). Write a variable as `{{ name }}` and apply filters with
 `|`, as in `{{ temperature | round(1) }}`.
 
@@ -11,7 +11,7 @@ with [MiniJinja](https://docs.rs/minijinja/). Write a variable as `{{ name }}` a
 
 Each kind of template string sees a different set of variables.
 
-| Variable | Value | `instance_id` | Availability `topic` | Message `topic` and `payload` |
+| Variable | Value | `instance_id` | Availability `topic` | Message `topic`, `payload` and `user_properties` |
 | --- | --- | --- | --- | --- |
 | `id` | The device's `id`, e.g. `office` | yes | no | no |
 | `index` | The instance's position in its device: 0, 1, 2, … | yes | yes | yes |

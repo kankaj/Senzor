@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, DragValue};
-use senzor_core::project::{Location, TlsSpec};
+use senzor_core::project::{Location, MqttVersion, TlsSpec};
 
-use super::{Action, UiState, duration_edit, errors_at, optional_text, replace_if_unchanged};
+use super::{
+    Action, UiState, duration_edit, errors_at, mqtt5_control, optional_text, replace_if_unchanged,
+};
 use crate::document::Document;
 use crate::edits::{PasswordSource, set_password_source};
 
@@ -36,6 +38,22 @@ pub fn show(
                         .labelled_by(label.id);
                     ui.end_row();
 
+                    let label = ui.label("MQTT version");
+                    egui::ComboBox::from_id_salt("broker-mqtt-version")
+                        .selected_text(broker.mqtt_version.label())
+                        .show_ui(ui, |ui| {
+                            for version in MqttVersion::ALL {
+                                ui.selectable_value(
+                                    &mut broker.mqtt_version,
+                                    version,
+                                    version.label(),
+                                );
+                            }
+                        })
+                        .response
+                        .labelled_by(label.id);
+                    ui.end_row();
+
                     ui.label("Client ID prefix");
                     ui.text_edit_singleline(&mut broker.client_id_prefix);
                     ui.end_row();
@@ -48,6 +66,20 @@ pub fn show(
                         &mut broker.keep_alive,
                     )
                     .labelled_by(label.id);
+                    ui.end_row();
+
+                    let label = ui.label("Session expiry");
+                    let mqtt5 = broker.mqtt_version == MqttVersion::V5;
+                    let has_value = !broker.session_expiry.is_zero();
+                    mqtt5_control(ui, mqtt5, has_value, |ui| {
+                        duration_edit(
+                            ui,
+                            &mut ui_state.buffers,
+                            "broker/session_expiry",
+                            &mut broker.session_expiry,
+                        )
+                        .labelled_by(label.id)
+                    });
                     ui.end_row();
 
                     ui.label("Username");
@@ -111,7 +143,7 @@ mod tests {
     use std::time::Duration;
 
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     use super::*;
     use crate::ui::test_support::{Fixture, type_into_label, type_per_frame};
@@ -141,6 +173,56 @@ mod tests {
             Duration::from_secs(30)
         );
         assert!(h.query_by_label("use e.g. 10s, 500ms, 1h").is_some());
+    }
+
+    #[test]
+    fn choosing_mqtt_3_1_1_edits_the_broker_and_marks_the_project_unsaved() {
+        let mut h = harness();
+        assert_eq!(h.state().doc.file().broker.mqtt_version, MqttVersion::V5);
+        h.get_by_label("MQTT version").click();
+        h.run();
+        h.get_by_label("3.1.1").click();
+        h.run();
+        assert_eq!(h.state().doc.file().broker.mqtt_version, MqttVersion::V311);
+        assert!(h.state().doc.is_dirty());
+        assert!(
+            h.state()
+                .doc
+                .file()
+                .to_toml_string()
+                .contains(r#"mqtt_version = "3.1.1""#)
+        );
+    }
+
+    #[test]
+    fn typing_a_session_expiry_edits_the_broker() {
+        let mut h = harness();
+        h.get_by_label("Session expiry").focus();
+        h.run();
+        h.key_press(egui::Key::Backspace);
+        h.key_press(egui::Key::Backspace);
+        h.run();
+        type_per_frame(&mut h, &["6", "0", "s"]);
+        assert_eq!(
+            h.state().doc.file().broker.session_expiry,
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn session_expiry_is_disabled_with_the_reason_on_mqtt_3_1_1() {
+        let mut fixture = Fixture::new("[broker]\nmqtt_version = \"3.1.1\"\n");
+        fixture.ui.broker_open = true;
+        let h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        assert!(
+            h.get_by_label("Session expiry")
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert!(h.query_by_label(crate::ui::NEEDS_MQTT5).is_some());
     }
 
     #[test]

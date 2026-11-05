@@ -141,12 +141,13 @@ fn wgpu_renderer() -> Result<WgpuTestRenderer, String> {
 /// else a test broker started there, else a test broker on a free port (the shots then show
 /// that port).
 fn broker_port() -> u16 {
-    if senzor_testkit::broker_answers(SHOWCASE_PORT) {
+    // The showcase uses MQTT 5, so a 3.1.1-only broker on the port is no use.
+    if senzor_testkit::broker_accepts(SHOWCASE_PORT, senzor_testkit::Protocol::V5) {
         println!("using the MQTT broker already running on localhost:{SHOWCASE_PORT}");
         return SHOWCASE_PORT;
     }
     match senzor_testkit::start_broker_on(SHOWCASE_PORT) {
-        Ok(()) => {
+        Ok(_) => {
             println!("started a test broker on localhost:{SHOWCASE_PORT}");
             SHOWCASE_PORT
         }

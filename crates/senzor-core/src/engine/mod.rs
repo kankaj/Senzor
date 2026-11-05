@@ -284,6 +284,13 @@ impl Supervisor {
         let Some(config) = self.project.instance(id).cloned() else {
             return;
         };
+        // Before the task starts, so its own status updates always come later. In one update with
+        // the new run, so nobody sees the run counted while still `Stopped`.
+        self.shared.update_instance(id, |instance| {
+            instance.needs_restart = false;
+            instance.runs += 1;
+            instance.status = InstanceStatus::Connecting;
+        });
         let broker = self.project.broker.clone();
         let (commands, rx) = mpsc::unbounded_channel();
         let handle = self.tasks.spawn(run_instance(
@@ -301,10 +308,6 @@ impl Supervisor {
                 broker,
             },
         );
-        self.shared.update_instance(id, |instance| {
-            instance.needs_restart = false;
-            instance.runs += 1;
-        });
     }
 
     fn finished(&mut self, result: Result<(Id, ()), JoinError>) {
@@ -600,6 +603,62 @@ template = "air"
         engine.send(Command::Stop(Target::Instance("a-0".into())));
         wait_for_status(&engine, "a-0", InstanceStatus::Stopped).await;
         assert!(!engine.snapshot().instances["a-0"].needs_restart);
+        engine.shutdown().await;
+    }
+
+    /// A started instance is never seen with its new run counted but its status still `Stopped`:
+    /// a reader of that state (MCP's `start`) would wait for a run that never comes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_new_run_is_never_observed_with_a_stopped_status() {
+        let engine = spawn(project(senzor_testkit::free_port(), TWO_DEVICES));
+        for round in 0..20 {
+            engine.send(Command::Start(Target::All));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let state = engine.snapshot();
+                for (id, instance) in &state.instances {
+                    assert!(
+                        !(instance.runs > round && instance.status == InstanceStatus::Stopped),
+                        "round {round}: {id} counts run {} but is Stopped",
+                        instance.runs
+                    );
+                }
+                if state.instances.values().all(|i| i.runs > round) || Instant::now() > deadline {
+                    break;
+                }
+            }
+            engine.send(Command::Stop(Target::All));
+            wait_until(&engine, "all stopped", |s| {
+                all_in(s, &InstanceStatus::Stopped)
+            })
+            .await;
+        }
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn changing_the_mqtt_version_or_session_expiry_flags_every_running_instance() {
+        let port = start_broker();
+        let original = project(port, TWO_DEVICES);
+        let engine = spawn(original.clone());
+        start_online(&engine, "b").await;
+
+        for change in [
+            |broker: &mut BrokerConfig| broker.mqtt_version = crate::project::MqttVersion::V311,
+            |broker: &mut BrokerConfig| broker.session_expiry = Duration::from_secs(60),
+        ] {
+            let mut changed = original.clone();
+            change(&mut changed.broker);
+            engine.send(Command::ReplaceProject(changed));
+            wait_until(&engine, "b flagged", |s| s.instances["b"].needs_restart).await;
+            assert!(
+                !engine.snapshot().instances["a-0"].needs_restart,
+                "a-0 is not running"
+            );
+
+            engine.send(Command::ReplaceProject(original.clone()));
+            wait_until(&engine, "b unflagged", |s| !s.instances["b"].needs_restart).await;
+        }
         engine.shutdown().await;
     }
 

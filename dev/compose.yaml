@@ -1,0 +1,17 @@
+# Local MQTT brokers for development and for the tests marked #[ignore = "needs the Docker brokers…"].
+#   docker compose -f dev/compose.yaml up -d
+#   cargo test --workspace -- --ignored
+# Both listen on 127.0.0.1 only and accept anonymous clients.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:18831:1883"
+    volumes:
+      - ./mosquitto/mosquitto-2.conf:/mosquitto/config/mosquitto.conf:ro
+  mosquitto-1-5:
+    image: eclipse-mosquitto:1.5
+    ports:
+      - "127.0.0.1:18832:1883"
+    volumes:
+      - ./mosquitto/mosquitto-1.5.conf:/mosquitto/config/mosquitto.conf:ro

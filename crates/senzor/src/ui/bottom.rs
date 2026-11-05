@@ -114,6 +114,7 @@ mod tests {
                 payload: "1".to_string(),
                 qos: 0,
                 retain: false,
+                properties: Default::default(),
             })
             .collect();
         EngineState {

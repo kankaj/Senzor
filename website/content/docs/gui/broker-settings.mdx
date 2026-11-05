@@ -14,10 +14,25 @@ The **Broker** window edits the project's `[broker]` section. Changes go into th
 | **Host**             | `host`                       | `localhost` |
 | **Port**             | `port`                       | `1883`      |
 | **Client ID prefix** | `client_id_prefix`           | `senzor-`   |
+| **MQTT version**     | `mqtt_version`               | `5`         |
 | **Keep alive**       | `keep_alive`                 | `30s`       |
+| **Session expiry**   | `session_expiry`             | `0s`        |
 | **Username**         | `username`                   | none        |
 | **Password**         | `password` or `password_env` | none        |
 | **TLS**              | `[broker.tls]`               | off         |
+
+## MQTT version
+
+**MQTT version** chooses **5** or **3.1.1** for every instance of the project. Use **3.1.1** for a broker that does not support MQTT 5. Such a broker refuses MQTT 5 clients:
+
+- An MQTT 5 broker that refuses the version ends each instance **Failed** with `the broker does not support MQTT 5; …`.
+- A broker that speaks only MQTT 3.1.1, such as Mosquitto before 1.6, closes the connection. Senzor then checks whether the broker answers MQTT 3.1.1, and if it does, ends the instance **Failed** with the same message. Over TLS it cannot check: the instance keeps reconnecting, and until it has connected once its error ends with `the broker closed the connection before accepting it; if it supports only MQTT 3.1.1, …`.
+
+With **3.1.1**, the MQTT 5 settings (**Session expiry** here, and the message properties and **Will delay** in the [template editor](/docs/gui/editing-templates)) are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1**. A setting that still has a value stays editable, so you can clear it; until you do, the Problems tab lists it.
+
+## Session expiry
+
+**Session expiry** is how long the broker keeps an instance's session after its connection ends. At `0s`, the default, every connect starts a clean session. Above zero, a reconnect continues the session; that is what lets an instance that reconnects within its template's **Will delay** cancel its Last Will. See [Availability and Last Will](/docs/concepts/availability#will-delay). It takes whole seconds, like `1m`.
 
 ## Client ID prefix
 

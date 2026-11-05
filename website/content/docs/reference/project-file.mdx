@@ -30,8 +30,8 @@ An empty file is a valid project with no devices. For how the pieces fit togethe
 
 ## Broker
 
-The `[broker]` table sets the MQTT broker every instance connects to. Each instance opens its own
-connection, with a clean session.
+The `[broker]` table sets the MQTT broker every instance connects to, and the MQTT version they use.
+Each instance opens its own connection.
 
 | Key | Type | Default | Rules |
 | --- | --- | --- | --- |
@@ -39,6 +39,8 @@ connection, with a clean session.
 | `port` | integer | `1883` | 1 to 65535. |
 | `client_id_prefix` | string | `"senzor-"` | The MQTT client ID of an instance is this prefix followed by the instance ID, e.g. `senzor-office-0`. |
 | `keep_alive` | duration | `"30s"` | MQTT keep-alive. At least `"1s"`. |
+| `mqtt_version` | string | `"5"` | `"5"` or `"3.1.1"`. Every instance connects with this MQTT version. Saving always writes it. |
+| `session_expiry` | duration | `"0s"` | MQTT 5 only. Whole seconds. How long the broker keeps an instance's session after the connection ends. `"0s"` starts a clean session on every connect; above zero, a reconnect continues the session, which lets a reconnect within [`will_delay`](#availability) cancel the Last Will. |
 | `username` | string | none | Can be used without a password; Senzor then sends only the username. |
 | `password` | string | none | Requires `username`. Cannot be combined with `password_env`. |
 | `password_env` | string | none | The name of an environment variable that holds the password. Requires `username`. The variable must be set when the project is loaded. |
@@ -56,6 +58,13 @@ tls = { ca_file = "certs/ca.pem" }
 
 Prefer `password_env` to `password`: the password then stays out of the project file. In the GUI,
 see [Broker settings](/docs/gui/broker-settings).
+
+A broker that does not support MQTT 5 refuses the connection, and the instance ends **Failed** with
+`the broker does not support MQTT 5; …`. A broker that speaks only MQTT 3.1.1, such as Mosquitto
+before 1.6, closes the connection instead; Senzor then checks whether it answers MQTT 3.1.1. Over
+TLS it cannot check, so the instance keeps reconnecting and its error ends with
+`the broker closed the connection before accepting it; if it supports only MQTT 3.1.1, …`. Set
+`mqtt_version = "3.1.1"` for such brokers.
 
 ### TLS
 
@@ -120,9 +129,22 @@ Each entry of `messages` is one MQTT message published on every tick, with the t
 | --- | --- | --- | --- |
 | `topic` | template string | required | Must render to a non-empty topic without the wildcards `+` and `#`. |
 | `payload` | template string | required | Any text. |
+| `message_expiry` | duration | none | MQTT 5 only. Whole seconds, at least `"1s"`. How long the broker may keep the message for subscribers that have not received it yet, including a retained message. |
+| `content_type` | string | none | MQTT 5 only. Sent as written, for example `"application/json"`. Must not be empty. |
+| `user_properties` | table of strings | none | MQTT 5 only. Each value is a template string with the same variables as the payload; keys are sent as written, sorted by key. |
 
-Both are rendered on every tick and can use the field values. A message whose topic and payload
-together are larger than 1 MiB (1,048,576 bytes) is not published and counts as an error.
+`topic`, `payload` and the `user_properties` values are rendered on every tick and can use the field
+values. A message whose topic and payload together are larger than 1 MiB (1,048,576 bytes) is not
+published and counts as an error.
+
+```toml
+messages = [
+    { topic = "office/{{ device_id }}/state", payload = '{"co2": {{ co2 | round | int }}}', message_expiry = "5m", content_type = "application/json", user_properties = { room = "{{ room }}" } },
+]
+```
+
+With `mqtt_version = "3.1.1"`, a template that sets `message_expiry`, `content_type` or
+`user_properties` has a problem, and its devices cannot start.
 
 ### Availability
 
@@ -136,6 +158,7 @@ status messages and sets no Last Will. See [Availability and Last Will](/docs/co
 | `topic` | template string | required | Can use params, `device_id`, `index` and `template_id`, but not field values or time. Must render to a non-empty topic without `+` or `#`. |
 | `online` | string | required | Published when the instance connects. Plain text, not a template. |
 | `offline` | string | required | The Last Will, and what a graceful stop publishes. Plain text, not a template. |
+| `will_delay` | duration | none | MQTT 5 only. Whole seconds. The broker waits this long before it publishes the Last Will, and does not publish it if the instance reconnects in time. Must not be longer than the broker's `session_expiry`. |
 
 ### Fields
 

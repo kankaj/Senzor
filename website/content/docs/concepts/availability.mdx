@@ -19,12 +19,29 @@ When an instance connects, it hands the broker its Last Will: the `offline` payl
 
 The broker publishes the Last Will on the instance's behalf when the connection ends without a clean disconnect. That happens when you **Kill** an instance, and also when the `senzor` or `senzor-cli` process dies or the network fails: the broker publishes the Will once it notices that the connection is gone.
 
+## Will delay
+
+With MQTT 5, a template can ask the broker to wait before it publishes the Last Will:
+
+```toml
+[broker]
+session_expiry = "1m"
+
+[[templates]]
+id = "air"
+availability = { topic = "b/{{ device_id }}/status", online = "online", offline = "offline", will_delay = "30s" }
+```
+
+After a Kill, the broker publishes `offline` only after `will_delay`. If the instance reconnects before that, for example because you start it again, the broker publishes no Last Will at all: the device had a short dropout, not an outage. Real devices use this to avoid flapping offline on every Wi-Fi hiccup.
+
+`will_delay` needs a broker `session_expiry` at least as long. MQTT 5 has the broker publish the Last Will when the session ends, even if the delay has not passed, and with the default `session_expiry` of `0s` the session ends at disconnect. Some brokers, such as Mosquitto 2, wait for the delay anyway, but Senzor reports a problem on the template so the delay behaves the same on every broker. Brokers count the delay in whole seconds, so the Last Will can come up to a second early.
+
 ## Stop and Kill
 
 | | **Stop** | **Kill** |
 | --- | --- | --- |
 | The instance | Publishes `offline` itself, then disconnects cleanly | Drops the connection without a word |
-| The broker | Discards the Last Will | Publishes the Last Will, `offline` |
+| The broker | Discards the Last Will | Publishes the Last Will, `offline` (after `will_delay`, if set) |
 | A subscriber to the status topic sees | `offline`, once | `offline`, once |
 | The instance's status afterwards | **Stopped** | **Stopped** |
 
@@ -43,6 +60,8 @@ After reconnecting, the instance publishes `online` again and carries on where i
 ## Refused connections
 
 If the broker answers but refuses the connection, for example because the username or password is wrong, the instance does not retry. It shows **Failed** with the broker's reason, such as `broker refused the connection: BadUserNamePassword`. Other instances keep running. Fix the cause, then start the instance again.
+
+A broker that does not support MQTT 5 is a special case; see [MQTT version](/docs/gui/broker-settings#mqtt-version).
 
 ## Without availability
 

@@ -5,6 +5,7 @@ use minijinja::value::ValueKind;
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 
 use crate::project::file::{AvailabilitySpec, MessageSpec};
+use crate::project::mqtt_seconds;
 use crate::value::Value;
 
 /// Variable names that params and fields must not use, because the context builders below set them.
@@ -32,12 +33,55 @@ const AVAILABILITY_TOPIC: &str = "availability.topic";
 pub struct RenderedMessage {
     pub topic: String,
     pub payload: String,
+    pub properties: MessageProperties,
+}
+
+/// The MQTT 5 properties a message is published with. Empty for messages that set none, and
+/// always empty on MQTT 3.1.1 (validation rejects properties there).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageProperties {
+    /// Message expiry interval in seconds.
+    pub message_expiry: Option<u32>,
+    pub content_type: Option<String>,
+    /// Rendered user properties, sorted by key.
+    pub user_properties: Vec<(String, String)>,
+}
+
+impl MessageProperties {
+    pub fn is_empty(&self) -> bool {
+        self.message_expiry.is_none()
+            && self.content_type.is_none()
+            && self.user_properties.is_empty()
+    }
+
+    /// Bytes these properties add to a PUBLISH packet, without the length of the property list
+    /// itself: an identifier byte per property, plus two length bytes per string.
+    pub fn encoded_len(&self) -> usize {
+        let expiry = self.message_expiry.map_or(0, |_| 1 + 4);
+        let content_type = self.content_type.as_ref().map_or(0, |c| 1 + 2 + c.len());
+        let user: usize = self
+            .user_properties
+            .iter()
+            .map(|(name, value)| 1 + 2 + name.len() + 2 + value.len())
+            .sum();
+        expiry + content_type + user
+    }
+}
+
+/// One message's template names in the environment, and the properties that are not templates.
+struct CompiledMessage {
+    topic: String,
+    payload: String,
+    message_expiry: Option<u32>,
+    content_type: Option<String>,
+    /// Each user property's name and the name of its value's template.
+    user_properties: Vec<(String, String)>,
 }
 
 /// The compiled topic/payload templates of one template.
 pub struct InstanceTemplates {
     env: Environment<'static>,
-    message_count: usize,
+    messages: Vec<CompiledMessage>,
     has_availability: bool,
 }
 
@@ -65,6 +109,10 @@ fn payload_name(index: usize) -> String {
     format!("messages[{}].payload", index + 1)
 }
 
+fn user_property_name(index: usize, key: &str) -> String {
+    format!("messages[{}].user_properties.{key}", index + 1)
+}
+
 impl InstanceTemplates {
     /// Compiles all templates; the error names the first broken one.
     pub fn compile(
@@ -72,11 +120,28 @@ impl InstanceTemplates {
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, String> {
         let mut env = strict_environment();
+        let mut compiled = Vec::with_capacity(messages.len());
         for (i, message) in messages.iter().enumerate() {
-            env.add_template_owned(topic_name(i), message.topic.clone())
+            let topic = topic_name(i);
+            env.add_template_owned(topic.clone(), message.topic.clone())
                 .map_err(|e| e.to_string())?;
-            env.add_template_owned(payload_name(i), message.payload.clone())
+            let payload = payload_name(i);
+            env.add_template_owned(payload.clone(), message.payload.clone())
                 .map_err(|e| e.to_string())?;
+            let mut user_properties = Vec::with_capacity(message.user_properties.len());
+            for (key, value) in &message.user_properties {
+                let name = user_property_name(i, key);
+                env.add_template_owned(name.clone(), value.clone())
+                    .map_err(|e| e.to_string())?;
+                user_properties.push((key.clone(), name));
+            }
+            compiled.push(CompiledMessage {
+                topic,
+                payload,
+                message_expiry: message.message_expiry.map(mqtt_seconds),
+                content_type: message.content_type.clone(),
+                user_properties,
+            });
         }
         if let Some(availability) = availability {
             env.add_template_owned(AVAILABILITY_TOPIC, availability.topic.clone())
@@ -84,7 +149,7 @@ impl InstanceTemplates {
         }
         Ok(Self {
             env,
-            message_count: messages.len(),
+            messages: compiled,
             has_availability: availability.is_some(),
         })
     }
@@ -101,12 +166,31 @@ impl InstanceTemplates {
 
     /// Renders every message. A failure affects only that message.
     pub fn render_messages(&self, ctx: &Context) -> Vec<Result<RenderedMessage, String>> {
-        (0..self.message_count)
-            .map(|i| {
-                let topic = render_named(&self.env, &topic_name(i), ctx)?;
+        self.messages
+            .iter()
+            .enumerate()
+            .map(|(i, message)| {
+                let topic = render_named(&self.env, &message.topic, ctx)?;
                 check_topic(&topic).map_err(|e| format!("message {} topic: {e}", i + 1))?;
-                let payload = render_named(&self.env, &payload_name(i), ctx)?;
-                Ok(RenderedMessage { topic, payload })
+                let payload = render_named(&self.env, &message.payload, ctx)?;
+                let user_properties = message
+                    .user_properties
+                    .iter()
+                    .map(|(key, name)| {
+                        let value = render_named(&self.env, name, ctx)
+                            .map_err(|e| format!("{name}: {e}"))?;
+                        Ok((key.clone(), value))
+                    })
+                    .collect::<Result<_, String>>()?;
+                Ok(RenderedMessage {
+                    topic,
+                    payload,
+                    properties: MessageProperties {
+                        message_expiry: message.message_expiry,
+                        content_type: message.content_type.clone(),
+                        user_properties,
+                    },
+                })
             })
             .collect()
     }
@@ -214,10 +298,7 @@ mod tests {
     use std::time::Duration;
 
     fn message(topic: &str, payload: &str) -> MessageSpec {
-        MessageSpec {
-            topic: topic.into(),
-            payload: payload.into(),
-        }
+        MessageSpec::new(topic, payload)
     }
 
     fn params() -> BTreeMap<String, Value> {
@@ -263,6 +344,7 @@ mod tests {
             vec![Ok(RenderedMessage {
                 topic: "b/office/office-3/state".into(),
                 payload: r#"{"co2": 1185, "temp": 22.7, "ts": 1700000000123, "seq": 7}"#.into(),
+                properties: MessageProperties::default(),
             })]
         );
     }
@@ -328,7 +410,8 @@ mod tests {
             rendered[1],
             Ok(RenderedMessage {
                 topic: "b".into(),
-                payload: "ok".into()
+                payload: "ok".into(),
+                properties: MessageProperties::default(),
             })
         );
     }
@@ -339,6 +422,7 @@ mod tests {
             topic: "b/{{ room }}/{{ device_id }}/status".into(),
             online: "online".into(),
             offline: "offline".into(),
+            will_delay: None,
         };
         let templates =
             InstanceTemplates::compile(&[message("t", "p")], Some(&availability)).unwrap();
@@ -355,6 +439,7 @@ mod tests {
             topic: "b/{{ co2 }}".into(),
             online: "online".into(),
             offline: "offline".into(),
+            will_delay: None,
         };
         let templates =
             InstanceTemplates::compile(&[message("t", "p")], Some(&availability)).unwrap();
@@ -368,6 +453,80 @@ mod tests {
         assert!(check_topic("a/#").is_err());
         assert!(check_topic("").is_err());
         assert!(check_topic("a/b").is_ok());
+    }
+
+    #[test]
+    fn properties_are_rendered_with_the_message_context() {
+        let mut spec = message("t", "p");
+        spec.message_expiry = Some(Duration::from_secs(60));
+        spec.content_type = Some("application/json".into());
+        spec.user_properties = BTreeMap::from([
+            ("seq".to_string(), "{{ seq }}".to_string()),
+            ("room".to_string(), "{{ room }}-{{ device_id }}".to_string()),
+        ]);
+        let templates = InstanceTemplates::compile(&[spec], None).unwrap();
+        let ctx = tick_context(
+            &base_context("office-0", 0, "t", &params()),
+            &values(),
+            now(),
+            2,
+        );
+        let rendered = templates.render_messages(&ctx).remove(0).unwrap();
+        assert_eq!(
+            rendered.properties,
+            MessageProperties {
+                message_expiry: Some(60),
+                content_type: Some("application/json".into()),
+                user_properties: vec![
+                    ("room".into(), "office-office-0".into()),
+                    ("seq".into(), "2".into()),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn encoded_len_counts_identifiers_and_string_lengths() {
+        let properties = MessageProperties {
+            message_expiry: Some(60),
+            content_type: Some("text".into()),
+            user_properties: vec![("ab".into(), "cde".into())],
+        };
+        assert_eq!(properties.encoded_len(), 5 + (3 + 4) + (5 + 2 + 3));
+        assert_eq!(MessageProperties::default().encoded_len(), 0);
+    }
+
+    #[test]
+    fn a_message_without_properties_renders_none() {
+        let templates = InstanceTemplates::compile(&[message("t", "p")], None).unwrap();
+        let rendered = templates
+            .render_messages(&tick_ctx(&BTreeMap::new()))
+            .remove(0);
+        assert!(rendered.unwrap().properties.is_empty());
+    }
+
+    #[test]
+    fn a_user_property_that_does_not_render_names_the_property() {
+        let mut spec = message("t", "p");
+        spec.user_properties = BTreeMap::from([("room".to_string(), "{{ rom }}".to_string())]);
+        let templates = InstanceTemplates::compile(&[spec], None).unwrap();
+        let err = templates
+            .render_messages(&tick_ctx(&BTreeMap::new()))
+            .remove(0)
+            .unwrap_err();
+        assert!(
+            err.starts_with("messages[1].user_properties.room: "),
+            "{err}"
+        );
+        assert!(err.contains("rom"), "{err}");
+    }
+
+    #[test]
+    fn a_user_property_syntax_error_fails_compile_and_names_it() {
+        let mut spec = message("t", "p");
+        spec.user_properties = BTreeMap::from([("room".to_string(), "{{ x ".to_string())]);
+        let err = InstanceTemplates::compile(&[spec], None).err().unwrap();
+        assert!(err.contains("messages[1].user_properties.room"), "{err}");
     }
 
     fn id_context() -> Context {

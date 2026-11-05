@@ -264,6 +264,30 @@ pub fn duration_edit(
     )
 }
 
+/// An optional duration: empty means none, otherwise typed like `10s`, `500ms`, `1h`. Invalid
+/// text stays in the box with a hint and leaves `value` unchanged.
+pub fn optional_duration_edit(
+    ui: &mut egui::Ui,
+    buffers: &mut Buffers,
+    key: &str,
+    value: &mut Option<Duration>,
+) -> egui::Response {
+    ParsedEdit::new(key, 90.0).hint("none").show(
+        ui,
+        buffers,
+        value,
+        |value| value.map_or_else(String::new, |d| humantime::format_duration(d).to_string()),
+        |text| {
+            if text.trim().is_empty() {
+                return Ok(None);
+            }
+            humantime::parse_duration(text)
+                .map(Some)
+                .map_err(|_| "use e.g. 10s, 1m, 1h".to_string())
+        },
+    )
+}
+
 /// A param or `constant` value: a type selector and a box read as that type, so typing never
 /// changes the type. Invalid text stays in the box with a hint and leaves `value` unchanged.
 /// Another type can only be chosen when the box's text reads as it; choosing it stores that
@@ -347,6 +371,27 @@ pub fn name_edit(
             (response, None)
         }
     }
+}
+
+pub use senzor_core::project::NEEDS_MQTT5;
+
+/// Shows an MQTT 5-only control. On MQTT 3.1.1 it stays usable only while it holds a value, so the
+/// user can clear what validation reports, and the reason shows next to it.
+pub fn mqtt5_control<R>(
+    ui: &mut egui::Ui,
+    mqtt5: bool,
+    has_value: bool,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.horizontal(|ui| {
+        let inner = ui.add_enabled_ui(mqtt5 || has_value, add);
+        if !mqtt5 {
+            inner.response.on_disabled_hover_text(NEEDS_MQTT5);
+            ui.weak(NEEDS_MQTT5);
+        }
+        inner.inner
+    })
+    .inner
 }
 
 /// An optional text value: an empty box means `None`.
