@@ -19,6 +19,8 @@ senzor-cli validate examples/quick-start.toml
 examples/quick-start.toml: OK (2 devices, 3 instances, MQTT 5)
 ```
 
+`MQTT 5` is the MQTT version every instance connects with. To run against a broker that supports only MQTT 3.1.1, set `mqtt_version = "3.1.1"` under `[broker]` in the project file.
+
 `validate` reads the file and runs the same checks as the GUI. It also resolves the broker settings:
 it reads the environment variable named in `password_env` and the TLS files. Run it with the same
 environment you will use for `run`, or it reports a missing variable. It does not connect to the
@@ -37,7 +39,7 @@ A TOML syntax error, or a key Senzor does not know, is reported with its positio
 checks are skipped until you fix it:
 
 ```text
-typo.toml: line 3, column 1: unknown field `prot`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`
+typo.toml: line 3, column 1: unknown field `prot`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`, `mqtt_version`, `session_expiry`
 ```
 
 [Validation errors](/docs/reference/validation-errors) explains each message and how to fix it.
@@ -127,7 +129,7 @@ This is a short run of one device, `kitchen`, while the broker is not running (t
 2026-10-15T15:53:16.729975Z  INFO senzor_core::engine::state: Stopped instance=kitchen
 ```
 
-Add `-v` to log every published message at `debug` level, with its instance, topic and payload:
+Add `-v` to log every published message at `debug` level, with its instance, topic, payload and any MQTT 5 properties:
 
 ```bash
 senzor-cli run examples/quick-start.toml -v

@@ -4,3 +4,13 @@ description: How to get Senzor 1.0.0.
 ---
 
 Installation instructions will be published together with the 1.0.0 release builds.
+
+Until then, build Senzor from source. You need [Rust](https://www.rust-lang.org/tools/install) 1.85
+or newer. In a clone of the [Senzor repository](https://github.com/kankaj/Senzor), run:
+
+```bash
+cargo install --path crates/senzor       # the GUI, `senzor`
+cargo install --path crates/senzor-cli   # the headless runner, `senzor-cli`
+```
+
+Cargo puts both programs into `~/.cargo/bin`, which the Rust installer adds to your `PATH`.

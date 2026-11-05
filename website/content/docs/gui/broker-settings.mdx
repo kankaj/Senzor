@@ -7,14 +7,14 @@ All instances of a project connect to one broker. To change it, click the **Brok
 
 ![The Broker window](/screenshots/broker.png)
 
-The **Broker** window edits the project's `[broker]` section. Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. Problems with the broker settings appear in red at the top of the window, and while there are any, no device can start.
+The **Broker** window edits the project's `[broker]` section. Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. While the broker settings have problems, they show **device has errors** instead, and cannot be restarted until you fix them. Problems with the broker settings appear in red at the top of the window, and while there are any, no device can start.
 
 | Label                | Key in the file              | Default     |
 | -------------------- | ---------------------------- | ----------- |
 | **Host**             | `host`                       | `localhost` |
 | **Port**             | `port`                       | `1883`      |
-| **Client ID prefix** | `client_id_prefix`           | `senzor-`   |
 | **MQTT version**     | `mqtt_version`               | `5`         |
+| **Client ID prefix** | `client_id_prefix`           | `senzor-`   |
 | **Keep alive**       | `keep_alive`                 | `30s`       |
 | **Session expiry**   | `session_expiry`             | `0s`        |
 | **Username**         | `username`                   | none        |
@@ -25,10 +25,10 @@ The **Broker** window edits the project's `[broker]` section. Changes go into th
 
 **MQTT version** chooses **5** or **3.1.1** for every instance of the project. Use **3.1.1** for a broker that does not support MQTT 5. Such a broker refuses MQTT 5 clients:
 
-- An MQTT 5 broker that refuses the version ends each instance **Failed** with `the broker does not support MQTT 5; …`.
+- A broker that answers the MQTT 5 connection with "unsupported protocol version" ends each instance **Failed** with `the broker does not support MQTT 5; …`.
 - A broker that speaks only MQTT 3.1.1, such as Mosquitto before 1.6, closes the connection. Senzor then checks whether the broker answers MQTT 3.1.1, and if it does, ends the instance **Failed** with the same message. Over TLS it cannot check: the instance keeps reconnecting, and until it has connected once its error ends with `the broker closed the connection before accepting it; if it supports only MQTT 3.1.1, …`.
 
-With **3.1.1**, the MQTT 5 settings (**Session expiry** here, and the message properties and **Will delay** in the [template editor](/docs/gui/editing-templates)) are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1**. A setting that still has a value stays editable, so you can clear it; until you do, the Problems tab lists it.
+With **3.1.1**, the MQTT 5 settings (**Session expiry** here, and the message properties and **Will delay** in the [template editor](/docs/gui/editing-templates)) are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1**. A setting that still has a value stays editable, so you can clear it; until you do, the Problems tab lists it, and the devices it affects cannot start (all of them, for **Session expiry**).
 
 ## Session expiry
 
@@ -40,7 +40,7 @@ Each instance connects with the prefix followed by its instance ID as its client
 
 ## Keep alive
 
-**Keep alive** takes a duration like `30s` or `1m`, and must be at least 1 second. Text that is not a duration stays in the box with the hint **use e.g. 10s, 500ms, 1h**, and the setting keeps its previous value.
+**Keep alive** takes a duration like `30s` or `1m`: whole seconds, from 1 second to 65535 seconds (18h 12m 15s), the most MQTT can carry. Text that is not a duration stays in the box with the hint **use e.g. 10s, 500ms, 1h**, and the setting keeps its previous value.
 
 ## Username and password
 

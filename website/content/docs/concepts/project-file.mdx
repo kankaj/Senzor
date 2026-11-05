@@ -36,7 +36,7 @@ Senzor reads a project in two steps, and each step has its own kind of error.
 A TOML syntax error, a key Senzor does not know, a value of the wrong type or a missing required key stops the file from loading. Unknown keys are errors, not ignored, so a typo cannot slip through. The error names the line and column:
 
 ```text
-project.toml: line 2, column 1: unknown field `hots`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`
+project.toml: line 2, column 1: unknown field `hots`, expected one of `host`, `port`, `client_id_prefix`, `keep_alive`, `username`, `password`, `password_env`, `tls`, `mqtt_version`, `session_expiry`
 ```
 
 The GUI cannot open such a file. It shows the error and asks you to fix the file in a text editor. `senzor-cli` exits with code 2.

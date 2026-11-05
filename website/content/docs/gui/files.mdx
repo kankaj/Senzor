@@ -15,7 +15,7 @@ senzor examples/showcase.toml
 
 **New** starts an empty, untitled project. **Open** shows a file dialog that lists TOML files (**Senzor project**) and opens the one you pick. Replacing the project this way stops every instance of the current one; the new project's autostart devices start once those instances are offline ([Running devices](/docs/gui/running-devices#autostart)).
 
-A file opens even when it has validation problems: they appear in the Problems tab, and you can fix them in the GUI. A file that is not valid TOML, or that does not match the project format (an unknown key, for example), does not open. Senzor then shows **Cannot open** with the file's path, the note **Fix the file in a text editor, then open it again.** and the errors with their line and column. The current project stays open; if you named the file on the command line, Senzor starts with an empty project instead. To check a file from the command line, run `senzor-cli validate` ([CLI reference](/docs/reference/cli)).
+A file opens even when it has validation problems: they appear in the Problems tab, and you can fix them in the GUI. A file that cannot be read, that is not valid TOML, or that does not match the project format (an unknown key, for example) does not open. Senzor then shows **Cannot open** with the file's path, the note **Fix the file in a text editor, then open it again.** and the errors with their line and column. The current project stays open; if you named the file on the command line, Senzor starts with an empty project instead. To check a file from the command line, run `senzor-cli validate` ([CLI reference](/docs/reference/cli)).
 
 ## Save and Save as
 
@@ -44,6 +44,6 @@ When the project has unsaved changes, **New**, **Open** and closing the window f
 
 - **Save** saves the project, then goes on. For a project without a file, Senzor asks where to save first; if you cancel that dialog, nothing else happens and the project stays as it is.
 - **Discard** drops the changes and goes on.
-- **Cancel** keeps the project open with its changes.
+- **Cancel** keeps the project open with its changes. Escape or a click outside the dialog does the same.
 
 A name you are still typing into an ID or name box counts as a change, so the question also comes up for a rename you have not confirmed yet.

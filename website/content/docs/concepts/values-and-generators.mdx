@@ -29,7 +29,7 @@ An instance ticks only while it is online. While it is connecting or reconnectin
 | `uniform` | A random number between `min` and `max`, independent of the previous one. |
 | `sequence` | The `values` in order, then again from the start. With `loop = false` it repeats the last value once it reaches the end. |
 
-Any generator can add `noise`: a random amount between `-noise` and `+noise`, added to each value. Noise needs numeric values, and it does not change the generator's state: a random walk with noise walks exactly as it would without it, and each published value gets fresh noise on top.
+Any generator can add `noise`: a random amount between `-noise` and `+noise`, added to each value. Noise needs numeric values, and it does not change the generator's state: noise never adds up in a random walk, which moves only by its own steps, and each published value gets fresh noise on top.
 
 Generated numbers usually have many decimals, so payloads format them with Jinja filters: `{{ co2 | round | int }}` turns 611.7 into `612`, and `{{ temp | round(1) }}` turns 21.5872 into `21.6`.
 
@@ -37,14 +37,14 @@ Generated numbers usually have many decimals, so payloads format them with Jinja
 
 ## Pins
 
-In the GUI you can pin a field of a running instance to a value ([Instance view](/docs/gui/instance-view) shows how). While a field is pinned:
+In the GUI you can pin a field of a running instance to a value ([Instance view](/docs/gui/instance-view) shows how); an AI agent can do the same with the MCP `pin` tool. While a field is pinned:
 
 - every tick uses the pinned value instead of a generated one, without noise. The payload template formats it like any other value.
 - the field's generator does not advance. After **Unpin**, a random walk continues from the value it had before the pin, and a sequence with the value it would have published next. A sine follows the clock, so it continues at the current point of its wave.
 
 What you type becomes a number if it reads as one, `true` or `false` as a boolean, and text otherwise.
 
-A pin lasts until you unpin the field or the instance's run ends. Pins are a GUI feature; `senzor-cli` has none.
+A pin lasts until you unpin the field or the instance's run ends. `senzor-cli run` has no pins; `senzor-cli mcp` has them through the `pin` and `unpin` tools.
 
 ## Reconnects keep the state
 

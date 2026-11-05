@@ -22,7 +22,7 @@ A template is the definition of a sensor type. It has:
 - `qos` (0, 1 or 2, default 0) and `retain` (default `false`) for its messages.
 - `availability`: an optional status topic with `online` and `offline` payloads, which also becomes the Last Will. See [Availability and Last Will](/docs/concepts/availability).
 
-On each tick, an instance computes every field and then renders and publishes every message. This is the message of the showcase's `office-air` template:
+On each tick, an instance computes every field and then renders and publishes every message. These are the topic and payload of the showcase's `office-air` message:
 
 ```toml
 [[templates.messages]]
@@ -32,7 +32,7 @@ payload = '{"co2": {{ co2 | round | int }}, "temp": {{ temp | round(1) }}, "ts":
 
 In the topic and payload, `room` is a param that each device sets, `device_id` is the instance's ID, `co2` and `temp` are the template's fields (a `random_walk` and a `sine`), and `now_ms` is the time of the tick. The whole template is in the showcase project on the [Project file](/docs/concepts/project-file#what-is-in-it) page. [Template variables](/docs/reference/template-variables) lists every variable and the filters you can use.
 
-Templates are strict: a variable that does not exist is an error, not an empty string. Senzor renders every device's templates once when it validates the project, so a misspelled param or field shows up as a problem before anything connects.
+Templates are strict: a variable that does not exist is an error, not an empty string. Senzor renders each device's templates once when it validates the project, for the device's first instance and with sample field values, so a misspelled param or field shows up as a problem before anything connects. A template that no device uses is only checked for syntax.
 
 ### Built-in templates
 

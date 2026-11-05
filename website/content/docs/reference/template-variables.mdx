@@ -72,8 +72,9 @@ Filters that payloads use most:
 | `{{ temp \| round(1) }}` | `22.6789` | `22.7` |
 | `{{ room \| tojson }}` | `a"b` | `"a\"b"` |
 
-`round` alone returns a decimal number, so `{{ co2 | round }}` renders `1185.0` for `1184.6`; add
-`| int` to get `1185`. MiniJinja's built-in filters are available, including `tojson`, except
+`round` keeps a decimal number decimal, so `{{ co2 | round }}` renders `1185.0` for `1184.6`; add
+`| int` to get `1185`. A whole value stays whole: `{{ v | round(1) }}` renders `45` for `45`, but
+`22.0` for `22.04`. MiniJinja's built-in filters are available, including `tojson`, except
 `urlencode`. The loop controls `{% break %}` and `{% continue %}` are not available either.
 
 ## Undefined variables are errors
@@ -98,6 +99,8 @@ to message topics and the availability topic.
 
 ## Message size
 
-A message whose topic and payload together are larger than 1 MiB (1,048,576 bytes) is not published.
-It counts as an error, and the log shows
-`` message on `<topic>` is <size> bytes; the limit is 1048576 ``.
+A message whose topic, payload and MQTT 5 properties together are larger than 1 MiB (1,048,576 bytes)
+is not published. An MQTT 5 broker that announces a smaller maximum packet size lowers this limit to
+that size minus 16 bytes. The message counts as an error, and the log shows
+`` message on `<topic>` is <size> bytes; the limit is <limit> ``, where `<limit>` is 1048576 unless the
+broker set a lower one.

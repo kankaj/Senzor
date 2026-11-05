@@ -49,7 +49,7 @@ Without a project, it starts with an empty one that the agent can fill and save.
 
 ## Set up Claude Code with the GUI
 
-Click **MCP** at the right of the window's top bar. The toggle turns on, and the address agents connect to, `127.0.0.1:18830`, shows next to it. To have MCP on from the start, open the window with `--mcp`:
+Click **MCP** at the end of the window's top bar, after **Stop all**. The toggle turns on, and the address agents connect to, `127.0.0.1:18830`, shows next to it. To have MCP on from the start, open the window with `--mcp`:
 
 ```bash
 senzor --mcp examples/showcase.toml
@@ -61,9 +61,9 @@ Then register the endpoint:
 claude mcp add --transport http senzor-gui http://127.0.0.1:18830/mcp
 ```
 
-To use another port, start the window with `--mcp-port 18900` and use that port in the URL. If the port is taken, a dialog says why MCP could not start and the toggle stays off; hover over it for the reason, and click it to try again.
+To use another port, start the window with `--mcp-port 18900` (this turns MCP on; `--mcp` is not needed) and use that port in the URL. If the port is taken, the **MCP** toggle turns red and stays off, and a dialog says why, unless another dialog is already open. Hover over the toggle for the reason, and click it to try again.
 
-Click **MCP** again to turn it off. Agents connected at that moment lose their connection; reconnect them once MCP is on again. MCP is off whenever the window starts without `--mcp`.
+Click **MCP** again to turn it off. Agents connected at that moment lose their connection; reconnect them once MCP is on again. MCP is off whenever the window starts without `--mcp` or `--mcp-port`.
 
 ## Other MCP clients
 
@@ -91,7 +91,7 @@ Use an absolute path when the client does not start servers in your project's fo
 The tools follow the GUI:
 
 - **Observe**: `get_status` lists every instance with its status, counters and pins. `get_instance` adds the current value of every field. `get_messages` returns published messages with sequence numbers. The agent passes the last number back to get only newer messages, and can wait for the next matching one.
-- **Run**: `start`, `stop`, `kill` and `restart` take all instances, a list of devices or a list of instances. They wait until the instances are online or stopped and report their status. `pin` and `unpin` force a field's value, as **Pin** does in the [instance view](/docs/gui/instance-view).
+- **Run**: `start`, `stop`, `kill` and `restart` take all instances, a list of devices or a list of instances. They wait until the instances are up (`online`, `reconnecting` or `failed`) or stopped, and report their status. `pin` and `unpin` force a field's value, as **Pin** does in the [instance view](/docs/gui/instance-view).
 - **Edit**: `get_project` returns the project as TOML. `set_project` replaces it. `put_device`, `put_template` and `set_broker` take the same keys as the project file, and further tools rename and remove devices and templates, or copy a built-in template.
 - **Files**: `new_project`, `open_project` and `save_project`.
 
@@ -123,5 +123,5 @@ The window applies the agent's changes while it draws. On Linux (checked on KDE 
 
 - One project at a time, as in the GUI.
 - The agent cannot see or change GUI-only state such as the selection, the panels or the message-log filter.
-- There is no undo for the agent's edits. Keep the project file under version control, or open it again without saving to throw the changes away.
+- There is no undo for the agent's edits. Keep the project file under version control, or open it again with `open_project` and `discard_unsaved = true` to throw the changes away.
 - `get_messages` sees what the message log sees: the last 1,000 published messages, without the `online` and `offline` availability messages. To check those, subscribe to the broker.

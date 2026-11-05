@@ -37,21 +37,21 @@ Ticking **online/offline topic with Last Will** adds three boxes, filled in with
 - **Online payload**: `online`
 - **Offline payload**: `offline`
 
-A fourth box, **Will delay**, is empty by default. With MQTT 5, a duration there makes the broker wait that long before it publishes the Last Will; it needs a broker **Session expiry** at least as long. [Availability and Last Will](/docs/concepts/availability) explains when each payload is sent.
+A fourth box, **Will delay**, is empty (`none`) by default. With MQTT 5, a duration there, in whole seconds, makes the broker wait that long before it publishes the Last Will; it needs a broker **Session expiry** at least as long. [Availability and Last Will](/docs/concepts/availability) explains when each payload is sent.
 
 ## Messages
 
-Each message is a group named **Message 1**, **Message 2** and so on, with a **Topic** box, a multi-line **Payload** box and a **Remove** button. **Add message** adds a message on `senzor/{{ device_id }}/value` with the payload `{{ value }}`. Topics and payloads are templates; the [template variables reference](/docs/reference/template-variables) lists what you can use in them.
+Each message is a group named **Message 1**, **Message 2** and so on, with a **Topic** box, a multi-line **Payload** box and a **Remove** button. **Add message** adds a message on `senzor/{{ device_id }}/value` with the payload `{{ value }}`. Change the payload to use your own fields: a template without a field named `value` cannot render it. Topics and payloads are templates; the [template variables reference](/docs/reference/template-variables) lists what you can use in them.
 
 ### MQTT 5 properties
 
 Under each message, **MQTT 5 properties** opens three more settings. The section starts open when the message sets any of them.
 
-- **Message expiry**: how long the broker may keep the message for subscribers that have not received it yet, in whole seconds, like `5m`. Empty means no expiry.
+- **Message expiry**: how long the broker may keep the message for subscribers that have not received it yet: whole seconds and at least `1s`, like `5m`. Empty (shown as `none`) means no expiry. Text that is not a duration shows the hint **use e.g. 10s, 1m, 1h**.
 - **Content type**: sent as written, for example `application/json`. Empty means none.
-- **User properties**: name and value pairs. **Add user property** adds a row named `name`; **Remove property** removes one. A new name applies when you leave its box. The values are templates with the same variables as the payload, so `{{ room }}` sends the device's `room` param.
+- **User properties**: name and value pairs. **Add user property** adds a row named `name`; **Remove property** removes one. A new name applies when you press Enter or leave its box. An empty name, or one the message already has, shows the reason in red while you type, and the box goes back to the old name when you leave it. The values are templates with the same variables as the payload, so `{{ room }}` sends the device's `room` param.
 
-With **MQTT version** set to **3.1.1** in the [broker settings](/docs/gui/broker-settings#mqtt-version), these settings and **Will delay** are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1**. One that still has a value stays editable, so you can clear it; until you do, the Problems tab lists it.
+With **MQTT version** set to **3.1.1** in the [broker settings](/docs/gui/broker-settings#mqtt-version), these settings and **Will delay** are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1** (inside the opened **MQTT 5 properties** section, and next to **Will delay**). While a message still sets any property, its whole section stays editable so you can clear it, and **Will delay** stays editable while it has a value. Until you clear them, the Problems tab lists them and the template's devices cannot start.
 
 ## Fields
 
@@ -91,7 +91,7 @@ The **Preview** section at the bottom renders the template's topics and payloads
 
 The sample value of each field is its starting value: the `constant` value, the `random_walk` start, the `sine` center, the `uniform` min, or the first `sequence` value.
 
-If no valid device uses the template, the preview says **No valid device uses this template, so params are not available.** A template that uses params then shows an error for the missing param.
+If no valid device uses the template, the preview says **No valid device uses this template, so params are not available.** This is also the case while the template itself has problems, since its devices cannot run then. A template that uses params then shows an error for the missing param.
 
 The preview shows the availability topic (as `availability: …`) and each message's topic and payload, followed by the MQTT 5 properties the message sets, such as `content type: application/json`, `message expiry: 300 s` and `user property: room = office`. A message that fails to render shows its error in red, such as `message 1: …`.
 

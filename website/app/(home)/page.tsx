@@ -8,7 +8,7 @@ const features = [
   },
   {
     title: 'Behaves like a real device',
-    body: 'Every sensor has its own connection and can announce online and offline with a Last Will.',
+    body: 'Every sensor has its own MQTT 5 or 3.1.1 connection and can announce online and offline with a Last Will.',
   },
   {
     title: 'GUI and headless CLI',

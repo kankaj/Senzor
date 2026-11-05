@@ -30,7 +30,7 @@ The keys of the JSON object depend on the device. The device pages list them:
   - `humidity`, `pm25` and `voc_index` take random steps within their limits.
   - `contact` repeats the sequence `true`, `true`, `false`, `true`.
   - `battery` stays at 87, and `voltage` is a random value between 2900 and 3000.
-  - `linkquality` is a random value in its range, drawn anew for every message.
+  - `linkquality` is a random value in its range, drawn anew for every message. It is not on the device pages, but Zigbee2MQTT adds it to the state of every device.
 - VINDSTYRKA publishes every 10 seconds, PARASOLL every 30 seconds.
 
 ## Run it

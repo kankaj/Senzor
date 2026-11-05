@@ -34,7 +34,7 @@ Choose the duration with the interval in mind. Each instance publishes its first
 | `2` | The file cannot be read, the project has problems, the arguments are invalid, or no device is set to start. |
 
 <Callout type="warn" title="Exit code 0 does not mean messages arrived">
-`run` exits with 0 even if no instance ever reached the broker: an instance that cannot reach the broker keeps retrying until the run ends, and one the broker refuses, for example because of a wrong password, stops as **Failed**. Check in your tests that the messages arrived, not only that `senzor-cli` succeeded.
+`run` exits with 0 even if no instance ever reached the broker: an instance that cannot reach the broker keeps retrying until the run ends, and one the broker refuses, for example because of a wrong password or because the broker does not support MQTT 5, stops as **Failed**. Check in your tests that the messages arrived, not only that `senzor-cli` succeeded.
 </Callout>
 
 The retrying also means the broker does not have to be ready when `senzor-cli` starts: an instance tries again after 1 s, 2 s, 4 s and so on, up to 30 s between attempts. [CLI reference](/docs/reference/cli) lists every message and code.
@@ -99,12 +99,13 @@ jobs:
 The log of the run step starts like this:
 
 ```text
-2026-10-15T15:55:16.606220Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-9
-2026-10-15T15:55:16.606235Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-5
-2026-10-15T15:55:16.606235Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-4
+2026-11-05T15:59:59.730051Z  INFO senzor_cli: connecting with MQTT 5
+2026-11-05T15:59:59.732979Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-4
+2026-11-05T15:59:59.734123Z  INFO senzor_core::engine::state: Connecting instance=ci-co2-7
+2026-11-05T15:59:59.735457Z  INFO senzor_core::engine::state: Online instance=ci-co2-4
 ```
 
-followed by an `Online` line for each instance. Add `-v` to `senzor-cli run` to log every message it publishes.
+followed by a `Connecting` and an `Online` line for each instance, in no fixed order. Add `-v` to `senzor-cli run` to log every message it publishes.
 
 ## Running on your machine
 

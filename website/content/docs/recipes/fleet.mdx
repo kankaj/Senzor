@@ -32,6 +32,8 @@ building/1/f1-room-77/telemetry {"co2": 600, "humidity": 45, "seq": 0}
 building/1/f1-room-42/telemetry {"co2": 600, "humidity": 45, "seq": 0}
 ```
 
+The order can differ in your run.
+
 Each instance's first reading is its walk's `start` value. From the second reading on, every instance takes its own random steps.
 
 ## Instance ID patterns
@@ -47,11 +49,11 @@ The instance ID is how a consumer tells your sensors apart: it is `{{ device_id 
 | `{{ id }}-{{ index }}` | `floor1-0` … `floor1-99` (the default) |
 | `room-{{ '%03d' \| format(index) }}` | `room-000` … `room-099` |
 
-Every instance ID must be unique in the project. For a device with `count` above 1, a pattern without `{{ index }}` is an error, and so are two devices whose patterns produce the same ID:
+Every instance ID must be unique in the project. For a device with `count` above 1, a pattern without `{{ index }}` is an error, and so are two devices whose patterns produce the same ID (here `floor2` and `floor3` both use `room-{{ index }}`):
 
 ```text
 device `floor1`: instance id `room` repeats; include {{ index }} in instance_id
-device `floor2`: instance id `room-0` is already used by device `floor1`
+device `floor3`: instance id `room-0` is already used by device `floor2`
 ```
 
 [Template variables](/docs/reference/template-variables) lists the variables, and [Validation errors](/docs/reference/validation-errors) the messages.

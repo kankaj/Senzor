@@ -21,11 +21,13 @@ docker run -d --name mosquitto -p 127.0.0.1:1883:1883 eclipse-mosquitto:2 mosqui
 
 The file is `examples/quick-start.toml` in the [Senzor repository](https://github.com/kankaj/Senzor). If you do not have the repository, save the project above under that path.
 
-The project connects to `localhost:1883` and defines two devices. Neither needs a template of its own: they use the built-in `co2` and `temperature` templates.
+The project connects to `localhost:1883` with MQTT 5, the default, and defines two devices. Neither needs a template of its own: they use the built-in `co2` and `temperature` templates.
 
 - `office` runs two instances of `co2`. A device with a count above 1 numbers its instances from 0, so they are `office-0` and `office-1`.
 - `kitchen` runs one instance of `temperature`. A single instance takes the device's name: `kitchen`.
 - `autostart = true` starts a device as soon as the project is opened.
+
+For a broker that supports only MQTT 3.1.1, add `mqtt_version = "3.1.1"` under `[broker]`, or choose **3.1.1** under **MQTT version** in the [broker settings](/docs/gui/broker-settings#mqtt-version).
 
 ## Run it
 

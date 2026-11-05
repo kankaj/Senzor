@@ -28,17 +28,17 @@ The window has four parts: the top bar, the left panel with your devices and tem
 From left to right:
 
 - **The project's name.** This is the file name, or **untitled** for a project you have not saved yet. A `*` after the name means there are unsaved changes. The window title shows the same, for example `Senzor — showcase.toml*`.
-- **Broker: localhost:1883** shows the broker's host and port. Click it to open the [broker settings](/docs/gui/broker-settings).
+- **Broker: localhost:1883** shows the broker's host and port. Click it to open the [broker settings](/docs/gui/broker-settings), where you also choose MQTT 5 or 3.1.1.
 - **New**, **Open**, **Save** and **Save as** work on the project file. See [Files](/docs/gui/files).
 - **Start all** and **Stop all** start and stop every device. See [Running devices](/docs/gui/running-devices).
-- **starting devices…** can appear for a moment after you open another project. Hover over it to read **Waiting for the previous project's devices to go offline**: the new project's devices start once the old ones are offline (see [Autostart](/docs/gui/running-devices#autostart)).
+- **starting devices…** can appear for a moment after you open another project or start a new one. Hover over it to read **Waiting for the previous project's devices to go offline**: the new project's devices start once the old ones are offline (see [Autostart](/docs/gui/running-devices#autostart)).
 - **MCP** turns the endpoint for AI agents on and off. While it is on, the button is highlighted and the address agents connect to, `127.0.0.1:18830`, shows next to it; hover over it for the full URL. Click it again to turn MCP off, which disconnects connected agents. If the port is taken, a dialog says why, the toggle stays off and its label turns red; hover over it to read the reason, and click to try again.
 
 ## Left panel
 
 The left panel has two tabs.
 
-**Devices** lists every device in the project, with its instances under it. A device shows its ID and instance count, such as `office ×5`. Each instance has a coloured dot for its status:
+**Devices** lists every device in the project, with its instances under it. A device with problems lists only its instances that still run, as orphans. A device shows its ID and instance count, such as `office ×5`. Each instance has a coloured dot for its status:
 
 | Dot   | Status                     |
 | ----- | -------------------------- |

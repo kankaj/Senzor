@@ -3,7 +3,7 @@ title: Running devices
 description: Start, stop, restart and kill devices and instances from the GUI.
 ---
 
-Each instance of a device is its own MQTT client. While it runs, it publishes its messages on every tick of its interval. You control instances from the top bar, from the menus in the device tree and from the [instance view](/docs/gui/instance-view).
+Each instance of a device is its own MQTT client. While it runs, it publishes its messages on every tick of its interval. You control instances from the top bar, from the menus in the device tree, from **Start device** in the device editor and from the [instance view](/docs/gui/instance-view).
 
 ## Autostart
 
@@ -23,7 +23,7 @@ The **Devices** tab lists each device as its ID and instance count, for example 
 
 A device or instance can carry a note:
 
-- `office ×5 (has errors)`: the device has problems and cannot start. The Problems tab says why.
+- `office ×5 (has errors)`: the device cannot start, because it, its template or the broker settings have problems. The Problems tab says why. While it has errors, its instances are not listed, except those still running as orphans.
 - **restart to apply** next to an instance: the instance runs with settings that differ from the current project. Restart it to apply your edits.
 - **device has errors** or **removed** next to an instance: the instance is an orphan (see [Orphans](#orphans)).
 
@@ -35,12 +35,12 @@ Right-click a device to act on all of its instances:
 
 - **Start** starts the device's stopped and failed instances. It is disabled for a device with problems; hover over it to read **Fix the problems in the Problems tab first**.
 - **Stop** stops every instance listed under the device: each one that is online publishes `offline` (if the template has availability) and disconnects.
-- **Restart** stops each running instance and starts it again with the project's current settings. Stopped instances stay stopped. When no instance runs, the item is disabled with the hint **No running instances to restart**. A device with problems has no **Restart**.
+- **Restart** stops each running instance and starts it again with the project's current settings. Stopped instances stay stopped. When none of the device's own instances runs (orphans do not count), the item is disabled with the hint **No running instances to restart**. A device with problems has no **Restart**.
 - **Kill** drops the connection of every listed instance without publishing `offline`. If the template has availability, the broker then publishes the instance's Last Will, as it would for a device that lost power. See [Availability and Last Will](/docs/concepts/availability).
 
 ## Instance menu
 
-Right-click an instance for **Start**, **Stop**, **Restart** and **Kill** for that one instance. Unlike the device menu, **Restart** here also starts a stopped instance.
+Right-click an instance for **Start**, **Stop**, **Restart** and **Kill** for that one instance. Unlike the device menu, **Restart** here also starts a stopped instance. For an orphan, **Start** is disabled and **Restart** is missing: it has no settings in the project to start with.
 
 The [instance view](/docs/gui/instance-view) has the same actions as buttons.
 
@@ -50,10 +50,10 @@ Edits do not change instances that are already running. An instance keeps the se
 
 ## Orphans
 
-An instance that leaves the project while it runs keeps running as an orphan. That happens when you delete its device, when the device gets problems, or when a change to the device's ID, **Count** or **Instance IDs** gives the device a set of instance IDs without this one (lowering **Count** from 5 to 3 while `office-3` runs, for example). An orphan carries a note:
+An instance that leaves the project while it runs keeps running as an orphan. That happens when you delete its device, when the device, its template or the broker settings get problems, or when a change to the device's ID, **Count** or **Instance IDs** gives the device a set of instance IDs without this one (lowering **Count** from 5 to 3 while `office-3` runs, for example). An orphan carries a note:
 
 - **removed**: the instance is no longer part of the project. Instances of a deleted or renamed device are listed last, under the old device ID followed by `(removed)`. An instance dropped by a change to **Count** or **Instance IDs** stays under its device.
-- **device has errors**: the device has problems; the instance keeps running with its last valid settings.
+- **device has errors**: the device, its template or the broker settings have problems; the instance keeps running with its last valid settings.
 
 You can stop or kill an orphan, but not restart it, since there are no valid settings to start it with. Once an orphan stops, it disappears from the tree. For a `(removed)` entry, the device menu only offers **Stop** and **Kill**.
 

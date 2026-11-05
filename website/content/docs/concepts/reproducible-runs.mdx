@@ -29,6 +29,7 @@ Every new run starts the sequence from the beginning: a **Start** after **Stop**
 
 - **Timestamps.** `now_ms` and `now_iso` are the clock time of each tick.
 - **Sine values.** A `sine` follows the time since the run started, and the seed does not fix exactly when ticks happen. Its values can differ slightly between runs.
+- **Changes to other fields.** All fields of an instance draw from its one random number generator, in the order of their names. Adding, removing or renaming a field that draws random numbers, or adding `noise`, changes the values of the instance's other random fields too. Changing the interval changes the wait before the first tick.
 - **Runs with pins.** A pinned field skips its generator. If that generator draws random numbers (`random_walk`, `uniform` or `noise`), the numbers it would have drawn go to the instance's next draws instead. From then on, the instance's values no longer match a run without the pin.
 
 A reconnect does not change the values either. While reconnecting, the instance does not tick and draws no random numbers, and missed ticks are not made up, so its sequence continues where it stopped. Only the timing differs.
@@ -40,5 +41,7 @@ Because the instance ID feeds the random number generator, anything that changes
 ## Spread-out first ticks
 
 Instances that start together do not publish in lockstep. Each instance waits a random time, between zero and one interval, before its first tick, then ticks once per interval. A thousand sensors with a 10 second interval spread their messages over those 10 seconds instead of sending them all at once.
+
+The wait counts from when the instance starts, not from when it connects. An instance that comes online after its wait is over ticks at once and then once per interval from that moment. So instances that wait together for an unreachable broker, or reconnect together after a broker restart, publish in step from then on.
 
 This wait is the first random number an instance draws, so with a seed it is the same on every run as well.

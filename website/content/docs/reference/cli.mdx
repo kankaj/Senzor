@@ -88,7 +88,7 @@ The tools are listed in the [MCP tools reference](/docs/reference/mcp-tools).
 
 1. Opens the project. Unlike `run`, a project with validation problems opens: its problems go to
    stderr as `<PROJECT>: <location>: <message>`, and only the devices with problems are blocked, as
-   in the GUI. If the file cannot be read or has a TOML syntax error, `mcp` prints a warning that
+   in the GUI. A problem in `[broker]` blocks every device. If the file cannot be read or has a TOML syntax error, `mcp` prints a warning that
    names the file and the problem, for example
    `warning: cannot read project.toml: No such file or directory (os error 2); starting with an empty project`,
    and starts with an empty project. The agent sees the same reason as `open_error` in `get_status`.
@@ -105,7 +105,7 @@ stdout carries only MCP messages; the log and warnings go to stderr. `-v` works 
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. `mcp`: the agent disconnected, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
+| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
 | `1` | The async runtime could not start. |
 | `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
 
@@ -120,8 +120,8 @@ stdout carries only MCP messages; the log and warnings go to stderr. `-v` works 
 | `error: cannot read <PROJECT>: <reason>` | 2 | The file does not exist or cannot be read. |
 | `error: no devices to start (none has autostart = true; use --only)` | 2 | `run` without `--only`, and no device has autostart on. |
 | `error: --only names no devices` | 2 | `--only` contains only commas or spaces. |
-| `error: unknown device id(s): <ids>` | 2 | `--only` names IDs that are not devices of the project, listed with commas. |
-| `error: cannot start the async runtime: <reason>` | 1 | `run` could not create the runtime that drives the instances. |
+| `error: unknown device id(s): <ids>` | 2 | `--only` names IDs that are not devices of the project, listed with a comma and a space. |
+| `error: cannot start the async runtime: <reason>` | 1 | `run` or `mcp` could not create the runtime that drives the instances. |
 
 Invalid arguments are reported by the argument parser and exit with 2, for example:
 
@@ -150,31 +150,35 @@ the MQTT client, log only warnings and errors unless `RUST_LOG` says otherwise.
 | --- | --- |
 | Default | `warn,senzor_core=info,senzor_cli=info` |
 | `-v` | `warn,senzor_core=debug,senzor_cli=debug` |
-| `RUST_LOG` set | The value of `RUST_LOG`, which replaces the filter above. A value that cannot be parsed is ignored, and the filter above applies. |
+| `RUST_LOG` set | The value of `RUST_LOG`, which replaces the filter above. A value that cannot be parsed is ignored, and the filter above applies. An empty value logs only errors. |
 
 | Level | Message | Meaning |
 | --- | --- | --- |
 | `INFO` | `connecting with MQTT <version>` | Once, when `run` starts: the project's MQTT version. |
 | `INFO` | `Connecting` | The instance started and is connecting to the broker. |
 | `INFO` | `Online` | The broker accepted the connection. |
-| `INFO` | `reconnecting: <error>` with `attempt=<n>` | The connection failed or dropped. The instance tries again after 1 s, 2 s, 4 s, …, at most 30 s apart. |
+| `INFO` | `reconnecting: <error>` with `attempt=<n>` | The connection failed or dropped. The instance tries again after 1 s, 2 s, 4 s, …, at most 30 s apart. Over TLS with MQTT 5, if the broker closed the connection before accepting it, `<error>` ends with a hint to try `mqtt_version = "3.1.1"`. |
 | `INFO` | `Stopped` | The instance stopped. |
 | `ERROR` | `failed: <reason>` | The instance stopped because of an error and does not retry. |
 | `WARN` | `render: <error>` | A message could not be rendered. It is skipped and counted as an error. |
-| `WARN` | `` message on `<topic>` is <size> bytes; the limit is 1048576 `` | A message is larger than 1 MiB. It is skipped and counted as an error. |
+| `WARN` | `` message on `<topic>` is <size> bytes; the limit is <limit> `` | A message is larger than the limit: 1 MiB (1048576), or less when an MQTT 5 broker announces a smaller maximum packet size. It is skipped and counted as an error. |
 | `WARN` | `publish: <error>` | A message could not be handed to the MQTT client, for example because its queue is full. It is skipped and counted as an error. |
 | `WARN` | `publish online: <error>` | The availability `online` message could not be handed to the MQTT client. |
 | `INFO` | `shutting down` | `run` or `mcp` is stopping. |
-| `DEBUG` | `publish` with `topic=<topic>` and `payload=<payload>` | One published message. Shown with `-v`. |
+| `DEBUG` | `publish` with `topic=<topic>`, `payload=<payload>` and, when the message sets MQTT 5 properties, `properties=<properties>` | One published message. Shown with `-v`. |
+| `ERROR` | `MCP client did not initialize: <error>` | `mcp`: the agent closed the connection or sent something else before the MCP handshake. `mcp` then stops and exits with 0. |
 
-When the broker refuses a connection, the reason is
-`broker refused the connection: <code>`, where `<code>` is one of `RefusedProtocolVersion`,
-`BadClientId`, `ServiceUnavailable`, `BadUserNamePassword` or `NotAuthorized`.
+When the broker refuses a connection, the reason is `broker refused the connection: <code>`. With
+MQTT 3.1.1, `<code>` is one of `RefusedProtocolVersion`, `BadClientId`, `ServiceUnavailable`,
+`BadUserNamePassword` or `NotAuthorized`. With MQTT 5 it is the broker's MQTT 5 reason code, for
+example `BadUserNamePassword` or `NotAuthorized`. When an MQTT 5 instance finds that the broker
+supports only MQTT 3.1.1, the reason is `the broker does not support MQTT 5; set mqtt_version =
+"3.1.1" in [broker], or choose 3.1.1 under MQTT version in the broker settings`.
 
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
-| `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored. |
+| `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored; an empty value logs only errors. |
 | `NO_COLOR` | Any non-empty value turns off colours in the log. |
-| The name in `password_env` | The broker password. Needed by `validate` and `run`. |
+| The name in `password_env` | The broker password. Needed by `validate`, `run` and `mcp`. |

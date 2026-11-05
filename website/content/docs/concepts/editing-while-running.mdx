@@ -5,7 +5,7 @@ description: What happens to running devices when you change the project in the 
 
 In the GUI you can edit a project while its devices run. An edit never changes a running instance by itself: each instance keeps the settings it started with until you restart it. The GUI marks the instances that run with outdated settings and blocks the devices that cannot start.
 
-This page is about the GUI. `senzor-cli` reads the project once when it starts; to apply changes, stop it and run it again.
+This page describes the GUI. Edits an AI agent makes over MCP, in the GUI or in `senzor-cli mcp`, affect running devices the same way. `senzor-cli run` reads the project once when it starts; to apply changes, stop it and run it again.
 
 ## Validation on every edit
 
@@ -15,7 +15,7 @@ Every edit validates the whole project again. The **Problems** tab at the bottom
 
 ## Devices with problems are blocked
 
-A device with problems cannot start until you fix them. In the **Devices** tab it reads like `office ×5 (has errors)`, and both its **Start device** button and the **Start** item in its right-click menu are disabled. A device can also be blocked by a problem that is not its own:
+A device with problems cannot start until you fix them. In the **Devices** tab it reads like `office ×5 (has errors)`, and both its **Start device** button and the **Start** item in its right-click menu are disabled. Its stopped instances are not listed until the problem is fixed. A device can also be blocked by a problem that is not its own:
 
 - a template with problems blocks every device that uses it;
 - a broker problem, such as a `password_env` variable that is not set or a TLS file that cannot be read, blocks every device.
@@ -32,7 +32,7 @@ Instances that are not running always start with the current settings, so they n
 
 ## Removed instances
 
-If you delete a running device, lower its count, or change its instance IDs (renaming the device does that too), the running instances that are no longer part of the project keep running. Senzor calls them orphans:
+If you delete a running device, lower its count, or change its instance IDs (renaming the device does that too, unless its `instance_id` pattern leaves out `{{ id }}`), the running instances that are no longer part of the project keep running. Senzor calls them orphans:
 
 - an orphan of a device that still exists is listed under that device, with the badge **removed**;
 - the orphans of a deleted or renamed device are listed under the old name, shown as `office (removed)`.

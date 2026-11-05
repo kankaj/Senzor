@@ -28,16 +28,18 @@ How problems are reported, and what they block:
 
 - A TOML error stops loading, so it is the only problem reported. Fix it and validate again to see
   the rest.
-- Otherwise every problem is reported at once: broker problems first, then templates and devices in
-  file order.
+- Otherwise every problem is reported at once: broker problems first, then template problems in file
+  order, then device problems in file order.
 - A broker problem blocks every device.
 - A template problem blocks every device that uses the template. Those devices get no message of
   their own.
 - A device problem blocks that device.
-- Senzor checks a device's instance IDs and renders its templates only when the device's other
-  settings are valid, so fixing one problem can reveal the next.
+- Senzor checks a device's other settings only when its template exists and has no problems, and
+  checks its instance IDs and renders its templates only when those settings are valid, so fixing one
+  problem can reveal the next.
 
-`senzor-cli` runs nothing while there is any problem, and exits with code 2. The GUI runs the devices
+`senzor-cli validate` and `senzor-cli run` run nothing while there is any problem, and exit with
+code 2. `senzor-cli mcp` prints the problems as warnings and serves the project anyway. The GUI runs the devices
 that are not blocked; see [Editing while running](/docs/concepts/editing-while-running).
 
 ## File syntax and schema
@@ -54,6 +56,8 @@ These come from the TOML parser and carry a line and column. The most common one
 | `invalid value: string "30", expected a duration` | A duration without a unit. Write `"30s"`. |
 | `` invalid type: integer `30`, expected a duration `` | A duration written as a number. Write it as a string with a unit, `"30s"`. |
 | `` unknown variant `linear`, expected one of `constant`, `random_walk`, `sine`, `uniform`, `sequence` `` | An unknown generator name. |
+| `` unknown variant `4`, expected `5` or `3.1.1` `` | `mqtt_version` is not `"5"` or `"3.1.1"`. |
+| `wanted string or table` | Often `mqtt_version = 5` without quotes. Write `mqtt_version = "5"`. |
 | `` missing field `generator` `` | A field table without a `generator` key. |
 | `data did not match any variant of untagged enum Value` | A param or value that is not a string, number or boolean, such as an array. |
 | `` unclosed table, expected `]` `` | A TOML syntax error. |
@@ -67,6 +71,9 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `host must not be empty` | `host` is empty or only spaces. |
 | `port must not be 0` | Use the broker's port, 1 to 65535. |
 | `keep_alive must be at least 1s` | Set `keep_alive` to `"1s"` or more. |
+| `keep_alive must be whole seconds, got <duration>` | Write `keep_alive` in whole seconds, such as `"30s"`. |
+| `keep_alive must be at most 65535 seconds (18h 12m 15s)` | MQTT sends the keep-alive as a 16-bit number of seconds. Use a shorter duration. |
+| `session_expiry must be at most 4294967295 seconds` | MQTT counts it in a 32-bit number of seconds (about 136 years). Use a shorter duration. |
 | `use either password or password_env, not both` | Remove one of them. |
 | `` environment variable `<name>` (password_env) is not set `` | Set the variable before you start Senzor or run `senzor-cli`. |
 | `a password requires a username` | Add `username`, or remove the password. |
@@ -93,6 +100,7 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `messages[<n>].message_expiry must be at least 1s` | Remove `message_expiry` for no expiry, or set `"1s"` or more. |
 | `messages[<n>].content_type must not be empty` | Remove `content_type`, or give it a value such as `"application/json"`. |
 | `<key> needs MQTT 5; the broker settings use MQTT 3.1.1` | `<key>` is `messages[<n>].message_expiry`, `messages[<n>].content_type`, `messages[<n>].user_properties` or `availability.will_delay`. Remove it, or switch `mqtt_version` to `"5"`. |
+| `<key> must be at most 4294967295 seconds` | `<key>` is `messages[<n>].message_expiry` or `availability.will_delay`. Use a shorter duration. |
 | `availability.will_delay must be whole seconds, got <duration>` | Write the delay in whole seconds, such as `"30s"`. |
 | `availability.will_delay <delay> is longer than the broker's session_expiry <expiry>; set session_expiry to at least <delay>` | MQTT 5 brokers may send the Last Will when the session ends, before the delay passes. Raise `session_expiry` in `[broker]`. |
 
@@ -160,6 +168,6 @@ See [Field overrides](/docs/reference/project-file#field-overrides) for how over
 | `` instance_id: undefined value: `<name>` is undefined (in <string>:1) `` | `instance_id` uses a variable it cannot see. It can use `id`, `index` and the device's params. |
 | `instance_id renders to an empty string` | `instance_id` produces an empty ID. |
 | `` instance id `<id>` repeats; include {{ index }} in instance_id `` | Two instances of the device get the same ID. With `count` above 1, put `{{ index }}` in `instance_id`. |
-| `` instance id `<id>` is already used by device `<device>` `` | An instance ID of this device is also an instance ID of an earlier device. Change `instance_id` or the device `id`. |
+| `` instance id `<id>` is already used by device `<device>` `` | An instance ID of this device is also an instance ID of an earlier device that has no problems. Change `instance_id` or the device `id`. |
 
 `(in <string>:1)` is literal text: it is how MiniJinja names the `instance_id` template.

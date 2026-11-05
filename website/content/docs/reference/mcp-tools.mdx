@@ -8,11 +8,11 @@ description: Every tool and resource of the Senzor MCP server, with arguments, r
 ## Conventions
 
 - **Results** are JSON objects. Clients that read only text get the same JSON as text.
-- **Errors** come back as a tool result marked as an error, with a one-line message, and nothing changes. Arguments that do not match a tool's input schema fail the same way, with `failed to deserialize parameters: <reason>`. Examples are a missing required argument, a key the project file does not know, or `null` as a pin value.
+- **Errors** come back as a tool result marked as an error, with a one-line message, and nothing changes. Arguments that do not match a tool's input schema fail the same way, with `failed to deserialize parameters: <reason>`. Examples are a missing required argument, a key the project file does not know, or `null` as a pin value. Other arguments a tool does not know are ignored, so check the spelling: `get_messages` with `instance_id` instead of `instance` returns every instance's messages.
 - **Times** are RFC 3339 in UTC with milliseconds, for example `2026-11-04T14:02:11.123Z`.
 - **Durations** in project-file keys are strings with a unit, for example `"10s"` or `"500ms"`, as in the [project file](/docs/reference/project-file).
 - **Passwords**: every result shows the broker password as `<redacted>`. When `set_project` or `set_broker` receives `<redacted>` as the password, the stored password is kept.
-- **Waiting for the host.** A tool that changes something waits up to 10 seconds for Senzor to apply it. In the GUI, the window applies changes while it draws frames. When the time runs out, the tool fails with `the Senzor window did not respond within 10s; the request was cancelled and will not be applied`.
+- **Waiting for the host.** A tool that changes something waits up to 10 seconds for Senzor to apply it. In the GUI, the window applies changes while it draws frames. When the time runs out, the tool fails with `the Senzor window did not respond within 10s; the request was cancelled and will not be applied` (from `senzor-cli mcp`: `Senzor did not respond within 10s; …`). While Senzor shuts down, tools fail with `Senzor is shutting down`, and right after start with `Senzor is still starting; try again`.
 
 ### Status values
 
@@ -35,8 +35,8 @@ description: Every tool and resource of the Senzor MCP server, with arguments, r
 | `id` | Instance ID, e.g. `office-3`. |
 | `device` | The `[[devices]]` entry it belongs to. |
 | `status` | See [Status values](#status-values). |
-| `published` | Messages published since the instance started. |
-| `errors` | Messages that could not be rendered or published. |
+| `published` | Messages published since the project was opened or the instance was added. Stopping and restarting do not reset it. |
+| `errors` | Messages that could not be rendered or published, and failed availability `online` messages, counted the same way as `published`. |
 | `last_publish` | Time of the last published message, or `null`. |
 | `pinned` | Fields forced to a value with `pin`. |
 | `needs_restart` | Running with older settings than the project's; `restart` applies them. |
@@ -68,8 +68,8 @@ The project and every instance. No arguments.
 | `dirty` | The project has changes that are not saved. |
 | `broker_host`, `broker_port` | The broker the project connects to. |
 | `problems` | How many validation problems the project has; `get_project` lists them. |
-| `open_error` | Why the last attempt to open a project file failed, or `null`. `senzor-cli mcp` reports a project it could not open at launch here. |
-| `instances` | Every instance, as an [instance summary](#instance-summary), sorted by ID. |
+| `open_error` | Why the project file could not be opened when `senzor-cli mcp` started, or when you last used **Open** in the GUI, or `null`. A failed `open_project` returns its error instead. |
+| `instances` | Every instance of the devices that can start, plus running orphans, as an [instance summary](#instance-summary), sorted by ID. Devices blocked by problems have no instances here. |
 
 ### `get_instance`
 
@@ -99,8 +99,8 @@ Published messages, oldest first. These are the messages your templates define, 
 | `instance` | string | | Only messages of this instance. |
 | `device` | string | | Only messages of this device's instances. |
 | `topic_contains` | string | | Only messages whose topic contains this text (case-sensitive). |
-| `limit` | integer | `100` | At most this many, from 1 to 1000. When more match, the newest are returned. |
-| `wait_seconds` | number | `0` | When no message matches yet, wait up to this long (at most 30) for one. The call returns as soon as one arrives. |
+| `limit` | integer | `100` | At most this many, from 1 to 1000; other values are clamped to that range. When more match, the newest are returned. |
+| `wait_seconds` | number | `0` | When no message matches yet, wait up to this long (at most 30; larger values count as 30, negative ones as 0) for one. The call returns as soon as one arrives. |
 
 | Key | Meaning |
 | --- | --- |
@@ -137,7 +137,7 @@ The project as TOML. No arguments.
 | `all` | boolean | | `true` for every instance. |
 | `devices` | list of strings | | Device IDs: every instance of each. |
 | `instances` | list of strings | | Instance IDs. |
-| `wait_seconds` | number | `5` | Wait up to this long (at most 60) for the instances to settle. `0` returns at once. |
+| `wait_seconds` | number | `5` | Wait up to this long (at most 60; larger values count as 60, negative ones as 0) for the instances to settle. `0` returns at once. |
 
 They return:
 
@@ -155,7 +155,7 @@ Errors, shared by all four:
 
 Starts stopped and failed instances; running ones are left alone. It waits until each instance is `online`, `failed` or `reconnecting`, so check the returned statuses.
 
-Errors: `` device `<id>` has validation errors and cannot start; get_project lists them ``.
+Errors: `` device `<id>` has validation errors and cannot start; get_project lists them ``. This error is returned only when you name the blocked device in `devices`. An instance of a blocked device, named in `instances`, is reported as unknown, and `all = true` skips blocked devices.
 
 ### `stop`
 
@@ -213,7 +213,7 @@ Replaces the whole project with TOML text.
 | `toml` | string | | The whole project file. Required. |
 | `dry_run` | boolean | `false` | Only report the problems the text would have; change nothing. |
 
-Text with a TOML syntax error or an unknown key is refused, and the project stays as it was. The error lists every problem with its position, for example ``line 2, column 1: unknown field `hots`, expected one of …``. Text that parses but has validation problems is applied; the problems come back in the result.
+Text with a TOML syntax error, an unknown or missing key, or a value of the wrong type is refused, and the project stays as it was. The error names the problem and its position, for example ``line 2, column 1: unknown field `hots`, expected one of …``. Text that parses but has validation problems is applied; the problems come back in the result.
 
 ### `put_device`
 
@@ -287,13 +287,13 @@ Errors: `` unknown built-in template `<id>` ``, `` a template `<id>` already exi
 
 ### `set_broker`
 
-Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Pass the current `mqtt_version` and `session_expiry` from `get_project` to keep them: an omitted `mqtt_version` is `"5"`. Omitted keys take their defaults, as in the [project file](/docs/reference/project-file#broker). Every running instance needs a restart to use the new settings.
+Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the project file: an omitted `mqtt_version` is `"5"`, and an omitted `username`, `password`, `password_env` or `tls` is removed. To change one setting, pass every key `get_project` shows under `[broker]`; pass `password = "<redacted>"` to keep the stored password. Every running instance needs a restart to use the new settings.
 
 ## Files
 
 ### `new_project`
 
-Replaces the project with an empty, untitled one.
+Replaces the project with an empty, untitled one. The current instances stop gracefully.
 
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -315,7 +315,7 @@ Opens a project file. The current instances stop gracefully, and the new project
 
 Returns as `new_project`. A file with validation problems opens; its problems come back in the result.
 
-Errors: those of `new_project`, ``cannot read <path>: <reason>``, and the problems of a file with a TOML syntax error or an unknown key. In that case the current project keeps running.
+Errors: those of `new_project`, ``cannot read <path>: <reason>``, and the problem of a file that does not parse (a TOML syntax error, an unknown or missing key, or a wrong type). In that case the current project keeps running.
 
 ### `save_project`
 
