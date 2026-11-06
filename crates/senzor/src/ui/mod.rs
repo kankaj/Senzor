@@ -54,6 +54,9 @@ pub enum Action {
     AskCopyBuiltin(String),
     OpenBroker,
     OpenSettings,
+    /// Open a project from the Recent menu.
+    OpenRecent(PathBuf),
+    ClearRecent,
     SetTheme(Theme),
     GoTo(ProblemTarget),
     /// Turn the MCP endpoint on or off.
@@ -108,10 +111,13 @@ pub fn replace_if_unchanged<T: Clone + PartialEq + 'static>(
 }
 
 /// What to do once unsaved changes are saved or discarded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pending {
     New,
+    /// Ask which file to open.
     Open,
+    /// Open this file, chosen from the recent projects.
+    OpenPath(PathBuf),
     Close,
 }
 

@@ -186,7 +186,10 @@ impl SenzorApp {
 
     fn open_path(&mut self, path: &Path) {
         match Document::open(path) {
-            Ok(doc) => self.replace_document(doc),
+            Ok(doc) => {
+                self.settings.remember(path);
+                self.replace_document(doc);
+            }
             Err(error) => {
                 if self.engine.is_none() {
                     self.replace_document(Document::new_empty());
@@ -235,6 +238,9 @@ impl SenzorApp {
     fn finish_save(&mut self, result: Result<(), String>, then: Option<Pending>) {
         match result {
             Ok(()) => {
+                if let Some(path) = self.doc.path().map(Path::to_path_buf) {
+                    self.settings.remember(&path);
+                }
                 // Saving elsewhere can change how relative TLS paths resolve.
                 self.send(Command::ReplaceProject(
                     self.doc.validated().project.clone(),
@@ -290,6 +296,7 @@ impl SenzorApp {
                     self.open_path(&path);
                 }
             }
+            Pending::OpenPath(path) => self.open_path(&path),
             Pending::Close => {
                 self.allow_close = true;
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -350,6 +357,18 @@ impl SenzorApp {
             }
             Action::OpenBroker => self.ui.broker_open = true,
             Action::OpenSettings => self.ui.settings_open = true,
+            Action::OpenRecent(path) => {
+                if path.exists() {
+                    self.guard(Pending::OpenPath(path));
+                } else {
+                    self.settings.forget(&path);
+                    self.ui.modal = Some(Modal::Error(format!(
+                        "{} no longer exists, so it was taken off the recent projects.",
+                        path.display()
+                    )));
+                }
+            }
+            Action::ClearRecent => self.settings.recent.clear(),
             Action::SetTheme(theme) => {
                 self.settings.theme = theme;
                 self.ctx.set_theme(theme.preference());
@@ -432,7 +451,7 @@ impl eframe::App for SenzorApp {
         let mut actions = Vec::new();
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
-            ui::top_bar::show(ui, &self.doc, starting, &mut actions);
+            ui::top_bar::show(ui, &self.doc, &self.settings.recent, starting, &mut actions);
         });
         egui::Panel::bottom("bottom")
             .resizable(true)

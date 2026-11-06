@@ -674,3 +674,74 @@ fn the_zoom_buttons_in_settings_zoom_the_window_and_the_zoom_is_saved() {
     eframe::App::save(harness.state_mut(), &mut storage);
     assert_eq!(AppSettings::load(Some(&storage)).zoom, 0.9);
 }
+
+/// The app's recent projects, the latest first.
+fn recent(harness: &App) -> Vec<PathBuf> {
+    harness.state().settings().recent.clone()
+}
+
+/// `path` as the recent projects store it.
+fn resolved(path: &std::path::Path) -> PathBuf {
+    path.canonicalize().unwrap()
+}
+
+/// Chooses `path` from the top bar's Recent menu; its items are named by the full path.
+fn open_recent(harness: &mut App, path: &std::path::Path) {
+    click(harness, "Recent");
+    click(harness, &path.display().to_string());
+}
+
+#[test]
+fn opening_a_project_puts_it_first_in_the_recent_projects() {
+    let a = write_project("recent-open-a", "");
+    let b = write_project("recent-open-b", "");
+    let mut harness = app(Some(a.clone()), FakeDialogs::opening(b.clone()));
+    assert_eq!(recent(&harness), [resolved(&a)]);
+
+    click(&mut harness, "Open");
+    assert_eq!(recent(&harness), [resolved(&b), resolved(&a)]);
+}
+
+#[test]
+fn saving_a_project_under_a_name_puts_it_in_the_recent_projects() {
+    let path = test_dir("recent-save-as").join("saved.toml");
+    let mut harness = app(None, FakeDialogs::saving(path.clone()));
+    click(&mut harness, "Save as");
+    assert_eq!(recent(&harness), [resolved(&path)]);
+}
+
+#[test]
+fn choosing_a_recent_project_opens_it() {
+    let a = write_project("recent-choose-a", "");
+    let b = write_project("recent-choose-b", "");
+    let mut harness = app(Some(a.clone()), FakeDialogs::opening(b.clone()));
+    click(&mut harness, "Open");
+
+    open_recent(&mut harness, &resolved(&a));
+    let opened = harness.state().document().path().map(resolved);
+    assert_eq!(opened, Some(resolved(&a)));
+    assert_eq!(recent(&harness), [resolved(&a), resolved(&b)]);
+}
+
+#[test]
+fn a_recent_project_that_is_gone_says_so_and_leaves_the_list() {
+    let a = write_project("recent-gone-a", "");
+    let b = write_project("recent-gone-b", "");
+    let mut harness = app(Some(a.clone()), FakeDialogs::opening(b.clone()));
+    click(&mut harness, "Open");
+    let gone = resolved(&a);
+    std::fs::remove_file(&a).unwrap();
+
+    open_recent(&mut harness, &gone);
+    assert_eq!(recent(&harness), [resolved(&b)]);
+    let opened = harness.state().document().path().map(resolved);
+    assert_eq!(opened, Some(resolved(&b)), "the open project stays");
+    assert!(
+        harness
+            .query_by_label(&format!(
+                "{} no longer exists, so it was taken off the recent projects.",
+                gone.display()
+            ))
+            .is_some()
+    );
+}

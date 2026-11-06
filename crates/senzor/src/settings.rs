@@ -1,6 +1,8 @@
 //! The app's own settings, kept between launches in eframe's storage (on Linux under
 //! `~/.local/share/`). They are not part of any project file.
 
+use std::path::{Path, PathBuf};
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +43,8 @@ pub struct AppSettings {
     pub theme: Theme,
     /// How large everything is drawn: 1.0 is 100 %.
     pub zoom: f32,
+    /// Project files opened or saved lately, the latest first, at most [`AppSettings::RECENT`].
+    pub recent: Vec<PathBuf>,
 }
 
 impl Default for AppSettings {
@@ -48,12 +52,29 @@ impl Default for AppSettings {
         Self {
             theme: Theme::default(),
             zoom: 1.0,
+            recent: Vec::new(),
         }
     }
 }
 
 impl AppSettings {
     const KEY: &str = "senzor-settings";
+    /// How many recent projects the list keeps.
+    pub const RECENT: usize = 10;
+
+    /// Puts `path` first in the recent projects, as an absolute path when it can be resolved.
+    pub fn remember(&mut self, path: &Path) {
+        let path = resolved(path);
+        self.recent.retain(|p| *p != path);
+        self.recent.insert(0, path);
+        self.recent.truncate(Self::RECENT);
+    }
+
+    /// Takes `path` off the recent projects.
+    pub fn forget(&mut self, path: &Path) {
+        let resolved = resolved(path);
+        self.recent.retain(|p| p != path && *p != resolved);
+    }
 
     /// The stored settings, or the defaults when there are none or they cannot be read.
     pub fn load(storage: Option<&dyn eframe::Storage>) -> Self {
@@ -71,6 +92,14 @@ impl AppSettings {
         ctx.set_theme(self.theme.preference());
         ctx.set_zoom_factor(self.zoom);
     }
+}
+
+/// `path` with symbolic links and `.` or `..` resolved; for a file that does not exist, just
+/// made absolute.
+fn resolved(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -104,6 +133,7 @@ mod tests {
         let settings = AppSettings {
             theme: Theme::Light,
             zoom: 1.3,
+            recent: vec![PathBuf::from("/projects/a.toml")],
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);
@@ -145,6 +175,7 @@ mod tests {
         AppSettings {
             theme: Theme::Light,
             zoom: 1.5,
+            recent: Vec::new(),
         }
         .apply(&ctx);
         // egui changes the zoom when the next frame begins.
@@ -155,5 +186,50 @@ mod tests {
             ctx.options(|o| o.theme_preference),
             egui::ThemePreference::Light
         );
+    }
+
+    #[test]
+    fn a_remembered_project_goes_first_and_appears_once() {
+        let mut settings = AppSettings::default();
+        for name in ["a", "b", "a"] {
+            settings.remember(Path::new(&format!("/projects/{name}.toml")));
+        }
+        assert_eq!(
+            settings.recent,
+            [Path::new("/projects/a.toml"), Path::new("/projects/b.toml")]
+        );
+    }
+
+    #[test]
+    fn the_recent_list_keeps_the_latest_ten() {
+        let mut settings = AppSettings::default();
+        for n in 0..12 {
+            settings.remember(Path::new(&format!("/projects/{n}.toml")));
+        }
+        assert_eq!(settings.recent.len(), AppSettings::RECENT);
+        assert_eq!(settings.recent[0], Path::new("/projects/11.toml"));
+        assert_eq!(settings.recent[9], Path::new("/projects/2.toml"));
+    }
+
+    #[test]
+    fn a_relative_path_is_remembered_as_an_absolute_one() {
+        let dir = std::env::temp_dir().join(format!("senzor-recent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("p.toml");
+        std::fs::write(&file, "").unwrap();
+        let mut settings = AppSettings::default();
+        settings.remember(&file);
+        settings.remember(&dir.join(".").join("p.toml"));
+        assert_eq!(settings.recent, [file.canonicalize().unwrap()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_forgotten_project_leaves_the_list() {
+        let mut settings = AppSettings::default();
+        settings.remember(Path::new("/projects/a.toml"));
+        settings.remember(Path::new("/projects/b.toml"));
+        settings.forget(Path::new("/projects/a.toml"));
+        assert_eq!(settings.recent, [Path::new("/projects/b.toml")]);
     }
 }

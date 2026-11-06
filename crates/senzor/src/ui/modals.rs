@@ -37,7 +37,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
                 ui.heading("Unsaved changes");
                 let what = match pending {
                     Pending::New => "starting a new project",
-                    Pending::Open => "opening another project",
+                    Pending::Open | Pending::OpenPath(_) => "opening another project",
                     Pending::Close => "closing",
                 };
                 ui.label(format!("Save the changes to this project before {what}?"));
@@ -48,7 +48,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
                         ("Cancel", UnsavedChoice::Cancel),
                     ] {
                         if ui.button(label).clicked() {
-                            outcome = Some(Outcome::Unsaved(*pending, choice));
+                            outcome = Some(Outcome::Unsaved(pending.clone(), choice));
                         }
                     }
                 });
@@ -96,7 +96,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
                     if ui.button("Replace").clicked() {
                         outcome = Some(Outcome::Replace {
                             path: path.clone(),
-                            then: *then,
+                            then: then.clone(),
                         });
                     }
                     if ui.button("Cancel").clicked() {
@@ -115,7 +115,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
     });
     if outcome.is_none() && response.should_close() {
         outcome = Some(match modal {
-            Modal::Unsaved(pending) => Outcome::Unsaved(*pending, UnsavedChoice::Cancel),
+            Modal::Unsaved(pending) => Outcome::Unsaved(pending.clone(), UnsavedChoice::Cancel),
             _ => Outcome::Dismissed,
         });
     }
