@@ -2,7 +2,7 @@
 //! Reads keep working while the host is busy (or, in the GUI, while no frames are drawn).
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use senzor_core::engine::EngineObserver;
 use senzor_core::project::{Document, ProjectFile, Validated};
@@ -34,13 +34,13 @@ impl View {
             open_error,
             observer,
         };
-        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(snapshot);
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
     }
 
     pub(crate) fn get(&self) -> Result<Snapshot, String> {
         self.0
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .ok_or_else(|| "Senzor is still starting; try again".to_string())
     }
@@ -48,7 +48,7 @@ impl View {
     pub(crate) fn observer(&self) -> Result<EngineObserver, String> {
         self.0
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map(|s| s.observer.clone())
             .ok_or_else(|| "Senzor is still starting; try again".to_string())

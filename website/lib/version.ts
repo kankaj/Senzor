@@ -15,7 +15,7 @@ export const version: string = (() => {
   }
   const afterHeader = cargoToml.split(/^\[workspace\.package\]\s*$/m)[1] ?? '';
   const section = afterHeader.split(/^\[/m)[0];
-  const match = section.match(/^version\s*=\s*"([^"]+)"/m);
+  const match = /^version\s*=\s*"([^"]+)"/m.exec(section);
   if (!match) {
     throw new Error('no version under [workspace.package] in ../Cargo.toml');
   }

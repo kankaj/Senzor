@@ -160,7 +160,7 @@ pub struct TlsConfig {
 impl fmt::Debug for TlsConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsConfig")
-            .field("ca", &self.ca.as_ref().map(|c| c.len()))
+            .field("ca", &self.ca.as_ref().map(Vec::len))
             .field("client_auth", &self.client_auth.is_some())
             .finish()
     }

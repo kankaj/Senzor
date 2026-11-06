@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use eframe::egui::{self, Button, TextEdit};
-use senzor_core::engine::{Command, EngineState, Target};
+use senzor_core::engine::{Command, EngineState, InstanceState, Target};
 use senzor_core::value::Value;
 
 use super::{Action, ERROR, UiState, WARNING, status_dot};
@@ -22,6 +22,14 @@ pub fn show(
         ui.label("This instance is no longer part of the project.");
         return;
     };
+    show_status(ui, doc, instance);
+    show_controls(ui, id, instance, actions);
+    ui.separator();
+    show_fields(ui, id, doc, instance, ui_state, actions);
+}
+
+/// The instance's status, counters and the warnings that apply to it.
+fn show_status(ui: &mut egui::Ui, doc: &Document, instance: &InstanceState) {
     let (word, detail) = format::status(&instance.status);
     ui.horizontal(|ui| {
         status_dot(ui, &instance.status);
@@ -59,35 +67,41 @@ pub fn show(
         };
         ui.colored_label(WARNING, text);
     }
+}
 
+/// Start, or Stop, Restart and Kill for a running instance.
+fn show_controls(ui: &mut egui::Ui, id: &str, instance: &InstanceState, actions: &mut Vec<Action>) {
     let target = || Target::Instance(id.to_string());
-    let running = instance.status.is_running();
     ui.horizontal(|ui| {
-        if running {
-            if ui.button("Stop").clicked() {
-                actions.push(Action::Engine(Command::Stop(target())));
+        if !instance.status.is_running() {
+            if ui.button("Start").clicked() {
+                actions.push(Action::Engine(Command::Start(target())));
             }
-            if is_restartable(&instance.status, instance.orphaned)
-                && ui
-                    .button("Restart")
-                    .on_hover_text("Stop, then start again with the project's current settings")
-                    .clicked()
-            {
-                actions.push(Action::Engine(Command::Restart(target())));
-            }
-            if ui
-                .button("Kill")
-                .on_hover_text("Drop the connection; the broker publishes the Last Will")
+            return;
+        }
+        if ui.button("Stop").clicked() {
+            actions.push(Action::Engine(Command::Stop(target())));
+        }
+        if is_restartable(&instance.status, instance.orphaned)
+            && ui
+                .button("Restart")
+                .on_hover_text("Stop, then start again with the project's current settings")
                 .clicked()
-            {
-                actions.push(Action::Engine(Command::Kill(target())));
-            }
-        } else if ui.button("Start").clicked() {
-            actions.push(Action::Engine(Command::Start(target())));
+        {
+            actions.push(Action::Engine(Command::Restart(target())));
+        }
+        if ui
+            .button("Kill")
+            .on_hover_text("Drop the connection; the broker publishes the Last Will")
+            .clicked()
+        {
+            actions.push(Action::Engine(Command::Kill(target())));
         }
     });
-    ui.separator();
+}
 
+/// The fields the project gives the instance, then any others the engine reports.
+fn field_names(id: &str, doc: &Document, instance: &InstanceState) -> Vec<String> {
     let mut fields: Vec<String> = doc
         .validated()
         .project
@@ -99,6 +113,18 @@ pub fn show(
             fields.push(name.clone());
         }
     }
+    fields
+}
+
+/// Each field's value, with an input to pin it and a Pin or Unpin button.
+fn show_fields(
+    ui: &mut egui::Ui,
+    id: &str,
+    doc: &Document,
+    instance: &InstanceState,
+    ui_state: &mut UiState,
+    actions: &mut Vec<Action>,
+) {
     egui::Grid::new("instance-fields")
         .num_columns(4)
         .striped(true)
@@ -108,45 +134,57 @@ pub fn show(
             ui.strong("Pin to");
             ui.label("");
             ui.end_row();
-            for field in fields {
-                let name = ui.label(&field);
-                let pinned = instance.pinned.contains(&field);
-                let value = instance
-                    .values
-                    .get(&field)
-                    .map_or_else(|| "–".to_string(), format::value);
-                ui.label(if pinned {
-                    format!("{value} (pinned)")
-                } else {
-                    value
-                });
-                let input = ui_state
-                    .pin_inputs
-                    .entry((id.to_string(), field.clone()))
-                    .or_default();
-                ui.add_sized([140.0, 20.0], TextEdit::singleline(input))
-                    .labelled_by(name.id);
-                if pinned {
-                    if ui.add_enabled(running, Button::new("Unpin")).clicked() {
-                        actions.push(Action::Engine(Command::Unpin {
-                            instance: id.to_string(),
-                            field: field.clone(),
-                        }));
-                    }
-                } else if ui
-                    // Pinning "" is a slip: templates that format the field fail on it every tick.
-                    .add_enabled(running && !input.trim().is_empty(), Button::new("Pin"))
-                    .clicked()
-                {
-                    actions.push(Action::Engine(Command::Pin {
-                        instance: id.to_string(),
-                        field: field.clone(),
-                        value: Value::parse_input(input),
-                    }));
-                }
+            for field in field_names(id, doc, instance) {
+                show_field(ui, id, &field, instance, ui_state, actions);
                 ui.end_row();
             }
         });
+}
+
+fn show_field(
+    ui: &mut egui::Ui,
+    id: &str,
+    field: &str,
+    instance: &InstanceState,
+    ui_state: &mut UiState,
+    actions: &mut Vec<Action>,
+) {
+    let running = instance.status.is_running();
+    let name = ui.label(field);
+    let pinned = instance.pinned.contains(field);
+    let value = instance
+        .values
+        .get(field)
+        .map_or_else(|| "–".to_string(), format::value);
+    ui.label(if pinned {
+        format!("{value} (pinned)")
+    } else {
+        value
+    });
+    let input = ui_state
+        .pin_inputs
+        .entry((id.to_string(), field.to_string()))
+        .or_default();
+    ui.add_sized([140.0, 20.0], TextEdit::singleline(input))
+        .labelled_by(name.id);
+    if pinned {
+        if ui.add_enabled(running, Button::new("Unpin")).clicked() {
+            actions.push(Action::Engine(Command::Unpin {
+                instance: id.to_string(),
+                field: field.to_string(),
+            }));
+        }
+    } else if ui
+        // Pinning "" is a slip: templates that format the field fail on it every tick.
+        .add_enabled(running && !input.trim().is_empty(), Button::new("Pin"))
+        .clicked()
+    {
+        actions.push(Action::Engine(Command::Pin {
+            instance: id.to_string(),
+            field: field.to_string(),
+            value: Value::parse_input(input),
+        }));
+    }
 }
 
 #[cfg(test)]

@@ -12,7 +12,11 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* While a dialog is open, react-remove-scroll-bar adds the scroll bar's width as a margin so the
+   page does not shift; the stable gutter above already keeps that space. Its margin is
+   `!important`, so only another `!important` overrides it; its variable is not, and this
+   selector is more specific than its `body[data-scroll-locked]`. */
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
-  --removed-body-scroll-bar-size: 0px !important;
+  --removed-body-scroll-bar-size: 0px;
 }

@@ -332,31 +332,26 @@ async fn sigterm_shuts_down_gracefully_and_exits_0() {
     let port = start_broker();
     let mut sub = Subscriber::connect(port, "cli/+/status").await;
     let path = write_project("sigterm", &project_toml(port, true));
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
+    let mut child = tokio::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
         .arg("run")
         .arg(&*path)
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .unwrap();
     sub.wait_for(Duration::from_secs(5), |m| m.payload == "online")
         .await
         .expect("instances came online");
 
-    let sent = std::process::Command::new("kill")
-        .args(["-TERM", &child.id().to_string()])
+    let pid = child.id().expect("senzor-cli is running");
+    let sent = tokio::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
         .status()
+        .await
         .unwrap();
     assert!(sent.success());
-    let pid = child.id();
-    let waited = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::task::spawn_blocking(move || child.wait().unwrap()),
-    )
-    .await;
-    let Ok(status) = waited else {
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
+    let Ok(status) = tokio::time::timeout(Duration::from_secs(5), child.wait()).await else {
+        let _ = child.kill().await;
         panic!("senzor-cli did not exit within 5 s of SIGTERM");
     };
     let status = status.unwrap();

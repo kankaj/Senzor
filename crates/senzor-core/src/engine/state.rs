@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use crate::render::MessageProperties;
@@ -160,9 +160,7 @@ pub(crate) struct Shared {
 
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, EngineState> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn update<R>(&self, f: impl FnOnce(&mut EngineState) -> R) -> R {

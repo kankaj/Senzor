@@ -168,11 +168,8 @@ fn free_port_never_hands_out_a_port_twice() {
 fn non_mqtt_listener() -> u16 {
     let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = squatter.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for stream in squatter.incoming() {
-            std::mem::forget(stream);
-        }
-    });
+    // Holding every accepted stream keeps its connection open without answering.
+    std::thread::spawn(move || squatter.incoming().collect::<Vec<_>>());
     port
 }
 

@@ -33,7 +33,7 @@ Coordinates are pixels in the screenshot: the window fills the display, with no 
 EOF
 }
 
-pid_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+pid_alive() { local pidfile=$1; [[ -f $pidfile ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; }
 
 need_app() {
   pid_alive "$STATE/app.pid" || { echo "the GUI is not running; use: dev/gui.sh start" >&2; exit 1; }
@@ -42,8 +42,8 @@ need_app() {
 xdo() { DISPLAY=$X xdotool "$@"; }
 
 start() {
-  local project=()
-  if [[ $# -gt 0 && $1 != -- ]]; then project=("$(realpath "$1")"); shift; fi
+  local project=() first=${1:-}
+  if [[ $# -gt 0 && $first != -- ]]; then project=("$(realpath "$first")"); shift; fi
   [[ ${1:-} == -- ]] && shift
   if pid_alive "$STATE/app.pid"; then echo "already running; use: dev/gui.sh stop" >&2; exit 1; fi
   mkdir -p "$STATE"

@@ -4,8 +4,8 @@
 
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use rumqttc::ConnectReturnCode;
@@ -29,9 +29,7 @@ pub fn free_port() -> u16 {
             .local_addr()
             .expect("local address")
             .port();
-        let mut handed_out = HANDED_OUT
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut handed_out = HANDED_OUT.lock().unwrap_or_else(PoisonError::into_inner);
         if handed_out.insert(port) {
             return port;
         }
