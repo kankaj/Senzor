@@ -119,8 +119,7 @@ fn icon_button(ui: &mut egui::Ui, icon: &str, label: &str) -> egui::Response {
     response
 }
 
-/// The Recent menu, a clock next to Open: each project's file name and folder; screen readers and tests know an item
-/// by its full path.
+/// The Recent menu, a clock next to Open, listing [`super::recent_project_button`]s.
 fn recent_menu(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
     let menu = ui.menu_button(icons::CLOCK_COUNTER_CLOCKWISE, |ui| {
         if recent.is_empty() {
@@ -128,21 +127,7 @@ fn recent_menu(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>)
             return;
         }
         for path in recent {
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-            let folder = path
-                .parent()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            let item = ui.button((
-                egui::RichText::new(name),
-                egui::RichText::new(folder).weak().small(),
-            ));
-            let full = path.display().to_string();
-            item.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &full));
-            if item.clicked() {
+            if super::recent_project_button(ui, path).clicked() {
                 actions.push(Action::OpenRecent(path.clone()));
             }
         }

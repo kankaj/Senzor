@@ -10,9 +10,10 @@ pub mod settings;
 pub mod switch;
 pub mod template;
 pub mod top_bar;
+pub mod welcome;
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use eframe::egui::{self, Color32, TextEdit};
@@ -434,6 +435,26 @@ pub fn errors_at(ui: &mut egui::Ui, doc: &Document, location: &Location) -> bool
         any
     })
     .inner
+}
+
+/// A recent project: its file name and, smaller, its folder. Screen readers and tests know it
+/// by its full path.
+pub fn recent_project_button(ui: &mut egui::Ui, path: &Path) -> egui::Response {
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let folder = path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let response = ui.button((
+        egui::RichText::new(name),
+        egui::RichText::new(folder).weak().small(),
+    ));
+    let full = path.display().to_string();
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &full));
+    response
 }
 
 /// Sets `ctx`'s fonts: egui's text fonts, and Phosphor as the only icon font, a fallback after the

@@ -768,3 +768,41 @@ fn save_stands_out_while_there_are_unsaved_changes() {
     assert!(harness.state().document().is_dirty());
     assert!(shows_tooltip(&mut harness, "Save", TIP));
 }
+
+const WELCOME: &str = "Welcome to Senzor";
+
+#[test]
+fn starting_without_a_project_shows_the_welcome_screen() {
+    let harness = app(None, FakeDialogs::default());
+    assert!(harness.query_by_label(WELCOME).is_some());
+    assert!(harness.query_by_label("No recent projects yet.").is_some());
+}
+
+#[test]
+fn an_opened_project_shows_no_welcome_screen() {
+    let path = write_project("welcome-opened", "");
+    let harness = app(Some(path), FakeDialogs::default());
+    assert!(harness.query_by_label(WELCOME).is_none());
+}
+
+#[test]
+fn the_welcome_screen_lists_the_recent_projects_and_opens_one() {
+    let a = write_project("welcome-recent", "");
+    let mut harness = app(None, FakeDialogs::opening(a.clone()));
+    click(&mut harness, "Open");
+    assert!(harness.query_by_label(WELCOME).is_none());
+
+    click(&mut harness, "New");
+    assert!(harness.query_by_label(WELCOME).is_some());
+    click(&mut harness, &resolved(&a).display().to_string());
+    let opened = harness.state().document().path().map(resolved);
+    assert_eq!(opened, Some(resolved(&a)));
+}
+
+#[test]
+fn adding_the_first_device_from_the_welcome_screen_leaves_it() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Add your first device");
+    assert_eq!(harness.state().document().file().devices.len(), 1);
+    assert!(harness.query_by_label(WELCOME).is_none());
+}

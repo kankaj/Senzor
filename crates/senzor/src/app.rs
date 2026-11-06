@@ -500,6 +500,9 @@ impl eframe::App for SenzorApp {
                     Some(Selection::Builtin(id)) => {
                         ui::template::show_builtin(ui, &id, &self.doc, &mut self.ui, &mut actions)
                     }
+                    None if ui::welcome::applies(&self.doc) => {
+                        ui::welcome::show(ui, &self.settings.recent, &mut actions)
+                    }
                     None => {
                         ui.heading("Senzor");
                         ui.label("Select a device, an instance or a template on the left.");
