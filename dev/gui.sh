@@ -125,7 +125,8 @@ event = protocol.event.ClientMessage(
     window=w, client_type=d.intern_atom("WM_PROTOCOLS"),
     data=(32, [d.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0]))
 w.send_event(event, event_mask=X.NoEventMask)
-d.flush()
+# sync, not flush: exiting right after a flush sometimes loses the request.
+d.sync()
 PY
     for _ in $(seq 100); do pid_alive "$STATE/app.pid" || break; sleep 0.1; done
     if pid_alive "$STATE/app.pid"; then echo "still running: a prompt may be open; see shot" >&2; exit 1; fi
