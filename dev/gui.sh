@@ -49,6 +49,11 @@ start() {
   mkdir -p "$STATE"
   (cd "$ROOT" && cargo build -q -p senzor)
 
+  if ! pid_alive "$STATE/xvfb.pid" && DISPLAY=$X xdotool getmouselocation >/dev/null 2>&1; then
+    echo "display $X is in use, perhaps by dev/gui.sh in another worktree: stop it there," >&2
+    echo "or pick another display with SENZOR_GUI_DISPLAY" >&2
+    exit 1
+  fi
   if ! pid_alive "$STATE/xvfb.pid"; then
     Xvfb "$X" -screen 0 "${SIZE}x24" -nolisten tcp >"$STATE/xvfb.log" 2>&1 &
     echo $! >"$STATE/xvfb.pid"
@@ -56,18 +61,22 @@ start() {
   fi
 
   # X11 only (no Wayland), its own D-Bus session so file dialogs open on the virtual display,
-  # and a scratch HOME so the app's files stay out of the real one.
+  # and a scratch HOME so the app's files stay out of the real one. setsid puts the app and
+  # everything it starts in one process group, which stop kills as a whole: killing only
+  # dbus-run-session leaves the app running.
   mkdir -p "$STATE/home"
-  env -u WAYLAND_DISPLAY DISPLAY=$X XDG_SESSION_TYPE=x11 HOME="$STATE/home" \
+  setsid env -u WAYLAND_DISPLAY DISPLAY=$X XDG_SESSION_TYPE=x11 HOME="$STATE/home" \
     XDG_CONFIG_HOME="$STATE/home/.config" XDG_DATA_HOME="$STATE/home/.local/share" \
     dbus-run-session -- "${CARGO_TARGET_DIR:-$ROOT/target}/debug/senzor" "${project[@]}" "$@" \
     >"$STATE/app.log" 2>&1 &
   echo $! >"$STATE/app.pid"
 
-  # Wait for the window, then put it at the origin at the display's size.
-  local win=""
+  # Wait for this app's window (found by its process, not its title), then put it at the origin
+  # at the display's size.
+  local win="" app=""
   for _ in $(seq 100); do
-    win=$(DISPLAY=$X xdotool search --name '^Senzor' 2>/dev/null | head -1 || true)
+    app=$(pgrep -s "$(cat "$STATE/app.pid")" -x senzor | head -1 || true)
+    [[ -n $app ]] && win=$(DISPLAY=$X xdotool search --pid "$app" 2>/dev/null | head -1 || true)
     [[ -n $win ]] && break
     pid_alive "$STATE/app.pid" || { echo "the GUI exited:" >&2; cat "$STATE/app.log" >&2; exit 1; }
     sleep 0.1
@@ -77,6 +86,7 @@ start() {
   # The window can be found before it is viewable; focusing it then fails, so retry.
   xdo windowmove "$win" 0 0 windowsize "$win" "${SIZE%x*}" "${SIZE#*x}"
   for _ in $(seq 50); do xdo windowfocus --sync "$win" 2>/dev/null && break; sleep 0.1; done
+  echo "$win" >"$STATE/window"
   sleep 1
   echo "running on $X (window $win)"
 }
@@ -90,11 +100,10 @@ shot() {
 }
 
 stop() {
-  for f in app xvfb; do
-    if pid_alive "$STATE/$f.pid"; then kill "$(cat "$STATE/$f.pid")" 2>/dev/null || true; fi
-    rm -f "$STATE/$f.pid"
-  done
-  pkill -f "senzor.*$STATE" 2>/dev/null || true
+  # The app's whole process group (see start), then the display.
+  if [[ -f "$STATE/app.pid" ]]; then kill -- "-$(cat "$STATE/app.pid")" 2>/dev/null || true; fi
+  if pid_alive "$STATE/xvfb.pid"; then kill "$(cat "$STATE/xvfb.pid")" 2>/dev/null || true; fi
+  rm -f "$STATE/app.pid" "$STATE/xvfb.pid" "$STATE/window"
   echo stopped
 }
 
@@ -116,7 +125,7 @@ case $cmd in
   close)
     need_app
     # With no window manager, xdotool windowquit reaches nobody: send WM_DELETE_WINDOW directly.
-    DISPLAY=$X python3 -I - "$(DISPLAY=$X xdotool search --name '^Senzor' | head -1)" <<'PY'
+    DISPLAY=$X python3 -I - "$(cat "$STATE/window")" <<'PY'
 import sys
 from Xlib import X, display, protocol
 d = display.Display()
