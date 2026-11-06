@@ -18,6 +18,12 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Largest message (topic + payload) an instance publishes; larger ones are counted as errors.
 pub(crate) const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
+/// How many QoS 1 and 2 messages a connection may have waiting for the broker's acknowledgement.
+/// rumqttc keeps a slot for each up front; its MQTT 5 client has no limit of its own and would
+/// make 65,536 of them, about 14 MB per instance. An instance publishes a few messages per tick, so
+/// 100, the 3.1.1 client's default, is plenty.
+const MAX_INFLIGHT: u16 = 100;
+
 /// rumqttc treats an over-limit packet as a connection error, so its limit is the message plus header room.
 const MAX_PACKET_BYTES: usize = MAX_MESSAGE_BYTES + 1024;
 
@@ -116,6 +122,7 @@ fn v311_options(broker: &BrokerConfig, instance_id: &str, will: Option<Will>) ->
     options.set_keep_alive(broker.keep_alive);
     options.set_clean_session(true);
     options.set_max_packet_size(MAX_PACKET_BYTES, MAX_PACKET_BYTES);
+    options.set_inflight(MAX_INFLIGHT);
     if let Some(credentials) = &broker.credentials {
         options.set_credentials(credentials.username.clone(), credentials.password.clone());
     }
@@ -151,6 +158,7 @@ fn v5_options(
     options.set_clean_start(session_expiry == 0);
     options.set_session_expiry_interval((session_expiry > 0).then_some(session_expiry));
     options.set_max_packet_size(Some(MAX_PACKET_BYTES as u32));
+    options.set_outgoing_inflight_upper_limit(MAX_INFLIGHT);
     if let Some(credentials) = &broker.credentials {
         options.set_credentials(credentials.username.clone(), credentials.password.clone());
     }
@@ -394,6 +402,16 @@ mod tests {
             mqtt_version,
             session_expiry: Duration::ZERO,
         }
+    }
+
+    /// rumqttc's MQTT 5 client keeps a slot for every packet ID it may have in flight, made up
+    /// front: without a limit that is 65,536 slots, about 14 MB for each instance.
+    #[test]
+    fn both_versions_keep_at_most_a_hundred_messages_in_flight() {
+        let v5 = v5_options(&broker(MqttVersion::V5), "d", None);
+        assert_eq!(v5.get_outgoing_inflight_upper_limit(), Some(MAX_INFLIGHT));
+        let v311 = v311_options(&broker(MqttVersion::V311), "d", None);
+        assert_eq!(v311.inflight(), MAX_INFLIGHT);
     }
 
     fn will(delay: Option<u32>) -> Will {
