@@ -47,7 +47,10 @@ start() {
   [[ ${1:-} == -- ]] && shift
   if pid_alive "$STATE/app.pid"; then echo "already running; use: dev/gui.sh stop" >&2; exit 1; fi
   mkdir -p "$STATE"
-  (cd "$ROOT" && cargo build -q -p senzor)
+  # SENZOR_GUI_RELEASE=1 runs an optimised build, for judging speed.
+  local profile=debug flags=()
+  [[ -n ${SENZOR_GUI_RELEASE:-} ]] && profile=release flags=(--release)
+  (cd "$ROOT" && cargo build -q -p senzor "${flags[@]}")
 
   if ! pid_alive "$STATE/xvfb.pid" && DISPLAY=$X xdotool getmouselocation >/dev/null 2>&1; then
     echo "display $X is in use, perhaps by dev/gui.sh in another worktree: stop it there," >&2
@@ -67,7 +70,7 @@ start() {
   mkdir -p "$STATE/home"
   setsid env -u WAYLAND_DISPLAY DISPLAY=$X XDG_SESSION_TYPE=x11 HOME="$STATE/home" \
     XDG_CONFIG_HOME="$STATE/home/.config" XDG_DATA_HOME="$STATE/home/.local/share" \
-    dbus-run-session -- "${CARGO_TARGET_DIR:-$ROOT/target}/debug/senzor" "${project[@]}" "$@" \
+    dbus-run-session -- "${CARGO_TARGET_DIR:-$ROOT/target}/$profile/senzor" "${project[@]}" "$@" \
     >"$STATE/app.log" 2>&1 &
   echo $! >"$STATE/app.pid"
 

@@ -48,4 +48,5 @@ dev/gui.sh stop                           # kill the app and the display
 session under `target/gui-driver/`, so file dialogs open on the virtual display and nothing is
 written to the real home folder; its saved settings land in `target/gui-driver/home/.local/share/`.
 `close` needs Python's Xlib (`python-xlib`), and a running build uses `CARGO_TARGET_DIR` if set. Edits are not saved unless you click **Save**, so an example
-project opened this way stays unchanged.
+project opened this way stays unchanged. `SENZOR_GUI_RELEASE=1 dev/gui.sh start …` runs an optimised
+build, for judging speed: a debug build lays out the window about ten times slower.
