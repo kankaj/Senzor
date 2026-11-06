@@ -29,6 +29,11 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
     `cargo clippy -p senzor --examples --features screenshots -- -D warnings`;
   - `cargo fmt --all --check`;
   - in `website/`: `pnpm check:links`, `pnpm types:check`, `pnpm build`, when docs changed.
+- Tool versions: Rust in `rust-toolchain.toml` (rustup and IDEs read it), Node and pnpm in
+  `mise.toml`, which also reads the Rust file; CI installs them with mise. `mise trust` once, then
+  `mise install`. Change a version there, never in the workflow.
+- CI (`.github/workflows/ci.yml`) runs the same gates once, plus the Mosquitto tests, on every
+  push to `main` and every pull request; when a gate changes, change the workflow with it.
 - Real-broker tests are `#[ignore]`d: `docker compose -f dev/compose.yaml up -d`, then
   `cargo test --workspace -- --ignored` (see `dev/README.md`). Run them after engine or MQTT
   changes.

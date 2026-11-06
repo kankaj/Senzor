@@ -1,0 +1,71 @@
+# Checks every push to main and every pull request: the Rust workspace (format, Clippy, tests,
+# and the tests against real Mosquitto brokers) and the documentation site.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the run still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # mise reads settings only from trusted config files: this checkout is ours.
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The tools and versions in mise.toml; Rust from rust-toolchain.toml.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.10.17
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (screenshot program)
+        run: cargo clippy -p senzor --examples --features screenshots -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+      # The ignored tests need the Mosquitto brokers in dev/compose.yaml (see dev/README.md).
+      - name: Start the Mosquitto brokers
+        run: docker compose -f dev/compose.yaml up -d --wait
+      - name: Tests against Mosquitto
+        run: cargo test --workspace -- --ignored
+      - name: Stop the Mosquitto brokers
+        if: always()
+        run: docker compose -f dev/compose.yaml down
+
+  website:
+    name: Documentation site
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Node and pnpm as mise.toml pins them.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.10.17
+      - run: pnpm install --frozen-lockfile
+      - name: Links
+        run: pnpm check:links
+      - name: Types
+        run: pnpm types:check
+      - name: Build
+        run: pnpm build

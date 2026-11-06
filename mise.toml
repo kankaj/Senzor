@@ -1,0 +1,11 @@
+# Tool versions for developing Senzor, the same in CI (.github/workflows/ci.yml).
+# Run `mise trust` once in this folder, then `mise install`.
+
+[settings]
+# The Rust version lives in rust-toolchain.toml, which rustup and IDEs read as well.
+idiomatic_version_file_enable_tools = ["rust"]
+
+[tools]
+# For the documentation site in website/.
+node = "26.12.0"
+pnpm = "12.15.0"

@@ -560,7 +560,7 @@ pub(crate) mod test_support {
 
         /// Applies the frame's edits, renames and removals in phase order, as the app does.
         pub fn apply_edits(&mut self) {
-            let mut actions: Vec<Action> = self.actions.drain(..).collect();
+            let mut actions = std::mem::take(&mut self.actions);
             actions.sort_by_key(phase);
             for action in actions {
                 if let Err(other) = apply_to_document(&mut self.doc, action, None) {

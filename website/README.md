@@ -4,8 +4,9 @@ The documentation for Senzor, built with [Fumadocs](https://fumadocs.dev) on Nex
 
 ## Requirements
 
-- Node.js 24 or newer
-- [pnpm](https://pnpm.io)
+Node.js and [pnpm](https://pnpm.io), in the versions `mise.toml` in the repository root pins; CI
+uses the same. With [mise](https://mise.jdx.dev), run `mise trust` once and then `mise install` in
+the repository.
 
 ## Run it
 

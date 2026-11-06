@@ -1,0 +1,6 @@
+# The Rust used to build and check Senzor, here and in CI. rustup reads it (so do IDEs and plain
+# cargo), and mise reads it through mise.toml. Move to a newer Rust by changing the channel.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
