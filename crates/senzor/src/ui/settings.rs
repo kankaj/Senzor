@@ -33,6 +33,8 @@ pub fn show(
                     ui.label(env!("CARGO_PKG_VERSION"));
                     ui.end_row();
                 });
+            ui.separator();
+            about(ui);
         });
     ui_state.settings_open = open;
 }
@@ -157,4 +159,72 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, actions: &mut Vec<Action>) {
         }
         McpStatus::Off { error: None, .. } => {}
     }
+}
+
+/// The open-source components built into the window: name, licence and project page.
+const CREDITS: &[(&str, &str, &str)] = &[
+    (
+        "egui and eframe",
+        "MIT or Apache-2.0",
+        "https://github.com/emilk/egui",
+    ),
+    ("Phosphor Icons", "MIT", "https://phosphoricons.com"),
+    (
+        "egui-phosphor",
+        "MIT or Apache-2.0",
+        "https://github.com/amPerl/egui-phosphor",
+    ),
+    (
+        "Ubuntu font",
+        "Ubuntu Font Licence 1.0",
+        "https://design.ubuntu.com/font",
+    ),
+    ("Hack font", "MIT", "https://github.com/source-foundry/Hack"),
+    (
+        "winit",
+        "Apache-2.0",
+        "https://github.com/rust-windowing/winit",
+    ),
+    (
+        "wgpu",
+        "MIT or Apache-2.0",
+        "https://github.com/gfx-rs/wgpu",
+    ),
+    ("rfd", "MIT", "https://github.com/PolyMeilex/rfd"),
+    (
+        "rumqttc",
+        "Apache-2.0",
+        "https://github.com/bytebeamio/rumqtt",
+    ),
+    ("Tokio", "MIT", "https://github.com/tokio-rs/tokio"),
+    (
+        "MiniJinja",
+        "Apache-2.0",
+        "https://github.com/mitsuhiko/minijinja",
+    ),
+    (
+        "rmcp",
+        "Apache-2.0",
+        "https://github.com/modelcontextprotocol/rust-sdk",
+    ),
+    ("axum", "MIT", "https://github.com/tokio-rs/axum"),
+];
+
+/// Links to the documentation and the source, and the credits, folded at first.
+fn about(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.hyperlink_to("Documentation", super::DOCS_URL);
+        ui.label("·");
+        ui.hyperlink_to("Source code", super::SOURCE_URL);
+    });
+    ui.collapsing("Open-source credits", |ui| {
+        ui.label("Senzor is built with these projects, and the Rust crates they depend on:");
+        egui::Grid::new("credits").num_columns(2).show(ui, |ui| {
+            for (name, licence, url) in CREDITS {
+                ui.hyperlink_to(*name, *url);
+                ui.weak(*licence);
+                ui.end_row();
+            }
+        });
+    });
 }

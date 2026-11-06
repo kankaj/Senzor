@@ -104,7 +104,7 @@ The server also gives the agent the [project file](/docs/reference/project-file)
 While MCP is on, the agent and you work on the same project:
 
 - The agent's changes appear in the window right away: the device tree, the detail panel, the problems and the message log.
-- An edit by the agent marks the project as unsaved, so the title shows `*`, and closing the window asks **Save**, **Discard** or **Cancel** as usual.
+- An edit by the agent marks the project as unsaved, so the title shows `*`, and closing the window asks **Save**, **Discard** or **Cancel** as usual. **Undo** takes back the agent's edits like your own ([Undo and redo](/docs/gui/window#undo-and-redo)).
 - Text you are still typing into a field is dropped when the agent edits the project, so the window never shows stale values. Finish typing (or press Enter) before you ask the agent to change things.
 - A device or template you have selected stays selected when the agent's edit moves it in the list, and the selection clears if the agent removes it.
 - While a dialog is open, for example **Unsaved changes**, the agent cannot save, open or start a new project. It gets an error asking it to try again after the dialog closes. Its other requests still work.

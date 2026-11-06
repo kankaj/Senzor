@@ -36,7 +36,16 @@ pub struct Document {
     file: ProjectFile,
     saved: ProjectFile,
     validated: Validated,
+    /// The model before each undo step, the latest last; at most [`HISTORY`].
+    undo: Vec<ProjectFile>,
+    /// The models undone, the latest last; a new edit clears them.
+    redo: Vec<ProjectFile>,
+    /// The group of the latest step while more edits in it may join it.
+    open_group: Option<u64>,
 }
+
+/// How many undo steps a document keeps.
+const HISTORY: usize = 100;
 
 impl Document {
     pub fn new_empty() -> Self {
@@ -57,6 +66,9 @@ impl Document {
             saved: file.clone(),
             file,
             validated,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            open_group: None,
         }
     }
 
@@ -95,15 +107,68 @@ impl Document {
         }
     }
 
-    /// Applies `f` and re-validates. Returns whether the model changed.
+    /// Applies `f` and re-validates. Returns whether the model changed; a change is an undo step.
     pub fn edit(&mut self, f: impl FnOnce(&mut ProjectFile)) -> bool {
+        self.edit_grouped(None, f)
+    }
+
+    /// As [`Document::edit`], but consecutive changed edits in the same `group` make one undo
+    /// step; the GUI groups the keystrokes typed into one text field.
+    pub fn edit_grouped(&mut self, group: Option<u64>, f: impl FnOnce(&mut ProjectFile)) -> bool {
         let before = self.file.clone();
         f(&mut self.file);
-        let changed = self.file != before;
-        if changed {
-            self.validated = validate_in_folder(&self.file, self.path.as_deref());
+        if self.file == before {
+            return false;
         }
-        changed
+        let joins = group.is_some() && group == self.open_group;
+        if !joins {
+            self.undo.push(before);
+            if self.undo.len() > HISTORY {
+                self.undo.remove(0);
+            }
+            self.open_group = group;
+        } else if self.undo.last() == Some(&self.file) {
+            // Typed and taken back: the step would undo nothing.
+            self.undo.pop();
+            self.open_group = None;
+        }
+        self.redo.clear();
+        self.revalidate();
+        true
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Reverts the latest undo step; false when there is none.
+    pub fn undo(&mut self) -> bool {
+        let Some(before) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(std::mem::replace(&mut self.file, before));
+        self.open_group = None;
+        self.revalidate();
+        true
+    }
+
+    /// Applies the latest undone step again; false when there is none.
+    pub fn redo(&mut self) -> bool {
+        let Some(after) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.file, after));
+        self.open_group = None;
+        self.revalidate();
+        true
+    }
+
+    fn revalidate(&mut self) {
+        self.validated = validate_in_folder(&self.file, self.path.as_deref());
     }
 
     pub fn save(&mut self) -> Result<(), String> {
@@ -545,5 +610,121 @@ count = 2
         assert_eq!(doc.title(), "saved.toml");
         let reopened = Document::open(&path).unwrap();
         assert_eq!(reopened.file(), doc.file());
+    }
+
+    fn add(doc: &mut Document, id: &str) -> bool {
+        doc.edit(|f| f.devices.push(DeviceSpec::new(id, "co2")))
+    }
+
+    fn ids(doc: &Document) -> Vec<&str> {
+        doc.file().devices.iter().map(|d| d.id.as_str()).collect()
+    }
+
+    #[test]
+    fn undo_reverts_the_last_edit_and_redo_applies_it_again() {
+        let mut doc = Document::new_empty();
+        assert!(!doc.can_undo());
+        assert!(!doc.undo(), "nothing to undo");
+        add(&mut doc, "a");
+        add(&mut doc, "b");
+
+        assert!(doc.undo());
+        assert_eq!(ids(&doc), ["a"]);
+        assert!(doc.can_redo());
+        assert!(doc.undo());
+        assert_eq!(ids(&doc), Vec::<&str>::new());
+        assert!(!doc.is_dirty(), "back where the project started");
+        assert!(
+            doc.validated().project.devices.is_empty(),
+            "validated again"
+        );
+
+        assert!(doc.redo());
+        assert_eq!(ids(&doc), ["a"]);
+        assert!(doc.redo());
+        assert_eq!(ids(&doc), ["a", "b"]);
+        assert!(!doc.redo(), "nothing to redo");
+    }
+
+    #[test]
+    fn a_new_edit_after_undo_drops_what_could_be_redone() {
+        let mut doc = Document::new_empty();
+        add(&mut doc, "a");
+        doc.undo();
+        add(&mut doc, "b");
+        assert!(!doc.can_redo());
+        assert_eq!(ids(&doc), ["b"]);
+    }
+
+    #[test]
+    fn an_edit_that_changes_nothing_is_no_undo_step() {
+        let mut doc = Document::new_empty();
+        add(&mut doc, "a");
+        assert!(!doc.edit(|_| {}));
+        doc.undo();
+        assert_eq!(ids(&doc), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn edits_in_one_group_undo_together_until_another_edit_comes_between() {
+        let mut doc = Document::new_empty();
+        add(&mut doc, "d");
+        let rename = |doc: &mut Document, group, id: &str| {
+            doc.edit_grouped(group, |f| f.devices[0].id = id.into())
+        };
+        rename(&mut doc, Some(1), "d1");
+        rename(&mut doc, Some(1), "d12");
+        rename(&mut doc, Some(2), "d123");
+        add(&mut doc, "e");
+        rename(&mut doc, Some(2), "d1234");
+
+        doc.undo();
+        assert_eq!(
+            ids(&doc),
+            ["d123", "e"],
+            "group 2 after another edit is its own step"
+        );
+        doc.undo();
+        assert_eq!(ids(&doc), ["d123"]);
+        doc.undo();
+        assert_eq!(ids(&doc), ["d12"], "group 2 is one step");
+        doc.undo();
+        assert_eq!(ids(&doc), ["d"], "both edits of group 1 undo together");
+    }
+
+    #[test]
+    fn typing_after_an_undo_starts_a_new_step() {
+        let mut doc = Document::new_empty();
+        add(&mut doc, "d");
+        doc.edit_grouped(Some(1), |f| f.devices[0].id = "x".into());
+        doc.undo();
+        doc.edit_grouped(Some(1), |f| f.devices[0].id = "y".into());
+        doc.undo();
+        assert_eq!(ids(&doc), ["d"]);
+        assert!(doc.can_undo());
+    }
+
+    #[test]
+    fn the_history_keeps_the_latest_hundred_steps() {
+        let mut doc = Document::new_empty();
+        for n in 0..105 {
+            add(&mut doc, &format!("d{n}"));
+        }
+        let mut undone = 0;
+        while doc.undo() {
+            undone += 1;
+        }
+        assert_eq!(undone, 100);
+        assert_eq!(doc.file().devices.len(), 5);
+    }
+
+    #[test]
+    fn a_group_that_ends_where_it_started_leaves_no_undo_step() {
+        let mut doc = Document::new_empty();
+        add(&mut doc, "d");
+        doc.edit_grouped(Some(1), |f| f.devices[0].id = "dx".into());
+        doc.edit_grouped(Some(1), |f| f.devices[0].id = "d".into());
+        doc.undo();
+        assert_eq!(ids(&doc), Vec::<&str>::new(), "the add is the step undone");
     }
 }

@@ -7,6 +7,7 @@ pub mod instance;
 pub mod left_panel;
 pub mod modals;
 pub mod settings;
+pub mod shortcuts;
 pub mod switch;
 pub mod template;
 pub mod top_bar;
@@ -55,6 +56,8 @@ pub enum Action {
     AskCopyBuiltin(String),
     OpenBroker,
     OpenSettings,
+    Undo,
+    Redo,
     /// Open a project from the Recent menu.
     OpenRecent(PathBuf),
     ClearRecent,
@@ -76,9 +79,14 @@ pub fn phase(action: &Action) -> u8 {
 
 /// Applies an edit, rename or removal to the document and reports whether it changed;
 /// hands every other action back.
-pub fn apply_to_document(doc: &mut Document, action: Action) -> Result<bool, Box<Action>> {
+/// `typing`: the text field being typed into, whose edits make one undo step.
+pub fn apply_to_document(
+    doc: &mut Document,
+    action: Action,
+    typing: Option<u64>,
+) -> Result<bool, Box<Action>> {
     match action {
-        Action::Edit(f) => Ok(doc.edit(f)),
+        Action::Edit(f) => Ok(doc.edit_grouped(typing, f)),
         Action::Rename(rename) => Ok(doc.edit(|f| {
             // Dropping a refused rename is intended: its name box checked it, so `apply` only
             // refuses it when an action applied earlier removed, moved or renamed what it names.
@@ -437,6 +445,11 @@ pub fn errors_at(ui: &mut egui::Ui, doc: &Document, location: &Location) -> bool
     .inner
 }
 
+/// Where the documentation lives.
+pub const DOCS_URL: &str = "https://senzor.kankaj.cz/docs";
+/// Where the source code lives.
+pub const SOURCE_URL: &str = "https://github.com/kankaj/Senzor";
+
 /// A recent project: its file name and, smaller, its folder. Screen readers and tests know it
 /// by its full path.
 pub fn recent_project_button(ui: &mut egui::Ui, path: &Path) -> egui::Response {
@@ -550,7 +563,7 @@ pub(crate) mod test_support {
             let mut actions: Vec<Action> = self.actions.drain(..).collect();
             actions.sort_by_key(phase);
             for action in actions {
-                if let Err(other) = apply_to_document(&mut self.doc, action) {
+                if let Err(other) = apply_to_document(&mut self.doc, action, None) {
                     self.other.push(*other);
                 }
             }

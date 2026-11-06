@@ -759,7 +759,7 @@ fn shows_tooltip(harness: &mut App, label: &str, tip: &str) -> bool {
 
 #[test]
 fn save_stands_out_while_there_are_unsaved_changes() {
-    const TIP: &str = "Save the unsaved changes";
+    const TIP: &str = "Save the unsaved changes (Ctrl+S)";
     let path = write_project("save-highlight", "");
     let mut harness = app(Some(path), FakeDialogs::default());
     assert!(!shows_tooltip(&mut harness, "Save", TIP));
@@ -805,4 +805,207 @@ fn adding_the_first_device_from_the_welcome_screen_leaves_it() {
     click(&mut harness, "Add your first device");
     assert_eq!(harness.state().document().file().devices.len(), 1);
     assert!(harness.query_by_label(WELCOME).is_none());
+}
+
+#[test]
+fn the_settings_link_to_the_docs_and_the_source_and_credit_the_components() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(harness.query_by_label("Source code").is_some());
+    assert!(
+        harness.query_by_label("Phosphor Icons").is_none(),
+        "credits start folded"
+    );
+
+    click(&mut harness, "Open-source credits");
+    harness.run();
+    assert!(harness.query_by_label("Phosphor Icons").is_some());
+    assert!(harness.query_by_label("egui and eframe").is_some());
+}
+
+/// Presses `key` with `modifiers` and lets the window handle it.
+fn press(harness: &mut App, modifiers: egui::Modifiers, key: egui::Key) {
+    harness.key_press_modifiers(modifiers, key);
+    harness.run_steps(2);
+}
+
+const CTRL: egui::Modifiers = egui::Modifiers::COMMAND;
+
+#[test]
+fn ctrl_s_saves_and_ctrl_shift_s_saves_under_another_name() {
+    let path = write_project("shortcut-save", "");
+    let other = test_dir("shortcut-save").join("other.toml");
+    let mut harness = app(Some(path.clone()), FakeDialogs::saving(other.clone()));
+    click(&mut harness, "Add device");
+    assert!(harness.state().document().is_dirty());
+
+    press(&mut harness, CTRL, egui::Key::S);
+    assert!(!harness.state().document().is_dirty());
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("[[devices]]")
+    );
+    assert_eq!(harness.state().document().path(), Some(path.as_path()));
+
+    press(&mut harness, CTRL | egui::Modifiers::SHIFT, egui::Key::S);
+    assert_eq!(harness.state().document().path(), Some(other.as_path()));
+}
+
+#[test]
+fn ctrl_o_opens_a_project_and_ctrl_n_starts_a_new_one() {
+    let a = write_project("shortcut-open", "");
+    let mut harness = app(None, FakeDialogs::opening(a.clone()));
+    press(&mut harness, CTRL, egui::Key::O);
+    assert_eq!(harness.state().document().path(), Some(a.as_path()));
+
+    press(&mut harness, CTRL, egui::Key::N);
+    assert_eq!(harness.state().document().path(), None);
+}
+
+#[test]
+fn ctrl_comma_opens_the_settings() {
+    let mut harness = app(None, FakeDialogs::default());
+    assert!(harness.query_by_label("Open-source credits").is_none());
+    press(&mut harness, CTRL, egui::Key::Comma);
+    assert!(harness.query_by_label("Open-source credits").is_some());
+}
+
+#[test]
+fn f5_starts_every_device_and_shift_f5_stops_them() {
+    let port = start_broker();
+    let path = write_project("shortcut-run", &project(port, false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    let all = |a: &App, status: InstanceStatus| {
+        a.state()
+            .engine_state()
+            .instances
+            .values()
+            .all(|i| i.status == status)
+    };
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::F5);
+    wait_until(&mut harness, "everything online", |a| {
+        all(a, InstanceStatus::Online)
+    });
+    press(&mut harness, egui::Modifiers::SHIFT, egui::Key::F5);
+    wait_until(&mut harness, "everything stopped", |a| {
+        all(a, InstanceStatus::Stopped)
+    });
+}
+
+#[test]
+fn shortcuts_wait_while_a_dialog_is_open() {
+    let a = write_project("shortcut-dialog-a", "");
+    let b = write_project("shortcut-dialog-b", "");
+    let mut harness = app(Some(a.clone()), FakeDialogs::opening(b));
+    click(&mut harness, "Add device");
+    press(&mut harness, CTRL, egui::Key::N);
+    assert!(harness.query_by_label("Unsaved changes").is_some());
+
+    press(&mut harness, CTRL, egui::Key::O);
+    assert_eq!(harness.state().document().path(), Some(a.as_path()));
+    assert!(harness.query_by_label("Unsaved changes").is_some());
+}
+
+#[test]
+fn the_top_bar_buttons_name_their_shortcuts() {
+    let mut harness = app(None, FakeDialogs::default());
+    for (button, tip) in [
+        ("New", "New project (Ctrl+N)"),
+        ("Open", "Open a project (Ctrl+O)"),
+        ("Save", "Save (Ctrl+S)"),
+        ("Save as", "Save under another name (Ctrl+Shift+S)"),
+        (
+            "Start all",
+            "Start every device, regardless of autostart (F5)",
+        ),
+        ("Stop all", "Stop every device (Shift+F5)"),
+        ("Settings", "Settings (Ctrl+Comma)"),
+    ] {
+        assert!(shows_tooltip(&mut harness, button, tip), "{button}: {tip}");
+    }
+}
+
+fn device_count(harness: &App) -> usize {
+    harness.state().document().file().devices.len()
+}
+
+#[test]
+fn ctrl_z_undoes_and_ctrl_shift_z_or_ctrl_y_redoes() {
+    let path = write_project("undo-keys", "");
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Add device");
+    assert_eq!(device_count(&harness), 1);
+
+    press(&mut harness, CTRL, egui::Key::Z);
+    assert_eq!(device_count(&harness), 0);
+    assert!(!harness.state().document().is_dirty());
+    press(&mut harness, CTRL | egui::Modifiers::SHIFT, egui::Key::Z);
+    assert_eq!(device_count(&harness), 1);
+    press(&mut harness, CTRL, egui::Key::Z);
+    press(&mut harness, CTRL, egui::Key::Y);
+    assert_eq!(device_count(&harness), 1);
+}
+
+#[test]
+fn the_undo_and_redo_buttons_are_off_when_there_is_nothing_to_do() {
+    use egui_kittest::kittest::NodeT;
+    let path = write_project("undo-buttons", "");
+    let mut harness = app(Some(path), FakeDialogs::default());
+    let disabled = |h: &App, label: &str| h.get_by_label(label).accesskit_node().is_disabled();
+    assert!(disabled(&harness, "Undo") && disabled(&harness, "Redo"));
+
+    click(&mut harness, "Add device");
+    assert!(!disabled(&harness, "Undo"));
+    click(&mut harness, "Undo");
+    assert_eq!(device_count(&harness), 0);
+    assert!(disabled(&harness, "Undo") && !disabled(&harness, "Redo"));
+    click(&mut harness, "Redo");
+    assert_eq!(device_count(&harness), 1);
+}
+
+#[test]
+fn ctrl_z_in_a_name_box_undoes_the_typing_not_the_project() {
+    let path = write_project(
+        "undo-name-box",
+        "[[devices]]\nid = \"d\"\ntemplate = \"co2\"\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Add device");
+    click(&mut harness, "d ×1");
+    harness.get_by_label("ID").focus();
+    harness.run();
+    harness.key_press(egui::Key::End);
+    harness.get_by_label("ID").type_text("x");
+    harness.run();
+
+    press(&mut harness, CTRL, egui::Key::Z);
+    assert_eq!(device_count(&harness), 2, "the added device stays");
+}
+
+/// In a field that edits the project as you type, Ctrl+Z is the field's own undo, and the
+/// project follows the field back.
+#[test]
+fn ctrl_z_in_a_field_takes_back_the_typing_and_the_project_follows() {
+    let path = write_project("undo-typing", "");
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Broker: localhost:1883");
+    harness.run();
+    harness.get_by_label("Host").focus();
+    harness.run();
+    harness.get_by_label("Host").type_text(".lan");
+    harness.run();
+    assert_eq!(
+        harness.state().document().file().broker.host,
+        "localhost.lan"
+    );
+
+    press(&mut harness, CTRL, egui::Key::Z);
+    assert_eq!(harness.state().document().file().broker.host, "localhost");
+    assert!(!harness.state().document().is_dirty());
+    assert!(
+        !harness.state().document().can_undo(),
+        "typing taken back leaves no undo step"
+    );
 }

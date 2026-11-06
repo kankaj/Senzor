@@ -313,8 +313,23 @@ impl SenzorApp {
         }
     }
 
+    /// The text field that has the keyboard, if any: edits typed into it make one undo step.
+    fn typing_into(&self) -> Option<u64> {
+        self.ctx
+            .memory(|m| m.focused())
+            .filter(|_| self.ctx.egui_wants_keyboard_input())
+            .map(|id| id.value())
+    }
+
+    /// Text the forms keep for a value they could not parse yet belongs to the model undone.
+    fn after_undo_or_redo(&mut self) {
+        self.ui.buffers.clear();
+        self.document_changed();
+    }
+
     fn apply(&mut self, action: Action) {
-        let action = match ui::apply_to_document(&mut self.doc, action) {
+        let typing = self.typing_into();
+        let action = match ui::apply_to_document(&mut self.doc, action, typing) {
             Ok(changed) => {
                 if changed {
                     self.document_changed();
@@ -357,6 +372,16 @@ impl SenzorApp {
             }
             Action::OpenBroker => self.ui.broker_open = true,
             Action::OpenSettings => self.ui.settings_open = true,
+            Action::Undo => {
+                if self.doc.undo() {
+                    self.after_undo_or_redo();
+                }
+            }
+            Action::Redo => {
+                if self.doc.redo() {
+                    self.after_undo_or_redo();
+                }
+            }
             Action::OpenRecent(path) => {
                 if path.exists() {
                     self.guard(Pending::OpenPath(path));
@@ -449,6 +474,10 @@ impl eframe::App for SenzorApp {
         }
 
         let mut actions = Vec::new();
+        // While a dialog asks something, it gets the keys.
+        if self.ui.modal.is_none() {
+            actions.extend(ui::shortcuts::pressed(&ctx));
+        }
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
             let mcp = match self.mcp_status() {

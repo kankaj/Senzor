@@ -6,9 +6,6 @@ use egui_phosphor::regular as icons;
 use super::{Action, recent_project_button};
 use crate::document::Document;
 
-/// Where the documentation lives.
-pub const DOCS_URL: &str = "https://senzor.kankaj.cz/docs";
-
 /// The welcome screen replaces the detail panel's hint for a new project that is still blank:
 /// no file, no changes, no devices and no templates. That is how the window starts without a
 /// file, and what New gives.
@@ -45,7 +42,10 @@ pub fn show(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
         }
 
         ui.add_space(24.0);
-        ui.hyperlink_to(format!("{} Documentation", icons::BOOK_OPEN), DOCS_URL);
+        ui.hyperlink_to(
+            format!("{} Documentation", icons::BOOK_OPEN),
+            super::DOCS_URL,
+        );
     });
 }
 
