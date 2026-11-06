@@ -1009,3 +1009,12 @@ fn ctrl_z_in_a_field_takes_back_the_typing_and_the_project_follows() {
         "typing taken back leaves no undo step"
     );
 }
+
+#[test]
+fn the_settings_name_senzors_licence_and_author() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(harness.query_by_label("Apache-2.0").is_some());
+    assert!(harness.query_by_label("© 2026 Jaroslav Kaňka").is_some());
+}

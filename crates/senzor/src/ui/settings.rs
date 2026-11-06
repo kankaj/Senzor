@@ -32,6 +32,17 @@ pub fn show(
                     ui.label("Version");
                     ui.label(env!("CARGO_PKG_VERSION"));
                     ui.end_row();
+
+                    ui.label("Licence");
+                    ui.hyperlink_to(
+                        env!("CARGO_PKG_LICENSE"),
+                        format!("{}/blob/main/LICENSE", super::SOURCE_URL),
+                    );
+                    ui.end_row();
+
+                    ui.label("Author");
+                    ui.label(format!("© 2026 {}", env!("CARGO_PKG_AUTHORS")));
+                    ui.end_row();
                 });
             ui.separator();
             about(ui);

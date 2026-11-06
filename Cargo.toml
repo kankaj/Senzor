@@ -5,6 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 version = "1.0.0"
 edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/kankaj/Senzor"
+authors = ["Jaroslav Kaňka"]
 
 [workspace.dependencies]
 senzor-core = { path = "crates/senzor-core" }
