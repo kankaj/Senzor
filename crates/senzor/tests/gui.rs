@@ -1018,3 +1018,83 @@ fn the_settings_name_senzors_licence_and_author() {
     assert!(harness.query_by_label("Apache-2.0").is_some());
     assert!(harness.query_by_label("© 2026 Jaroslav Kaňka").is_some());
 }
+
+#[test]
+fn test_connection_reports_a_working_broker_until_the_broker_settings_change() {
+    let port = start_broker();
+    let path = write_project("connection-test", &project(port, false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, &format!("Broker: 127.0.0.1:{port}"));
+    click(&mut harness, "Test connection");
+    wait_until(&mut harness, "the test passed", |h| {
+        h.query_by_label("Connected").is_some()
+    });
+
+    harness.get_by_label("Host").focus();
+    harness.run();
+    harness.get_by_label("Host").type_text("x");
+    harness.run();
+    assert!(
+        harness.query_by_label("Connected").is_none(),
+        "an old result is not shown"
+    );
+}
+
+#[test]
+fn duplicate_device_adds_a_copy_after_it_and_selects_it() {
+    let path = write_project(
+        "duplicate-device",
+        "[[devices]]\nid = \"d\"\ntemplate = \"co2\"\ncount = 2\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "d ×2");
+    click(&mut harness, "Duplicate device");
+    let ids: Vec<String> = harness
+        .state()
+        .document()
+        .file()
+        .devices
+        .iter()
+        .map(|d| d.id.clone())
+        .collect();
+    assert_eq!(ids, ["d", "d-copy"]);
+    assert!(harness.query_by_label("Device d-copy").is_some());
+}
+
+const ONE_DEVICE: &str = "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\nautostart = false\n";
+const TWO_DEVICES_ON_DISK: &str = "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\nautostart = false\n\n[[devices]]\nid = \"b\"\ntemplate = \"co2\"\nautostart = false\n";
+
+/// Opens a one-device project, then rewrites its file with two devices and waits for the window
+/// to ask about it.
+fn changed_on_disk(name: &str) -> App {
+    let path = write_project(name, ONE_DEVICE);
+    let mut harness = app(Some(path.clone()), FakeDialogs::default());
+    std::fs::write(&path, TWO_DEVICES_ON_DISK).unwrap();
+    wait_until(&mut harness, "the change on disk noticed", |h| {
+        h.query_by_label("project.toml changed on disk").is_some()
+    });
+    // A dialog sizes itself in its first frame and moves to the middle in the next.
+    harness.run();
+    harness
+}
+
+#[test]
+fn a_project_changed_on_disk_can_be_reloaded() {
+    let mut harness = changed_on_disk("disk-reload-gui");
+    click(&mut harness, "Reload");
+    assert_eq!(device_count(&harness), 2);
+    assert!(!harness.state().document().is_dirty());
+    assert!(
+        harness
+            .query_by_label("project.toml changed on disk")
+            .is_none()
+    );
+}
+
+#[test]
+fn keeping_my_version_leaves_it_as_unsaved_changes() {
+    let mut harness = changed_on_disk("disk-keep-gui");
+    click(&mut harness, "Keep my version");
+    assert_eq!(device_count(&harness), 1);
+    assert!(harness.state().document().is_dirty());
+}

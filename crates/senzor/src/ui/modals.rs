@@ -24,6 +24,10 @@ pub enum Outcome {
         path: PathBuf,
         then: Option<Pending>,
     },
+    /// Take the project the file now holds.
+    Reload,
+    /// Keep the project in the window over the one in the file.
+    KeepMine,
     Dismissed,
 }
 
@@ -111,11 +115,30 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
                     outcome = Some(Outcome::Dismissed);
                 }
             }
+            Modal::FileChanged { name, unsaved } => {
+                ui.heading(format!("{name} changed on disk"));
+                ui.label(if *unsaved {
+                    "Another program changed the file. Reload it to see its version; your \
+                     unsaved changes are replaced, and Undo brings them back."
+                } else {
+                    "Another program changed the file. Reload it to see its version."
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Reload").clicked() {
+                        outcome = Some(Outcome::Reload);
+                    }
+                    if ui.button("Keep my version").clicked() {
+                        outcome = Some(Outcome::KeepMine);
+                    }
+                });
+            }
         }
     });
     if outcome.is_none() && response.should_close() {
         outcome = Some(match modal {
             Modal::Unsaved(pending) => Outcome::Unsaved(pending.clone(), UnsavedChoice::Cancel),
+            // Losing nothing: Save can still write this version over the file.
+            Modal::FileChanged { .. } => Outcome::KeepMine,
             _ => Outcome::Dismissed,
         });
     }

@@ -283,7 +283,7 @@ fn check_device(spec: &DeviceSpec, template: &TemplateSpec) -> Vec<String> {
 
 /// Renders `instance_id` (or the default pattern) for every index. Fails on the first ID that is
 /// empty or repeats.
-fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
+pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
     let pattern = spec
         .instance_id
         .as_deref()

@@ -25,6 +25,15 @@ A file goes to the top of the list when it opens, including a file named on the 
 
 If a file in the list no longer exists, clicking it shows **Something went wrong** with `<path> no longer exists, so it was taken off the recent projects.`, and the current project stays open. Senzor keeps the list with its [settings](/docs/gui/settings#where-senzor-keeps-them).
 
+## When the file changes on disk
+
+About once a second, Senzor checks whether another program, such as your text editor, changed the project's file. When the file now holds a different project, the window asks: **project.toml changed on disk** (with your file's name). Changes that leave the project as it was, such as a new comment or other formatting, and a file that is not valid TOML yet do not ask: Senzor waits until the file reads as a project.
+
+- **Reload** takes the file's version. Devices that are running keep running and show **restart to apply** where their settings changed, or **removed** when they are gone from the file; see [Editing while running](/docs/concepts/editing-while-running). **Undo** brings back the version you had. If you had unsaved changes, the question says that **Reload** replaces them.
+- **Keep my version** leaves the window as it is. Your version then counts as unsaved changes, so the title shows `*`, and **Save** writes it over the file. Escape or a click outside the question does the same.
+
+While another question is open, Senzor waits with this one until you answer it.
+
 ## Save and Save as
 
 **Save** writes the project to its file. For a project without a file, it works like **Save as**. While there are unsaved changes, **Save** is filled with the accent colour.

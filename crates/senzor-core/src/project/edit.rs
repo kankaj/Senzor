@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use super::builtin::{builtin_template, is_builtin};
+use super::resolve::instance_ids;
 use super::{ProjectFile, TemplateSpec};
 
 /// The extension of project files.
@@ -41,6 +42,26 @@ pub fn check_new_template_id(file: &ProjectFile, id: &str) -> Result<(), String>
 /// The id offered for a copy of built-in `builtin`: `<builtin>-copy`, numbered when taken.
 pub fn copy_id_suggestion(file: &ProjectFile, builtin: &str) -> String {
     unique_id(&format!("{builtin}-copy"), |id| template_id_taken(file, id))
+}
+
+/// Copies device `id` right after it, under a free ID: `<id>-copy`, then `<id>-copy-2`, …
+/// Returns the copy's index, or `None` when there is no such device. The copy can run next to
+/// the original: when its `instance_id` pattern would give it the original's instance IDs, the
+/// copy uses the default pattern instead.
+pub fn duplicate_device(file: &mut ProjectFile, id: &str) -> Option<usize> {
+    let index = file.devices.iter().position(|d| d.id == id)?;
+    let original = &file.devices[index];
+    let mut copy = original.clone();
+    copy.id = unique_id(&format!("{id}-copy"), |id| {
+        file.devices.iter().any(|d| d.id == id)
+    });
+    if let (Ok(theirs), Ok(ours)) = (instance_ids(original), instance_ids(&copy))
+        && ours.iter().any(|id| theirs.contains(id))
+    {
+        copy.instance_id = None;
+    }
+    file.devices.insert(index + 1, copy);
+    Some(index + 1)
 }
 
 /// Copies built-in template `builtin` into the project under `new_id`; returns the new index.
@@ -442,5 +463,49 @@ template = "air"
         assert_eq!(file, project());
         Removal::Device(0).apply(&mut file);
         assert_eq!(file.devices[0].id, "lab");
+    }
+
+    fn devices(src: &str) -> ProjectFile {
+        ProjectFile::parse(src).unwrap()
+    }
+
+    #[test]
+    fn a_duplicate_goes_right_after_its_device_under_a_free_id() {
+        let mut file = devices(
+            "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\ncount = 3\n\n\
+             [[devices]]\nid = \"b\"\ntemplate = \"co2\"\n",
+        );
+        assert_eq!(duplicate_device(&mut file, "a"), Some(1));
+        assert_eq!(duplicate_device(&mut file, "a"), Some(1));
+        let ids: Vec<&str> = file.devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["a", "a-copy-2", "a-copy", "b"]);
+        assert_eq!(file.devices[1].count, 3, "everything else is copied");
+        assert!(file.validate(Path::new(".")).errors.is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_whose_instance_ids_would_repeat_the_originals_uses_the_default_pattern() {
+        let mut file = devices(
+            "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\ncount = 2\n\
+             instance_id = \"room-{{ index }}\"\n\n\
+             [[devices]]\nid = \"b\"\ntemplate = \"co2\"\ncount = 2\n\
+             instance_id = \"{{ id }}-n{{ index }}\"\n",
+        );
+        duplicate_device(&mut file, "a");
+        assert_eq!(file.devices[1].instance_id, None);
+        duplicate_device(&mut file, "b");
+        assert_eq!(
+            file.devices[3].instance_id.as_deref(),
+            Some("{{ id }}-n{{ index }}"),
+            "a pattern with the device ID stays"
+        );
+        assert!(file.validate(Path::new(".")).errors.is_empty());
+    }
+
+    #[test]
+    fn duplicating_an_unknown_device_changes_nothing() {
+        let mut file = devices("");
+        assert_eq!(duplicate_device(&mut file, "nope"), None);
+        assert!(file.devices.is_empty());
     }
 }

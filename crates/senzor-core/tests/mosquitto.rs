@@ -277,3 +277,29 @@ async fn mqtt_3_1_1_against_mosquitto_1_5_goes_online() {
     start_online(&engine).await;
     engine.shutdown().await;
 }
+
+/// The connection test tells a 3.1.1-only broker apart, as a failed instance does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the Docker brokers in dev/compose.yaml"]
+async fn the_connection_test_names_a_broker_without_mqtt_5() {
+    let port = mosquitto_15_port();
+    let broker = project(port, &unique("probe-"), "", "", "").broker;
+    let error =
+        senzor_core::engine::test_connection(&broker, senzor_core::engine::CONNECTION_TEST_TIMEOUT)
+            .await
+            .unwrap_err();
+    assert!(
+        error.starts_with("the broker does not support MQTT 5"),
+        "{error}"
+    );
+
+    let accepted = project(mosquitto_port(), &unique("probe-"), "", "", "").broker;
+    assert_eq!(
+        senzor_core::engine::test_connection(
+            &accepted,
+            senzor_core::engine::CONNECTION_TEST_TIMEOUT
+        )
+        .await,
+        Ok(())
+    );
+}

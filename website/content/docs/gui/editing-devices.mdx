@@ -9,12 +9,14 @@ Click a device in the **Devices** tab, such as `office ×5`, to open the device 
 
 The heading names the device, for example **Device office**. Problems with the device appear in red under it. As with templates, every change goes into the project at once, and running instances keep their settings until you restart them ([Editing while running](/docs/concepts/editing-while-running)).
 
-## Start device and Delete device
+## Start device, Duplicate device and Delete device
 
 **Start device** starts the device's instances that are not running. It is disabled while the device cannot run; hover over it to see where the problems are:
 
 - **Fix the problems listed above first**: the device's own problems, shown under the heading.
 - **Fix the problems in the Problems tab first**: the device itself is fine, but its template or the broker settings have problems.
+
+**Duplicate device** copies the device, with its template, count, params and all its other settings, and selects the copy; **Duplicate** in the device's right-click menu does the same. See [Duplicate device](#duplicate-device).
 
 **Delete device** removes the device from the project without asking. Instances of it that are running keep running as orphans until you stop them ([Running devices](/docs/gui/running-devices#orphans)).
 
@@ -73,3 +75,9 @@ In the editor, that is `{ start = 1100 }` in the `co2` row.
 If you switch the device to a template that lacks an overridden field, the override shows in red as, for example, **co2 (not in the template)**, with a **Remove override** button.
 
 [Templates, devices and instances](/docs/concepts/templates-devices-instances) explains how overrides combine with the template's fields, and the [project file reference](/docs/reference/project-file) lists the keys.
+
+## Duplicate device
+
+The copy goes right after the original, under the ID `<id>-copy`, or `<id>-copy-2`, `<id>-copy-3` and so on when that is taken. For `office`, that is `office-copy`. It does not start by itself, even with **Autostart** on: start it like any other device.
+
+Instance IDs must be unique, so the copy keeps a custom **Instance IDs** pattern only when that pattern gives it new instance IDs, for example one that uses `{{ id }}`. A pattern such as `room-{{ index }}` would give the copy the original's instance IDs, so the copy uses the default pattern instead (`office-copy-0`, `office-copy-1`, …).

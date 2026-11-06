@@ -52,6 +52,9 @@ pub fn show(
                 original.id.clone(),
             ))));
         }
+        if ui.button("Duplicate device").clicked() {
+            actions.push(Action::DuplicateDevice(original.id.clone()));
+        }
         if ui.button("Delete device").clicked() {
             actions.push(Action::Remove(Removal::Device(index)));
             actions.push(Action::Select(None));

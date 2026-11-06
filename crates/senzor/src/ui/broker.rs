@@ -4,12 +4,17 @@ use eframe::egui::{self, DragValue};
 use senzor_core::project::{Location, MqttVersion, TlsSpec};
 
 use super::{
-    Action, UiState, duration_edit, errors_at, mqtt5_control, optional_text, replace_if_unchanged,
+    Action, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, duration_edit, errors_at,
+    mqtt5_control, optional_text, replace_if_unchanged,
 };
+use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{PasswordSource, set_password_source};
 
-/// The `[broker]` / `[broker.tls]` dialog.
+/// Shown under the seed box while its text is not a seed.
+const SEED_HINT: &str = "use a whole number, or leave it empty";
+
+/// The project's settings: the `[broker]` / `[broker.tls]` section and `[simulation]`.
 pub fn show(
     ctx: &egui::Context,
     doc: &Document,
@@ -19,11 +24,14 @@ pub fn show(
     let mut open = ui_state.broker_open;
     let original = &doc.file().broker;
     let mut broker = original.clone();
-    egui::Window::new("Broker")
+    let original_simulation = &doc.file().simulation;
+    let mut simulation = original_simulation.clone();
+    egui::Window::new("Project settings")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
+            ui.strong("Broker");
             errors_at(ui, doc, &Location::Broker);
             egui::Grid::new("broker-form")
                 .num_columns(2)
@@ -125,11 +133,87 @@ pub fn show(
                     }
                 });
             ui.weak("Relative paths are resolved against the project file's folder.");
+            connection_test(ui, doc, ui_state.connection_test.as_ref(), actions);
+
+            ui.separator();
+            ui.strong("Simulation");
+            egui::Grid::new("simulation-form")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    let label = ui.label("Seed");
+                    seed_edit(ui, &mut ui_state.buffers, &mut simulation.seed)
+                        .labelled_by(label.id);
+                    ui.end_row();
+                });
+            ui.weak("With a seed, every run draws the same random values.");
         });
     ui_state.broker_open = open;
     actions.extend(replace_if_unchanged(original, broker, |f| {
         Some(&mut f.broker)
     }));
+    actions.extend(replace_if_unchanged(original_simulation, simulation, |f| {
+        Some(&mut f.simulation)
+    }));
+}
+
+/// Test connection, then how the test went, on a line of its own so a long reason wraps.
+fn connection_test(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    test: Option<&ConnectionTest>,
+    actions: &mut Vec<Action>,
+) {
+    let running = matches!(test, Some(ConnectionTest::Running));
+    let problems = doc
+        .validated()
+        .errors
+        .iter()
+        .any(|e| e.location == Location::Broker);
+    let button = ui
+        .add_enabled(!running && !problems, egui::Button::new("Test connection"))
+        .on_hover_text("Connect once with these settings, then disconnect")
+        .on_disabled_hover_text(if problems {
+            "Fix the broker problems first"
+        } else {
+            "Testing…"
+        });
+    if button.clicked() {
+        actions.push(Action::TestConnection);
+    }
+    match test {
+        Some(ConnectionTest::Running) => {
+            ui.horizontal(|ui| {
+                ui.weak(egui_phosphor::regular::HOURGLASS_MEDIUM);
+                ui.weak("connecting…");
+            });
+        }
+        Some(ConnectionTest::Passed) => {
+            ui.colored_label(ONLINE, "Connected");
+        }
+        Some(ConnectionTest::Failed(reason)) => {
+            ui.colored_label(ERROR, reason);
+        }
+        None => {}
+    }
+}
+
+/// The seed: a whole number, or empty for none, which makes every run draw fresh random values.
+fn seed_edit(ui: &mut egui::Ui, buffers: &mut Buffers, seed: &mut Option<u64>) -> egui::Response {
+    ParsedEdit::new("simulation/seed", 160.0)
+        .hint("random")
+        .show(
+            ui,
+            buffers,
+            seed,
+            |seed| seed.map_or_else(String::new, |s| s.to_string()),
+            |text| {
+                let text = text.trim();
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                text.parse().map(Some).map_err(|_| SEED_HINT.to_string())
+            },
+        )
 }
 
 fn path_edit(ui: &mut egui::Ui, path: &mut Option<PathBuf>) {
@@ -155,6 +239,107 @@ mod tests {
             let ctx = ui.ctx().clone();
             show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
         })
+    }
+
+    #[test]
+    fn test_connection_asks_the_app_to_test() {
+        let mut h = harness();
+        h.get_by_label("Test connection").click();
+        h.run();
+        assert!(
+            h.state()
+                .other
+                .iter()
+                .any(|a| matches!(a, Action::TestConnection))
+        );
+    }
+
+    fn harness_with_test(test: ConnectionTest) -> Harness<'static, Fixture> {
+        let mut fixture = Fixture::new("");
+        fixture.ui.broker_open = true;
+        fixture.ui.connection_test = Some(test);
+        fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        })
+    }
+
+    #[test]
+    fn the_test_result_shows_under_the_button() {
+        let h = harness_with_test(ConnectionTest::Passed);
+        assert!(h.query_by_label("Connected").is_some());
+        let h = harness_with_test(ConnectionTest::Failed("broker refused".into()));
+        assert!(h.query_by_label("broker refused").is_some());
+        let h = harness_with_test(ConnectionTest::Running);
+        assert!(h.query_by_label("connecting…").is_some());
+        assert!(
+            h.get_by_label("Test connection")
+                .accesskit_node()
+                .is_disabled()
+        );
+    }
+
+    #[test]
+    fn a_broker_with_problems_cannot_be_tested() {
+        let mut fixture = Fixture::new("[broker]\nport = 0\n");
+        fixture.ui.broker_open = true;
+        let h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        assert!(
+            !h.state().doc.validated().errors.is_empty(),
+            "port 0 is a problem"
+        );
+        assert!(
+            h.get_by_label("Test connection")
+                .accesskit_node()
+                .is_disabled()
+        );
+    }
+
+    #[test]
+    fn the_window_is_the_projects_settings() {
+        let h = harness();
+        assert!(h.query_by_label("Project settings").is_some());
+        assert!(h.query_by_label("Simulation").is_some());
+    }
+
+    #[test]
+    fn typing_a_seed_sets_it_in_the_project() {
+        let mut h = harness();
+        type_into_label(&mut h, "Seed", "42");
+        assert_eq!(h.state().doc.file().simulation.seed, Some(42));
+        assert!(
+            h.state()
+                .doc
+                .file()
+                .to_toml_string()
+                .contains("[simulation]\nseed = 42")
+        );
+    }
+
+    #[test]
+    fn clearing_the_seed_takes_it_out_of_the_project() {
+        let mut fixture = Fixture::new("[simulation]\nseed = 7\n");
+        fixture.ui.broker_open = true;
+        let mut h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        h.get_by_label("Seed").focus();
+        h.run();
+        h.key_press(egui::Key::Backspace);
+        h.run();
+        assert_eq!(h.state().doc.file().simulation.seed, None);
+    }
+
+    #[test]
+    fn a_seed_that_is_not_a_whole_number_is_not_applied() {
+        let mut h = harness();
+        type_into_label(&mut h, "Seed", "4x");
+        assert_eq!(h.state().doc.file().simulation.seed, None);
+        assert!(h.query_by_label(SEED_HINT).is_some());
     }
 
     #[test]

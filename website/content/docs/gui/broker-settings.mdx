@@ -7,7 +7,7 @@ All instances of a project connect to one broker. To change it, click the **Brok
 
 ![The Broker window](/screenshots/broker.png)
 
-The **Broker** window edits the project's `[broker]` section. Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. While the broker settings have problems, they show **device has errors** instead, and cannot be restarted until you fix them. Problems with the broker settings appear in red at the top of the window, and while there are any, no device can start.
+The broker button opens **Project settings**, whose **Broker** section edits the project's `[broker]` section; its **Simulation** section holds the [seed](/docs/concepts/reproducible-runs). Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. While the broker settings have problems, they show **device has errors** instead, and cannot be restarted until you fix them. Problems with the broker settings appear in red at the top of the window, and while there are any, no device can start.
 
 | Label                | Key in the file              | Default     |
 | -------------------- | ---------------------------- | ----------- |
@@ -71,3 +71,11 @@ Tick **use TLS** to connect over TLS. Three more boxes appear:
 Ticking **use TLS** does not change the port. Brokers usually accept TLS on a different port, often 8883, so set **Port** as well.
 
 Senzor reads the files whenever it validates the project, so a file it cannot read shows up in the Problems tab. Relative paths are resolved against the project file's folder, as the note at the bottom of the window says. For a project you have not saved yet, they are resolved against the folder you started Senzor in. The [project file reference](/docs/reference/project-file) lists every broker key.
+
+## Test connection
+
+**Test connection**, under the broker settings, connects to the broker once with the settings as they are, then disconnects. It does not start any device and sends no messages or Last Will. The client ID is the **Client ID prefix** followed by `connection-test`, for example `senzor-connection-test`.
+
+While it runs, the window shows **connecting…**. Then it shows **Connected**, or in red why the connection failed, in the same words a failed instance uses: a refusal such as `broker refused the connection: BadUserNamePassword`, a broker that does not support MQTT 5, or a network error. When the broker does not answer within 10 seconds, the result is `no answer from <host>:<port> within 10 s`.
+
+The result stays until you change a broker setting. While the broker settings have problems, the button is off: hover over it to read **Fix the broker problems first**.

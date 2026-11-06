@@ -42,6 +42,27 @@ pub struct Document {
     redo: Vec<ProjectFile>,
     /// The group of the latest step while more edits in it may join it.
     open_group: Option<u64>,
+    /// The file's modification time and size when last looked at.
+    disk: Option<DiskStamp>,
+    /// Another project found in the file and not yet taken or kept.
+    on_disk: Option<ProjectFile>,
+}
+
+/// What tells that a file changed without reading it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DiskStamp {
+    modified: std::time::SystemTime,
+    len: u64,
+}
+
+impl DiskStamp {
+    fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            modified: metadata.modified().ok()?,
+            len: metadata.len(),
+        })
+    }
 }
 
 /// How many undo steps a document keeps.
@@ -61,6 +82,7 @@ impl Document {
 
     fn from_file(path: Option<PathBuf>, file: ProjectFile) -> Self {
         let validated = validate_in_folder(&file, path.as_deref());
+        let disk = path.as_deref().and_then(DiskStamp::of);
         Self {
             path,
             saved: file.clone(),
@@ -69,6 +91,8 @@ impl Document {
             undo: Vec::new(),
             redo: Vec::new(),
             open_group: None,
+            disk,
+            on_disk: None,
         }
     }
 
@@ -171,6 +195,48 @@ impl Document {
         self.validated = validate_in_folder(&self.file, self.path.as_deref());
     }
 
+    /// Whether the file now holds another valid project than the one last opened or saved, not
+    /// yet reported. Reads the file only when its modification time or size changed; a file
+    /// that does not parse is left for the next check.
+    pub fn check_disk(&mut self) -> bool {
+        let Some(path) = self.path.as_deref() else {
+            return false;
+        };
+        let stamp = DiskStamp::of(path);
+        if stamp.is_none() || stamp == self.disk {
+            return false;
+        }
+        let Some(found) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| ProjectFile::parse(&text).ok())
+        else {
+            return false;
+        };
+        self.disk = stamp;
+        if found == self.saved {
+            return false;
+        }
+        self.on_disk = Some(found);
+        true
+    }
+
+    /// Takes the project [`Document::check_disk`] found as an edit (Undo returns to the one
+    /// before) and as what is saved.
+    pub fn reload(&mut self) {
+        if let Some(found) = self.on_disk.take() {
+            self.edit(|file| *file = found.clone());
+            self.saved = found;
+        }
+    }
+
+    /// Keeps the current project over the one [`Document::check_disk`] found, which becomes
+    /// what is saved: the current one now counts as unsaved changes.
+    pub fn keep_mine(&mut self) {
+        if let Some(found) = self.on_disk.take() {
+            self.saved = found;
+        }
+    }
+
     pub fn save(&mut self) -> Result<(), String> {
         let path = self
             .path
@@ -191,6 +257,8 @@ impl Document {
         write_replacing(path, &self.file.to_toml_string())
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         self.saved = self.file.clone();
+        self.disk = DiskStamp::of(path);
+        self.on_disk = None;
         Ok(())
     }
 }
@@ -726,5 +794,72 @@ count = 2
         doc.edit_grouped(Some(1), |f| f.devices[0].id = "d".into());
         doc.undo();
         assert_eq!(ids(&doc), Vec::<&str>::new(), "the add is the step undone");
+    }
+
+    /// A project file in its own folder, opened.
+    fn opened(name: &str, src: &str) -> (PathBuf, Document) {
+        let path = temp_dir(name).join("project.toml");
+        std::fs::write(&path, src).unwrap();
+        let doc = Document::open(&path).unwrap();
+        (path, doc)
+    }
+
+    const ONE: &str = "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\n";
+    const TWO: &str = "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\n\n[[devices]]\nid = \"b\"\ntemplate = \"co2\"\n";
+
+    #[test]
+    fn a_file_changed_elsewhere_is_reported_once() {
+        let (path, mut doc) = opened("disk-changed", ONE);
+        assert!(!doc.check_disk(), "nothing changed yet");
+        std::fs::write(&path, TWO).unwrap();
+        assert!(doc.check_disk());
+        assert!(!doc.check_disk(), "reported once");
+    }
+
+    #[test]
+    fn our_own_save_and_a_rewrite_with_the_same_project_are_no_change() {
+        let (path, mut doc) = opened("disk-own-save", ONE);
+        add(&mut doc, "b");
+        doc.save().unwrap();
+        assert!(!doc.check_disk());
+        // Same project, other formatting.
+        std::fs::write(&path, format!("# a comment\n{TWO}")).unwrap();
+        assert!(!doc.check_disk());
+    }
+
+    #[test]
+    fn a_half_written_file_waits_until_it_parses() {
+        let (path, mut doc) = opened("disk-half-written", ONE);
+        std::fs::write(&path, "[[devices]\nid = ").unwrap();
+        assert!(!doc.check_disk());
+        std::fs::write(&path, TWO).unwrap();
+        assert!(doc.check_disk());
+    }
+
+    #[test]
+    fn reload_takes_the_file_as_an_undoable_edit_and_as_saved() {
+        let (path, mut doc) = opened("disk-reload", ONE);
+        std::fs::write(&path, TWO).unwrap();
+        assert!(doc.check_disk());
+        doc.reload();
+        assert_eq!(ids(&doc), ["a", "b"]);
+        assert!(!doc.is_dirty());
+        assert_eq!(doc.validated().project.devices.len(), 2);
+        doc.undo();
+        assert_eq!(ids(&doc), ["a"]);
+        assert!(doc.is_dirty(), "the file holds two devices now");
+    }
+
+    #[test]
+    fn keeping_mine_makes_it_the_unsaved_version() {
+        let (path, mut doc) = opened("disk-keep", ONE);
+        std::fs::write(&path, TWO).unwrap();
+        assert!(doc.check_disk());
+        doc.keep_mine();
+        assert_eq!(ids(&doc), ["a"]);
+        assert!(doc.is_dirty());
+        doc.save().unwrap();
+        assert!(!doc.check_disk(), "our save is no change");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("\"b\""));
     }
 }

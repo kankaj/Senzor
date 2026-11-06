@@ -2,6 +2,7 @@
 
 mod instance;
 mod mqtt;
+mod probe;
 mod state;
 #[cfg(test)]
 mod test_support;
@@ -18,6 +19,7 @@ use crate::value::Value;
 use instance::{InstanceCmd, STOP_TIMEOUT, run_instance};
 use state::Shared;
 
+pub use probe::{CONNECTION_TEST_TIMEOUT, test_connection};
 pub use state::{
     EngineState, InstanceState, InstanceStatus, LOG_CAPACITY, LogEntry, LogPage, NOTIFY_INTERVAL,
     Notify, last_seq,

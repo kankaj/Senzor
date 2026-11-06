@@ -10,7 +10,7 @@ Without a seed, every run draws fresh random numbers, so random walks wander dif
 seed = 42
 ```
 
-The seed lives in the project file, in `[simulation]`. The GUI has no field for it, so add it in a text editor; the GUI keeps it when it saves the project.
+The seed lives in the project file, in `[simulation]`. In the GUI, click the broker button in the top bar to open **Project settings**, and type it under **Simulation** → **Seed**; empty means no seed. Running instances use a new seed once they restart, and show **restart to apply** until then.
 
 Use a seed when a test depends on the data: the random parts of the values come out the same on every run, so a failure can be repeated.
 

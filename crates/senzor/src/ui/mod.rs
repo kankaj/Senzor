@@ -30,7 +30,7 @@ use crate::settings::Theme;
 
 pub const ERROR: Color32 = Color32::from_rgb(220, 70, 70);
 pub const WARNING: Color32 = Color32::from_rgb(220, 160, 40);
-const ONLINE: Color32 = Color32::from_rgb(60, 180, 90);
+pub const ONLINE: Color32 = Color32::from_rgb(60, 180, 90);
 const STOPPED: Color32 = Color32::from_gray(140);
 
 /// Hover hint of a disabled Start: the Problems tab lists what blocks the device.
@@ -56,6 +56,10 @@ pub enum Action {
     AskCopyBuiltin(String),
     OpenBroker,
     OpenSettings,
+    /// Connect once with the broker settings and show how it went.
+    TestConnection,
+    /// Copy the device with this ID, and select the copy.
+    DuplicateDevice(String),
     Undo,
     Redo,
     /// Open a project from the Recent menu.
@@ -149,6 +153,12 @@ pub enum Modal {
         then: Option<Pending>,
     },
     Error(String),
+    /// The project's file now holds another project. `name` is the file's name; `unsaved`
+    /// whether reloading would drop unsaved changes.
+    FileChanged {
+        name: String,
+        unsaved: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -163,6 +173,15 @@ pub enum BottomTab {
     #[default]
     Log,
     Problems,
+}
+
+/// The broker connection test, as Project settings shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionTest {
+    Running,
+    Passed,
+    /// Why the connection failed.
+    Failed(String),
 }
 
 /// GUI-only state that is not part of the project.
@@ -181,6 +200,8 @@ pub struct UiState {
     pub log_frozen: Option<VecDeque<LogEntry>>,
     pub broker_open: bool,
     pub settings_open: bool,
+    /// The connection test for the current broker settings, set by the app every frame.
+    pub connection_test: Option<ConnectionTest>,
     pub modal: Option<Modal>,
 }
 

@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
-use senzor_core::engine::{Command, Engine, EngineHandle, EngineState, Target};
-use senzor_core::project::ProjectFile;
+use senzor_core::engine::{
+    CONNECTION_TEST_TIMEOUT, Command, Engine, EngineHandle, EngineState, Target, test_connection,
+};
+use senzor_core::project::edit::duplicate_device;
+use senzor_core::project::{BrokerConfig, ProjectFile};
 use tokio::task::JoinHandle;
 
 use crate::dialogs::{FileDialogs, project_file_path};
@@ -52,6 +55,20 @@ pub struct SenzorApp {
     mcp_error: Option<String>,
     /// The app's own settings, saved between launches.
     settings: AppSettings,
+    /// The latest broker connection test.
+    connection_test: Option<ConnectionTestRun>,
+    /// When the project's file was last checked for changes made elsewhere.
+    disk_checked: Instant,
+}
+
+/// How often the window looks whether another program changed the project's file.
+const DISK_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A connection test: the broker settings it tests, how far it is, and where its result comes in.
+struct ConnectionTestRun {
+    broker: BrokerConfig,
+    state: ui::ConnectionTest,
+    result: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
 impl SenzorApp {
@@ -84,6 +101,8 @@ impl SenzorApp {
             mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
             mcp_error: None,
             settings,
+            connection_test: None,
+            disk_checked: Instant::now(),
         };
         match path {
             Some(path) => app.open_path(&path),
@@ -131,6 +150,7 @@ impl SenzorApp {
     fn replace_document(&mut self, doc: Document) {
         self.doc = doc;
         self.open_error = None;
+        self.connection_test = None;
         self.engine_generation += 1;
         self.ui.reset();
         let ctx = self.ctx.clone();
@@ -327,6 +347,60 @@ impl SenzorApp {
         self.document_changed();
     }
 
+    /// About once a second, while no dialog is open, asks about a project file another program
+    /// changed.
+    fn check_disk(&mut self) {
+        if self.doc.path().is_none() {
+            return;
+        }
+        self.ctx.request_repaint_after(DISK_CHECK_INTERVAL);
+        if self.ui.modal.is_some() || self.disk_checked.elapsed() < DISK_CHECK_INTERVAL {
+            return;
+        }
+        self.disk_checked = Instant::now();
+        if self.doc.check_disk() {
+            self.ui.modal = Some(Modal::FileChanged {
+                name: self.doc.file_name().unwrap_or_default(),
+                unsaved: self.doc.is_dirty(),
+            });
+        }
+    }
+
+    /// Connects once with the project's broker settings, in the background.
+    fn start_connection_test(&mut self) {
+        let broker = self.doc.validated().project.broker.clone();
+        let (send, result) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        let tested = broker.clone();
+        self.runtime.spawn(async move {
+            let _ = send.send(test_connection(&tested, CONNECTION_TEST_TIMEOUT).await);
+            ctx.request_repaint();
+        });
+        self.connection_test = Some(ConnectionTestRun {
+            broker,
+            state: ui::ConnectionTest::Running,
+            result: Some(result),
+        });
+    }
+
+    /// Takes in a finished test's result, and shows it only while the broker settings are the
+    /// ones it tested.
+    fn update_connection_test(&mut self) {
+        let current = &self.doc.validated().project.broker;
+        self.ui.connection_test = self.connection_test.as_mut().and_then(|run| {
+            if let Some(result) = &run.result
+                && let Ok(outcome) = result.try_recv()
+            {
+                run.state = match outcome {
+                    Ok(()) => ui::ConnectionTest::Passed,
+                    Err(reason) => ui::ConnectionTest::Failed(reason),
+                };
+                run.result = None;
+            }
+            (run.broker == *current).then(|| run.state.clone())
+        });
+    }
+
     fn apply(&mut self, action: Action) {
         let typing = self.typing_into();
         let action = match ui::apply_to_document(&mut self.doc, action, typing) {
@@ -372,6 +446,12 @@ impl SenzorApp {
             }
             Action::OpenBroker => self.ui.broker_open = true,
             Action::OpenSettings => self.ui.settings_open = true,
+            Action::TestConnection => self.start_connection_test(),
+            Action::DuplicateDevice(id) => {
+                if let Some(index) = self.edit(|f| duplicate_device(f, &id)) {
+                    self.reveal(Selection::Device(index));
+                }
+            }
             Action::Undo => {
                 if self.doc.undo() {
                     self.after_undo_or_redo();
@@ -416,6 +496,11 @@ impl SenzorApp {
             Outcome::Dismissed | Outcome::Unsaved(_, UnsavedChoice::Cancel) => {}
             Outcome::Unsaved(pending, UnsavedChoice::Discard) => self.proceed(pending),
             Outcome::Unsaved(pending, UnsavedChoice::Save) => self.save(Some(pending)),
+            Outcome::Reload => {
+                self.doc.reload();
+                self.after_undo_or_redo();
+            }
+            Outcome::KeepMine => self.doc.keep_mine(),
             Outcome::Replace { path, then } => {
                 let result = self.doc.save_as(path);
                 self.finish_save(result, then);
@@ -463,6 +548,8 @@ impl eframe::App for SenzorApp {
         self.autostart_when_ready();
         self.handle_mcp_requests();
         self.state = self.engine().snapshot();
+        self.update_connection_test();
+        self.check_disk();
         self.handle_close_request(&ctx);
         // The panels record a rename still being typed again while they draw.
         self.ui.pending_rename = None;

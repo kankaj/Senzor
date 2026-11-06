@@ -153,6 +153,14 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
         }
         ui.close();
     }
+    // An orphan's device is gone; there is nothing to copy.
+    if node.index.is_some() {
+        ui.separator();
+        if ui.button("Duplicate").clicked() {
+            actions.push(Action::DuplicateDevice(node.id.clone()));
+            ui.close();
+        }
+    }
 }
 
 fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<Action>) {
@@ -318,6 +326,18 @@ count = 3
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn duplicate_in_a_device_menu_asks_to_copy_that_device() {
+        let mut h = harness();
+        choose_from_context_menu(&mut h, "small ×3", "Duplicate");
+        assert!(
+            h.state()
+                .actions
+                .iter()
+                .any(|a| matches!(a, Action::DuplicateDevice(id) if id == "small"))
+        );
     }
 
     #[test]

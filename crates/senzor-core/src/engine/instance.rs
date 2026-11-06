@@ -21,12 +21,12 @@ use crate::value::Value;
 pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Why an MQTT 5 instance ends **Failed** when the broker refuses MQTT 5.
-const MQTT5_UNSUPPORTED: &str = "the broker does not support MQTT 5; set mqtt_version = \"3.1.1\" \
+pub(super) const MQTT5_UNSUPPORTED: &str = "the broker does not support MQTT 5; set mqtt_version = \"3.1.1\" \
     in [broker], or choose 3.1.1 under MQTT version in the broker settings";
 
 /// Appended to an MQTT 5 connection over TLS that the broker closed before accepting it: that may
 /// be a 3.1.1-only broker, which [`answers_mqtt311`] cannot check over TLS.
-const MAYBE_MQTT311_ONLY: &str = "the broker closed the connection before accepting it; if it \
+pub(super) const MAYBE_MQTT311_ONLY: &str = "the broker closed the connection before accepting it; if it \
     supports only MQTT 3.1.1, set mqtt_version = \"3.1.1\" in [broker], or choose 3.1.1 under MQTT \
     version in the broker settings";
 
