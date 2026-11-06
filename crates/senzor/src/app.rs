@@ -451,7 +451,18 @@ impl eframe::App for SenzorApp {
         let mut actions = Vec::new();
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
-            ui::top_bar::show(ui, &self.doc, &self.settings.recent, starting, &mut actions);
+            let mcp = match self.mcp_status() {
+                McpStatus::Listening(address) => Some(address),
+                McpStatus::Off { .. } => None,
+            };
+            ui::top_bar::show(
+                ui,
+                &self.doc,
+                &self.settings.recent,
+                starting,
+                mcp,
+                &mut actions,
+            );
         });
         egui::Panel::bottom("bottom")
             .resizable(true)

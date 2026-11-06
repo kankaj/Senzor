@@ -639,6 +639,26 @@ mod tests {
         assert!(refused(address), "the listener is closed");
     }
 
+    /// The top bar's sign that MCP is on.
+    const MCP_ON: &str = "MCP on";
+
+    #[test]
+    fn the_top_bar_shows_while_agents_can_control_the_window_and_opens_the_settings() {
+        let mut h = window_with_mcp_off("mcp-indicator", 0);
+        assert!(h.query_by_label(MCP_ON).is_none());
+
+        toggle_mcp(&mut h);
+        h.state_mut().ui.settings_open = false;
+        h.run();
+        assert!(h.query_by_label(MCP_ON).is_some());
+
+        crate::testing::click(&mut h, MCP_ON);
+        assert!(h.state().ui.settings_open);
+
+        toggle_mcp(&mut h);
+        assert!(h.query_by_label(MCP_ON).is_none());
+    }
+
     /// An initialize request on a kept-alive connection.
     fn initialize_request(host: &str) -> String {
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;

@@ -745,3 +745,26 @@ fn a_recent_project_that_is_gone_says_so_and_leaves_the_list() {
             .is_some()
     );
 }
+
+/// Whether hovering over `label` shows the tooltip `tip`.
+fn shows_tooltip(harness: &mut App, label: &str, tip: &str) -> bool {
+    harness.get_by_label(label).hover();
+    // A step is 0.25 s; tooltips wait 0.5 s for the pointer to rest.
+    harness.run_steps(4);
+    let shown = harness.query_by_label(tip).is_some();
+    harness.get_by_label("Settings").hover();
+    harness.run_steps(2);
+    shown
+}
+
+#[test]
+fn save_stands_out_while_there_are_unsaved_changes() {
+    const TIP: &str = "Save the unsaved changes";
+    let path = write_project("save-highlight", "");
+    let mut harness = app(Some(path), FakeDialogs::default());
+    assert!(!shows_tooltip(&mut harness, "Save", TIP));
+
+    click(&mut harness, "Add device");
+    assert!(harness.state().document().is_dirty());
+    assert!(shows_tooltip(&mut harness, "Save", TIP));
+}

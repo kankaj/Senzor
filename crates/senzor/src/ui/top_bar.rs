@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use eframe::egui;
@@ -6,13 +7,18 @@ use egui_phosphor::regular as icons;
 use super::Action;
 use crate::document::Document;
 
-/// `starting`: devices or commands are waiting for the previous project's engine to stop.
-/// `recent`: the recent projects, the latest first.
+/// From the left: the project, the broker, the file buttons and the run buttons with the
+/// starting hint; on the right, the MCP sign and the settings.
+///
+/// `recent`: the recent projects, the latest first. `starting`: devices or commands are waiting
+/// for the previous project's engine to stop. `mcp`: the address AI agents connect to while MCP
+/// is on.
 pub fn show(
     ui: &mut egui::Ui,
     doc: &Document,
     recent: &[PathBuf],
     starting: bool,
+    mcp: Option<SocketAddr>,
     actions: &mut Vec<Action>,
 ) {
     ui.horizontal(|ui| {
@@ -36,7 +42,7 @@ pub fn show(
             actions.push(Action::Open);
         }
         recent_menu(ui, recent, actions);
-        if icon_button(ui, icons::FLOPPY_DISK, "Save").clicked() {
+        if save_button(ui, doc.is_dirty()).clicked() {
             actions.push(Action::Save);
         }
         if icon_button(ui, icons::FLOPPY_DISK_BACK, "Save as").clicked() {
@@ -56,6 +62,8 @@ pub fn show(
             ui.weak("starting devices…")
                 .on_hover_text("Waiting for the previous project's devices to go offline");
         }
+        // Right to left: the first widget added is the rightmost. Only narrow icons go here: in a
+        // narrow window, what does not fit the space left is drawn over the buttons.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let cog = ui
                 .button(egui::RichText::new(icons::GEAR_SIX).size(16.0))
@@ -67,8 +75,41 @@ pub fn show(
             if cog.clicked() {
                 actions.push(Action::OpenSettings);
             }
+            if let Some(address) = mcp
+                && mcp_sign(ui, address).clicked()
+            {
+                actions.push(Action::OpenSettings);
+            }
         });
     });
+}
+
+/// Save, filled with the accent colour while the project has unsaved changes.
+fn save_button(ui: &mut egui::Ui, dirty: bool) -> egui::Response {
+    let mut button = egui::Button::new(format!("{} Save", icons::FLOPPY_DISK));
+    if dirty {
+        button = button.fill(ui.visuals().selection.bg_fill);
+    }
+    let response = ui.add(button);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Save"));
+    if dirty {
+        response.on_hover_text("Save the unsaved changes")
+    } else {
+        response
+    }
+}
+
+/// A robot in the accent colour while AI agents can control the window; it opens the settings,
+/// where MCP is turned off.
+fn mcp_sign(ui: &mut egui::Ui, address: SocketAddr) -> egui::Response {
+    let robot = egui::RichText::new(icons::ROBOT)
+        .size(16.0)
+        .color(ui.visuals().selection.stroke.color);
+    let response = ui.button(robot).on_hover_text(format!(
+        "AI agents can control this window at http://{address}/mcp. Click for the settings."
+    ));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "MCP on"));
+    response
 }
 
 /// A button showing `icon` before `label`. Screen readers and tests know it by `label` alone.
