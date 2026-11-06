@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::error::ProjectError;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
 use crate::generator::GeneratorSpec;
-use crate::render::InstanceTemplates;
+use crate::render::{InstanceTemplates, TemplateError};
 use crate::value::Value;
 
 /// The result of `ProjectFile::validate`: what can run, what is wrong, and which devices are blocked.
@@ -83,6 +83,14 @@ impl SharedTemplates {
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, String> {
         InstanceTemplates::compile(messages, availability).map(|t| Self(Arc::new(t)))
+    }
+
+    /// [`Self::compile`], with the key path of the broken template.
+    pub(crate) fn compile_located(
+        messages: &[MessageSpec],
+        availability: Option<&AvailabilitySpec>,
+    ) -> Result<Self, TemplateError> {
+        InstanceTemplates::compile_located(messages, availability).map(|t| Self(Arc::new(t)))
     }
 
     /// Whether both are the same compiled templates, not just equal ones.

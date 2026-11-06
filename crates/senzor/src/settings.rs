@@ -45,6 +45,10 @@ pub struct AppSettings {
     pub zoom: f32,
     /// Project files opened or saved lately, the latest first, at most [`AppSettings::RECENT`].
     pub recent: Vec<PathBuf>,
+    /// The port MCP listens on when it is turned on.
+    pub mcp_port: u16,
+    /// MCP was on when the window closed, so the next window turns it on again.
+    pub mcp_on: bool,
 }
 
 impl Default for AppSettings {
@@ -53,6 +57,8 @@ impl Default for AppSettings {
             theme: Theme::default(),
             zoom: 1.0,
             recent: Vec::new(),
+            mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
+            mcp_on: false,
         }
     }
 }
@@ -134,6 +140,8 @@ mod tests {
             theme: Theme::Light,
             zoom: 1.3,
             recent: vec![PathBuf::from("/projects/a.toml")],
+            mcp_port: 18900,
+            mcp_on: true,
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);
@@ -167,6 +175,8 @@ mod tests {
         assert_eq!(settings.theme, Theme::Dark);
         assert_eq!(settings.zoom, 1.0);
         assert_eq!(AppSettings::default().zoom, 1.0);
+        assert_eq!(settings.mcp_port, 18830, "MCP's usual port");
+        assert!(!settings.mcp_on, "MCP stays off until turned on");
     }
 
     #[test]
@@ -175,7 +185,7 @@ mod tests {
         AppSettings {
             theme: Theme::Light,
             zoom: 1.5,
-            recent: Vec::new(),
+            ..AppSettings::default()
         }
         .apply(&ctx);
         // egui changes the zoom when the next frame begins.

@@ -64,6 +64,17 @@ pub fn duplicate_device(file: &mut ProjectFile, id: &str) -> Option<usize> {
     Some(index + 1)
 }
 
+/// Copies project template `id` right after it, under a free ID: `<id>-copy`, then
+/// `<id>-copy-2`, … Returns the copy's index, or `None` when the project has no such template
+/// (a built-in is copied with [`copy_builtin`]). Devices keep using the original.
+pub fn duplicate_template(file: &mut ProjectFile, id: &str) -> Option<usize> {
+    let index = file.templates.iter().position(|t| t.id == id)?;
+    let mut copy = file.templates[index].clone();
+    copy.id = unique_id(&format!("{id}-copy"), |id| template_id_taken(file, id));
+    file.templates.insert(index + 1, copy);
+    Some(index + 1)
+}
+
 /// Copies built-in template `builtin` into the project under `new_id`; returns the new index.
 pub fn copy_builtin(file: &mut ProjectFile, builtin: &str, new_id: &str) -> Result<usize, String> {
     let new_id = new_id.trim();
@@ -500,6 +511,33 @@ template = "air"
             "a pattern with the device ID stays"
         );
         assert!(file.validate(Path::new(".")).errors.is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_template_goes_right_after_it_under_a_free_id() {
+        let mut file = devices(
+            "[[templates]]\nid = \"a\"\nqos = 1\nmessages = [{ topic = \"t\", payload = \"{{ v }}\" }]\n\
+             fields.v = { generator = \"constant\", value = 1 }\n\n\
+             [[templates]]\nid = \"b\"\nmessages = [{ topic = \"t\", payload = \"1\" }]\n\
+             fields.v = { generator = \"constant\", value = 1 }\n",
+        );
+        assert_eq!(duplicate_template(&mut file, "a"), Some(1));
+        assert_eq!(duplicate_template(&mut file, "a"), Some(1));
+        let ids: Vec<&str> = file.templates.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "a-copy-2", "a-copy", "b"]);
+        assert_eq!(file.templates[1].qos, 1, "everything else is copied");
+        assert!(file.validate(Path::new(".")).errors.is_empty());
+    }
+
+    #[test]
+    fn duplicating_an_unknown_template_changes_nothing() {
+        let mut file = devices("");
+        assert_eq!(
+            duplicate_template(&mut file, "co2"),
+            None,
+            "built-ins are copied with copy_builtin"
+        );
+        assert!(file.templates.is_empty());
     }
 
     #[test]

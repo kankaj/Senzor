@@ -4,11 +4,11 @@ use std::time::SystemTime;
 use eframe::egui::{self, DragValue, RichText, TextEdit};
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
-use senzor_core::project::{Location, MessageSpec, MqttVersion, ProjectFile, TemplateSpec};
+use senzor_core::project::{Location, MessageSpec, MqttVersion, TemplateSpec};
 
 use super::{
-    Action, ERROR, ParsedEdit, UiState, duration_edit, errors_at, mqtt5_control, name_edit,
-    optional_duration_edit, optional_text, replace_if_unchanged, value_edit,
+    Action, BoxOrRow, ERROR, ParsedEdit, UiState, checked, duration_edit, errors_at, mqtt5_control,
+    name_edit, optional_duration_edit, optional_text, replace_if_unchanged, shortcuts, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -29,26 +29,33 @@ pub fn show_user(
     let original = &doc.file().templates[index];
     let mut template = original.clone();
     ui.heading(format!("Template {}", original.id));
-    errors_at(
-        ui,
-        doc,
-        &Location::Template {
-            id: original.id.clone(),
-        },
-    );
-    if ui.button("Delete template").clicked() {
-        actions.push(Action::Remove(Removal::Template(index)));
-        actions.push(Action::Select(None));
-    }
+    let at = &Location::Template {
+        id: original.id.clone(),
+    };
+    errors_at(ui, doc, at, shown_inline);
+    ui.horizontal(|ui| {
+        if ui.button("Duplicate template").clicked() {
+            actions.push(Action::DuplicateTemplate(original.id.clone()));
+        }
+        if ui
+            .button("Delete template")
+            .on_hover_text(shortcuts::tip(
+                ui.ctx(),
+                "Delete the template",
+                &shortcuts::DELETE,
+            ))
+            .clicked()
+        {
+            actions.push(Action::Remove(Removal::Template(index)));
+            actions.push(Action::Select(None));
+        }
+    });
     ui.separator();
     editor(
         ui,
         &mut template,
         &format!("template/{index}"),
-        Some(Renamable {
-            index,
-            file: doc.file(),
-        }),
+        Some(ProjectTemplate { index, doc, at }),
         uses_mqtt5(doc),
         ui_state,
         actions,
@@ -94,57 +101,83 @@ pub fn show_builtin(
     preview_section(ui, &template, doc);
 }
 
-/// The project template an editor shows, so its names can be renamed. Built-ins have none.
+/// The project template an editor shows: its index, so its names can be renamed, and where its
+/// problems are. Built-ins have none.
 #[derive(Clone, Copy)]
-struct Renamable<'a> {
+struct ProjectTemplate<'a> {
     index: usize,
-    file: &'a ProjectFile,
+    doc: &'a Document,
+    at: &'a Location,
+}
+
+/// Draws one value with `add`, marked with its problems when the editor shows a `project`
+/// template (see [`checked`]).
+fn cell(
+    ui: &mut egui::Ui,
+    project: Option<ProjectTemplate>,
+    field: &str,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    match project {
+        Some(ProjectTemplate { doc, at, .. }) => checked(ui, doc, at, field, add),
+        None => add(ui),
+    }
+}
+
+/// The template fields the editor shows its problems next to.
+fn shown_inline(field: &str) -> bool {
+    matches!(field, "id" | "interval" | "qos" | "messages" | "fields")
+        || field.starts_with("fields.")
+        || field.starts_with("messages[")
+        || field.starts_with("availability.")
 }
 
 fn uses_mqtt5(doc: &Document) -> bool {
     doc.file().broker.mqtt_version == MqttVersion::V5
 }
 
-/// Edits `template` in place. With `renamable`, the ID and field names are name boxes that push
+/// Edits `template` in place. For a `project` template, the ID and field names are name boxes that push
 /// [`Rename`]s; without, they are plain labels. MQTT 5 settings are usable when `mqtt5`.
 fn editor(
     ui: &mut egui::Ui,
     template: &mut TemplateSpec,
     key: &str,
-    renamable: Option<Renamable>,
+    project: Option<ProjectTemplate>,
     mqtt5: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    settings_grid(ui, template, key, renamable, mqtt5, ui_state, actions);
+    settings_grid(ui, template, key, project, mqtt5, ui_state, actions);
     ui.add_space(6.0);
     messages_editor(
         ui,
         &mut template.messages,
         key,
+        project,
         mqtt5,
         &mut ui_state.buffers,
     );
     ui.add_space(6.0);
-    fields_editor(ui, &mut template.fields, key, renamable, ui_state, actions);
+    fields_editor(ui, &mut template.fields, key, project, ui_state, actions);
 }
 
-/// With `renamable`, a name box that pushes the [`Rename`] `rename` builds from the template's
+/// For a `project` template, a name box that pushes the [`Rename`] `rename` builds from the template's
 /// index and the new name; otherwise a plain label. Returns the name box, if any.
 fn name_or_label(
     ui: &mut egui::Ui,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
-    renamable: Option<Renamable>,
+    project: Option<ProjectTemplate>,
     key: &str,
     name: &str,
     rename: impl Fn(usize, String) -> Rename,
 ) -> Option<egui::Response> {
-    let Some(Renamable { index, file }) = renamable else {
+    let Some(ProjectTemplate { index, doc, .. }) = project else {
         ui.label(name);
         return None;
     };
-    let (response, committed) = name_edit(ui, ui_state, key, name, file, |to| rename(index, to));
+    let (response, committed) =
+        name_edit(ui, ui_state, key, name, doc.file(), |to| rename(index, to));
     actions.extend(committed.map(Action::Rename));
     Some(response)
 }
@@ -154,7 +187,7 @@ fn settings_grid(
     ui: &mut egui::Ui,
     template: &mut TemplateSpec,
     key: &str,
-    renamable: Option<Renamable>,
+    project: Option<ProjectTemplate>,
     mqtt5: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
@@ -163,42 +196,50 @@ fn settings_grid(
         .num_columns(2)
         .show(ui, |ui| {
             let label = ui.label("ID");
-            let id_box = name_or_label(
-                ui,
-                ui_state,
-                actions,
-                renamable,
-                &format!("{key}/id"),
-                &template.id,
-                |index, to| Rename::Template {
-                    index,
-                    from: template.id.clone(),
-                    to,
-                },
-            );
-            if let Some(id_box) = id_box {
-                id_box.labelled_by(label.id);
-            }
+            cell(ui, project, "id", |ui| {
+                let id_box = name_or_label(
+                    ui,
+                    ui_state,
+                    actions,
+                    project,
+                    &format!("{key}/id"),
+                    &template.id,
+                    |index, to| Rename::Template {
+                        index,
+                        from: template.id.clone(),
+                        to,
+                    },
+                );
+                match id_box {
+                    Some(id_box) => id_box.labelled_by(label.id),
+                    None => label.clone(),
+                }
+            });
             ui.end_row();
 
             let label = ui.label("Interval");
-            duration_edit(
-                ui,
-                &mut ui_state.buffers,
-                &format!("{key}/interval"),
-                &mut template.interval,
-            )
-            .labelled_by(label.id);
+            cell(ui, project, "interval", |ui| {
+                duration_edit(
+                    ui,
+                    &mut ui_state.buffers,
+                    &format!("{key}/interval"),
+                    &mut template.interval,
+                )
+                .labelled_by(label.id)
+            });
             ui.end_row();
 
             ui.label("QoS");
-            egui::ComboBox::from_id_salt(format!("{key}/qos"))
-                .selected_text(template.qos.to_string())
-                .show_ui(ui, |ui| {
-                    for qos in 0..=2u8 {
-                        ui.selectable_value(&mut template.qos, qos, qos.to_string());
-                    }
-                });
+            cell(ui, project, "qos", |ui| {
+                egui::ComboBox::from_id_salt(format!("{key}/qos"))
+                    .selected_text(template.qos.to_string())
+                    .show_ui(ui, |ui| {
+                        for qos in 0..=2u8 {
+                            ui.selectable_value(&mut template.qos, qos, qos.to_string());
+                        }
+                    })
+                    .response
+            });
             ui.end_row();
 
             ui.label("Retain");
@@ -221,22 +262,27 @@ fn settings_grid(
                     ("  Offline payload", &mut availability.offline, "offline"),
                 ] {
                     let label = ui.label(label);
-                    ui.add(
-                        TextEdit::singleline(text).id_salt(format!("{key}/availability/{salt}")),
-                    )
-                    .labelled_by(label.id);
+                    cell(ui, project, &format!("availability.{salt}"), |ui| {
+                        ui.add(
+                            TextEdit::singleline(text)
+                                .id_salt(format!("{key}/availability/{salt}")),
+                        )
+                        .labelled_by(label.id)
+                    });
                     ui.end_row();
                 }
                 let label = ui.label("  Will delay");
                 let has_value = availability.will_delay.is_some();
-                mqtt5_control(ui, mqtt5, has_value, |ui| {
-                    optional_duration_edit(
-                        ui,
-                        &mut ui_state.buffers,
-                        &format!("{key}/availability/will_delay"),
-                        &mut availability.will_delay,
-                    )
-                    .labelled_by(label.id)
+                cell(ui, project, "availability.will_delay", |ui| {
+                    mqtt5_control(ui, mqtt5, has_value, |ui| {
+                        optional_duration_edit(
+                            ui,
+                            &mut ui_state.buffers,
+                            &format!("{key}/availability/will_delay"),
+                            &mut availability.will_delay,
+                        )
+                        .labelled_by(label.id)
+                    })
                 });
                 ui.end_row();
             }
@@ -247,10 +293,11 @@ fn messages_editor(
     ui: &mut egui::Ui,
     messages: &mut Vec<MessageSpec>,
     key: &str,
+    project: Option<ProjectTemplate>,
     mqtt5: bool,
     buffers: &mut Buffers,
 ) {
-    ui.strong("Messages");
+    cell(ui, project, "messages", |ui| ui.strong("Messages"));
     let mut remove = None;
     for (i, message) in messages.iter_mut().enumerate() {
         ui.group(|ui| {
@@ -260,22 +307,28 @@ fn messages_editor(
                     remove = Some(i);
                 }
             });
+            // Problems name messages from 1.
+            let field = |name: &str| format!("messages[{}].{name}", i + 1);
             let label = ui.label("Topic");
-            ui.add(
-                TextEdit::singleline(&mut message.topic)
-                    .id_salt(format!("{key}/message/{i}/topic"))
-                    .desired_width(f32::INFINITY),
-            )
-            .labelled_by(label.id);
+            cell(ui, project, &field("topic"), |ui| {
+                ui.add(
+                    TextEdit::singleline(&mut message.topic)
+                        .id_salt(format!("{key}/message/{i}/topic"))
+                        .desired_width(f32::INFINITY),
+                )
+                .labelled_by(label.id)
+            });
             let label = ui.label("Payload");
-            ui.add(
-                TextEdit::multiline(&mut message.payload)
-                    .id_salt(format!("{key}/message/{i}/payload"))
-                    .code_editor()
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-            )
-            .labelled_by(label.id);
+            cell(ui, project, &field("payload"), |ui| {
+                ui.add(
+                    TextEdit::multiline(&mut message.payload)
+                        .id_salt(format!("{key}/message/{i}/payload"))
+                        .code_editor()
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                )
+                .labelled_by(label.id)
+            });
             let has_properties = message.has_properties();
             egui::CollapsingHeader::new("MQTT 5 properties")
                 .id_salt(format!("{key}/message/{i}/properties"))
@@ -283,7 +336,14 @@ fn messages_editor(
                 .show(ui, |ui| {
                     mqtt5_control(ui, mqtt5, has_properties, |ui| {
                         ui.vertical(|ui| {
-                            properties_editor(ui, message, &format!("{key}/message/{i}"), buffers);
+                            properties_editor(
+                                ui,
+                                message,
+                                &format!("{key}/message/{i}"),
+                                project,
+                                &field,
+                                buffers,
+                            );
                         });
                     });
                 });
@@ -298,30 +358,39 @@ fn messages_editor(
 }
 
 /// Message expiry, content type and user properties of one message.
+/// `field` gives the key path of one of the message's properties.
 fn properties_editor(
     ui: &mut egui::Ui,
     message: &mut MessageSpec,
     key: &str,
+    project: Option<ProjectTemplate>,
+    field: &dyn Fn(&str) -> String,
     buffers: &mut Buffers,
 ) {
     egui::Grid::new(format!("{key}/properties"))
         .num_columns(2)
         .show(ui, |ui| {
             let label = ui.label("Message expiry");
-            optional_duration_edit(
-                ui,
-                buffers,
-                &format!("{key}/message_expiry"),
-                &mut message.message_expiry,
-            )
-            .labelled_by(label.id);
+            cell(ui, project, &field("message_expiry"), |ui| {
+                optional_duration_edit(
+                    ui,
+                    buffers,
+                    &format!("{key}/message_expiry"),
+                    &mut message.message_expiry,
+                )
+                .labelled_by(label.id)
+            });
             ui.end_row();
 
             let label = ui.label("Content type");
-            optional_text(ui, &mut message.content_type, "none").labelled_by(label.id);
+            cell(ui, project, &field("content_type"), |ui| {
+                optional_text(ui, &mut message.content_type, "none").labelled_by(label.id)
+            });
             ui.end_row();
         });
-    ui.label("User properties");
+    cell(ui, project, &field("user_properties"), |ui| {
+        ui.label("User properties")
+    });
     let names: Vec<String> = message.user_properties.keys().cloned().collect();
     let mut rename = None;
     let mut remove = None;
@@ -392,43 +461,47 @@ fn fields_editor(
     ui: &mut egui::Ui,
     fields: &mut BTreeMap<String, GeneratorSpec>,
     key: &str,
-    renamable: Option<Renamable>,
+    project: Option<ProjectTemplate>,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    ui.strong("Fields");
+    cell(ui, project, "fields", |ui| ui.strong("Fields"));
     let names: Vec<String> = fields.keys().cloned().collect();
     for name in names {
         ui.group(|ui| {
-            ui.horizontal(|ui| {
-                name_or_label(
-                    ui,
-                    ui_state,
-                    actions,
-                    renamable,
-                    &format!("{key}/field/{name}"),
-                    &name,
-                    |template, to| Rename::Field {
-                        template,
-                        from: name.clone(),
-                        to,
-                    },
-                );
-                let Some(spec) = fields.get_mut(&name) else {
-                    return;
-                };
-                let mut kind = GeneratorKind::of(spec);
-                egui::ComboBox::from_id_salt(format!("{key}/field/{name}/kind"))
-                    .selected_text(kind.label())
-                    .show_ui(ui, |ui| {
-                        for option in GeneratorKind::ALL {
-                            ui.selectable_value(&mut kind, option, option.label());
-                        }
-                    });
-                set_generator_kind(spec, kind);
-                if ui.button("Remove").clicked() {
-                    fields.remove(&name);
-                }
+            cell(ui, project, &format!("fields.{name}"), |ui| {
+                ui.horizontal(|ui| {
+                    let name_box = name_or_label(
+                        ui,
+                        ui_state,
+                        actions,
+                        project,
+                        &format!("{key}/field/{name}"),
+                        &name,
+                        |template, to| Rename::Field {
+                            template,
+                            from: name.clone(),
+                            to,
+                        },
+                    );
+                    let Some(spec) = fields.get_mut(&name) else {
+                        return name_box;
+                    };
+                    let mut kind = GeneratorKind::of(spec);
+                    egui::ComboBox::from_id_salt(format!("{key}/field/{name}/kind"))
+                        .selected_text(kind.label())
+                        .show_ui(ui, |ui| {
+                            for option in GeneratorKind::ALL {
+                                ui.selectable_value(&mut kind, option, option.label());
+                            }
+                        });
+                    set_generator_kind(spec, kind);
+                    if ui.button("Remove").clicked() {
+                        fields.remove(&name);
+                    }
+                    name_box
+                })
+                .box_or_row()
             });
             if let Some(spec) = fields.get_mut(&name) {
                 generator_editor(

@@ -4,9 +4,11 @@ mod app;
 mod buffers;
 mod dialogs;
 mod edits;
+mod examples;
 mod format;
 pub mod icon;
 mod preview;
+mod rate;
 mod selection;
 pub mod settings;
 #[cfg(any(test, feature = "test-support"))]

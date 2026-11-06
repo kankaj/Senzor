@@ -155,6 +155,27 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, actions: &mut Vec<Action>) {
     });
     ui.end_row();
 
+    let label = ui.label("MCP port");
+    let mut port = match mcp {
+        McpStatus::Listening(address) => address.port(),
+        McpStatus::Off { port, .. } => *port,
+    };
+    let listening = matches!(mcp, McpStatus::Listening(_));
+    let response = ui
+        .add_enabled(
+            !listening,
+            egui::DragValue::new(&mut port)
+                .range(1..=65535)
+                .clamp_existing_to_range(false),
+        )
+        .labelled_by(label.id)
+        .on_hover_text("The port AI agents connect to")
+        .on_disabled_hover_text("Turn MCP off to change its port");
+    if response.changed() {
+        actions.push(Action::SetMcpPort(port));
+    }
+    ui.end_row();
+
     match mcp {
         McpStatus::Listening(address) => {
             ui.label("Address");

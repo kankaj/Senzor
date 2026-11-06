@@ -61,9 +61,9 @@ Then register the endpoint:
 claude mcp add --transport http senzor-gui http://127.0.0.1:18830/mcp
 ```
 
-To use another port, start the window with `--mcp-port 18900` (this turns MCP on; `--mcp` is not needed) and use that port in the URL. If the port is taken, the **MCP** switch stays off and a dialog says why, unless another dialog is already open. The settings show the reason in red under the switch; click the switch to try again.
+To use another port, set **MCP port** in the settings, or start the window with `--mcp-port 18900` (this turns MCP on; `--mcp` is not needed), and use that port in the URL. If the port is taken, the **MCP** switch stays off and a dialog says why, unless another dialog is already open. The settings show the reason in red under the switch; click the switch to try again.
 
-Turn the switch off to stop MCP. Agents connected at that moment lose their connection; reconnect them once MCP is on again. MCP is off whenever the window starts without `--mcp` or `--mcp-port`.
+Turn the switch off to stop MCP. Agents connected at that moment lose their connection; reconnect them once MCP is on again. Senzor remembers whether you left MCP on, so a window closed with MCP on starts with it on again.
 
 ## Other MCP clients
 

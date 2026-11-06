@@ -17,12 +17,12 @@ senzor --mcp examples/showcase.toml
 ```
 
 `--mcp` turns on the **MCP** switch in the [settings](/docs/gui/settings) at launch, and
-`--mcp-port <PORT>` picks another port than 18830 (and turns MCP on too). See
+`--mcp-port <PORT>` picks another port than the one in the settings, 18830 unless you changed it (and turns MCP on too). Neither changes what the settings remember. See
 [When an agent is connected](#when-an-agent-is-connected).
 
 ![The Senzor window with the showcase project running and instance office-0 selected](/screenshots/window.png)
 
-The window has four parts: the top bar, the left panel with your devices and templates, the detail panel in the middle, and the bottom panel with the message log and the problems. You can resize the left and bottom panels by dragging their edges.
+The window has five parts: the top bar, the left panel with your devices and templates, the detail panel in the middle, the bottom panel with the message log and the problems, and the status bar along the bottom edge. You can resize the left and bottom panels by dragging their edges.
 
 ## Top bar
 
@@ -30,7 +30,7 @@ Each button shows an icon before its name; in a narrow window, the buttons conti
 
 - **The project's name.** This is the file name, or **untitled** for a project you have not saved yet. A `*` after the name means there are unsaved changes. The window title shows the same, for example `Senzor — showcase.toml*`.
 - **Broker: localhost:1883** shows the broker's host and port. Click it to open **Project settings**: the [broker settings](/docs/gui/broker-settings), where you also choose MQTT 5 or 3.1.1, and the [seed](/docs/concepts/reproducible-runs).
-- **New**, **Open**, **Save** and **Save as** work on the project file, and the clock next to **Open** lists the [recent projects](/docs/gui/files#recent-projects). While there are unsaved changes, **Save** is filled with the accent colour; hover over it to read **Save the unsaved changes**. See [Files](/docs/gui/files).
+- **New**, **Open**, **Save** and **Save as** work on the project file, the clock next to **Open** lists the [recent projects](/docs/gui/files#recent-projects), and the books next to the clock list the [examples](/docs/gui/files#examples). While there are unsaved changes, **Save** is filled with the accent colour; hover over it to read **Save the unsaved changes**. See [Files](/docs/gui/files).
 - **Undo** and **Redo**, the two curved arrows after **Save as**, take back an edit to the project and apply it again. See [Undo and redo](#undo-and-redo).
 - **Start all** and **Stop all** start and stop every device. See [Running devices](/docs/gui/running-devices).
 - **starting devices…** can appear for a moment after you open another project or start a new one. Hover over it to read **Waiting for the previous project's devices to go offline**: the new project's devices start once the old ones are offline (see [Autostart](/docs/gui/running-devices#autostart)).
@@ -50,6 +50,8 @@ Each button shows an icon before its name; in a narrow window, the buttons conti
 | F5 | **Start all** |
 | Shift+F5 | **Stop all** |
 | Ctrl+Comma | Open the [settings](/docs/gui/settings) |
+| Ctrl+F | Show the message log and put the cursor in its **Filter** |
+| Delete | Delete the selected device or template; Ctrl+Z brings it back |
 | Ctrl++ or Ctrl+= | Zoom in |
 | Ctrl+- | Zoom out |
 | Ctrl+0 | Reset the zoom to 100 % |
@@ -61,7 +63,7 @@ On macOS, use Cmd instead of Ctrl. Hover over a button in the top bar to see its
 
 **Undo** takes back the latest edit to the project, and **Redo** applies it again. Each edit is one step: adding or removing a device or template, a rename, or a change in a form. What you type into one field counts as one step until you leave the field. Senzor keeps the last 100 steps; a new edit after an undo drops what you could have redone. Undoing back to the saved file removes the `*` from the title.
 
-While you are typing into a field, Ctrl+Z and Ctrl+Y belong to the field and take back what you typed there; the project follows. Leave the field to undo whole edits again.
+While you are typing into a field, Ctrl+Z and Ctrl+Y belong to the field and take back what you typed there; the project follows. Leave the field to undo whole edits again. Delete also belongs to the field while you type: it deletes text, not the selected device.
 
 Edits an AI agent makes over [MCP](/docs/mcp) are steps too, so Ctrl+Z also takes back the agent's latest edit. Opening a project or starting a new one starts a fresh history; saving keeps it.
 
@@ -78,9 +80,9 @@ The left panel has two tabs.
 | Grey  | Stopped                    |
 | Red   | Failed                     |
 
-Click a device or an instance to show it in the detail panel. Right-click it for a menu that starts, stops, restarts and kills it ([Running devices](/docs/gui/running-devices)). **Add device** at the top adds a new device and selects it.
+Click a device or an instance to show it in the detail panel. Right-click it for a menu that starts, stops, restarts and kills it ([Running devices](/docs/gui/running-devices)). **Add device** adds a new device and selects it. The box with the magnifying glass above it finds devices and instances, and the menu next to it shows only the instances in one state; see [The device tree](/docs/gui/running-devices#the-device-tree).
 
-**Templates** lists the templates. **Built-in** lists the templates that ship with Senzor (`co2`, `temperature`, `humidity`). **Project** lists the project's own templates. **Add template** adds a new template to the project and selects it.
+**Templates** lists the templates. **Built-in** lists the templates that ship with Senzor (`co2`, `temperature`, `humidity`). **Project** lists the project's own templates; right-click one and choose **Duplicate** to copy it. **Add template** adds a new template to the project and selects it.
 
 ## Detail panel
 
@@ -93,7 +95,7 @@ The middle of the window shows what you selected on the left:
 
 With nothing selected it says **Select a device, an instance or a template on the left.**
 
-A new project that is still blank shows the welcome screen instead. That is how the window starts without a file, and what **New** gives. **Welcome to Senzor** offers **Add your first device**, **Open a project**, your [recent projects](/docs/gui/files#recent-projects) and a link to this documentation. The welcome screen goes away once the project has a device or a template, a file, or unsaved changes.
+A new project that is still blank shows the welcome screen instead. That is how the window starts without a file, and what **New** gives. **Welcome to Senzor** offers **Add your first device**, **Open a project** and **Set the broker**, the [examples](/docs/gui/files#examples), your [recent projects](/docs/gui/files#recent-projects), and links to the **Quick start guide** and this documentation. The welcome screen goes away once the project has a device or a template, a file, or unsaved changes.
 
 ## Bottom panel
 
@@ -112,7 +114,7 @@ The message log lists the messages your instances publish, newest at the bottom.
 
 The log keeps the last 1,000 messages of all instances together. It shows the messages your templates define, not the `online` and `offline` availability messages. While you are scrolled to the bottom, the list follows new messages.
 
-- **Filter** shows only the rows whose topic contains the text you type. The match is case-sensitive.
+- **Filter** shows only the rows whose topic contains the text you type. The match is case-sensitive. Ctrl+F shows the message log and puts the cursor in the box.
 - **Pause** freezes the list so you can read it while the devices keep publishing. **Resume** shows the live log again.
 
 ### Problems
@@ -127,9 +129,20 @@ Each problem names what it is about, then what is wrong, for example:
 device `bad`: unknown template `nope`
 ```
 
-Click a problem to go to it: a device or template problem selects that device or template (switching the left tab if needed), and a broker problem opens the broker settings.
+Click a problem to go to it: a device or template problem selects that device or template (switching the left tab if needed), and a broker problem opens the broker settings. When the problem is about one value, such as a device's **Instance IDs**, the cursor goes into that box.
+
+In the editors, a problem with one value shows under that value's box, which gets a red outline. Problems that no single box holds, such as a template whose topic the device's params break, show in red under the editor's heading.
 
 A device with problems cannot start, and neither can the devices of a template with problems. A broker problem stops every device from starting. Instances that were already running keep running with their last valid settings; see [Editing while running](/docs/concepts/editing-while-running). The [validation errors reference](/docs/reference/validation-errors) explains each message.
+
+## Status bar
+
+The status bar along the bottom edge of the window shows, from the left:
+
+- The broker's host and port, then **connected** in green once an instance is online, **cannot connect** in red while instances are reconnecting or failed and none is online, **connecting…** while they connect, or **not connected** while nothing runs. Click it to open the [broker settings](/docs/gui/broker-settings).
+- How many instances are online, connecting, reconnecting and failed, for example **11 online**. A state with no instances is left out; with nothing running, it reads **nothing running**.
+- How many messages per second the instances publish, counted over the last 5 seconds, for example **4.6 msg/s**.
+- At the right end, **MCP off**, or **MCP on :18830** with the port while AI agents can control the window. Click it to open the [settings](/docs/gui/settings).
 
 ## When an agent is connected
 

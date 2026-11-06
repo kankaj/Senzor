@@ -24,11 +24,13 @@ Senzor starts with the zoom you used last.
 
 ## MCP
 
-The **MCP** switch, **let AI agents control this window**, turns on the endpoint AI agents such as Claude Code connect to. While it is on, the **Address** row shows where agents connect, `127.0.0.1:18830`, and a robot shows next to the gear in the top bar; clicking the robot opens the settings. Hover over the switch for the full URL. Turn the switch off to stop the endpoint, which disconnects connected agents.
+The **MCP** switch, **let AI agents control this window**, turns on the endpoint AI agents such as Claude Code connect to. While it is on, the **Address** row shows where agents connect, `127.0.0.1:18830`, a robot shows next to the gear in the top bar, and the status bar reads **MCP on :18830**; clicking the robot opens the settings. Hover over the switch for the full URL. Turn the switch off to stop the endpoint, which disconnects connected agents.
 
 If the port is taken, a dialog says why, unless another dialog is already open, and the switch stays off. The reason also shows in red under the switch, after **Could not start:**. Click the switch to try again.
 
-MCP is not remembered: it is off whenever the window starts without `--mcp` or `--mcp-port`. See [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui).
+**MCP port** is the port MCP listens on, 18830 unless you change it. Change it while MCP is off; while it is on, the box is disabled with the hint **Turn MCP off to change its port**.
+
+Senzor remembers the port and whether you left MCP on: a window you close with MCP on starts the next time with MCP on. `--mcp` and `--mcp-port` turn MCP on for one launch without changing what Senzor remembers. See [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui).
 
 ## Version and credits
 
@@ -36,7 +38,7 @@ MCP is not remembered: it is off whenever the window starts without `--mcp` or `
 
 ## Where Senzor keeps them
 
-Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), the size of the window and, where the desktop allows it, its position:
+Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), the MCP port and whether MCP was on, the size of the window and, where the desktop allows it, its position:
 
 | System  | File                                                    |
 | ------- | ------------------------------------------------------- |

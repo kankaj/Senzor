@@ -19,29 +19,30 @@ pub fn resolve_broker(
 ) -> Result<BrokerConfig, Vec<ProjectError>> {
     let mut errors = Vec::new();
     if spec.host.trim().is_empty() {
-        errors.push(ProjectError::broker("host must not be empty"));
+        errors.push(ProjectError::broker("host must not be empty").at("host"));
     }
     if spec.port == 0 {
-        errors.push(ProjectError::broker("port must not be 0"));
+        errors.push(ProjectError::broker("port must not be 0").at("port"));
     }
+    let keep_alive = |message: String| ProjectError::broker(message).at("keep_alive");
     if spec.keep_alive < Duration::from_secs(1) {
-        errors.push(ProjectError::broker("keep_alive must be at least 1s"));
+        errors.push(keep_alive("keep_alive must be at least 1s".into()));
     } else if spec.keep_alive.subsec_nanos() != 0 {
-        errors.push(ProjectError::broker(format!(
+        errors.push(keep_alive(format!(
             "keep_alive must be whole seconds, got {}",
             humantime::format_duration(spec.keep_alive)
         )));
     } else if spec.keep_alive > MAX_KEEP_ALIVE {
         // MQTT sends the keep-alive as 16-bit seconds.
-        errors.push(ProjectError::broker(
-            "keep_alive must be at most 65535 seconds (18h 12m 15s)",
+        errors.push(keep_alive(
+            "keep_alive must be at most 65535 seconds (18h 12m 15s)".into(),
         ));
     }
     if let Err(e) = whole_seconds("session_expiry", spec.session_expiry) {
-        errors.push(ProjectError::broker(e));
+        errors.push(ProjectError::broker(e).at("session_expiry"));
     }
     if spec.mqtt_version == MqttVersion::V311 && !spec.session_expiry.is_zero() {
-        errors.push(ProjectError::broker(needs_mqtt5("session_expiry")));
+        errors.push(ProjectError::broker(needs_mqtt5("session_expiry")).at("session_expiry"));
     }
     let credentials = resolve_credentials(spec, env).unwrap_or_else(|e| {
         errors.push(e);
@@ -113,15 +114,17 @@ fn resolve_credentials(
 ) -> Result<Option<Credentials>, ProjectError> {
     let password = match (&spec.password, &spec.password_env) {
         (Some(_), Some(_)) => {
-            return Err(ProjectError::broker(
-                "use either password or password_env, not both",
-            ));
+            return Err(
+                ProjectError::broker("use either password or password_env, not both")
+                    .at("password_env"),
+            );
         }
         (Some(password), None) => Some(password.clone()),
         (None, Some(var)) => Some(env(var).ok_or_else(|| {
             ProjectError::broker(format!(
                 "environment variable `{var}` (password_env) is not set"
             ))
+            .at("password_env")
         })?),
         (None, None) => None,
     };
@@ -130,7 +133,9 @@ fn resolve_credentials(
             username: username.clone(),
             password: password.unwrap_or_default(),
         })),
-        (None, Some(_)) => Err(ProjectError::broker("a password requires a username")),
+        (None, Some(_)) => {
+            Err(ProjectError::broker("a password requires a username").at("username"))
+        }
         (None, None) => Ok(None),
     }
 }
@@ -140,10 +145,10 @@ fn resolve_tls(spec: &TlsSpec, base_dir: &Path) -> Result<TlsConfig, Vec<Project
     let mut read = |name: &str, path: &Path| match std::fs::read(base_dir.join(path)) {
         Ok(bytes) => Some(bytes),
         Err(e) => {
-            errors.push(ProjectError::broker(format!(
-                "cannot read tls.{name} `{}`: {e}",
-                path.display()
-            )));
+            errors.push(
+                ProjectError::broker(format!("cannot read tls.{name} `{}`: {e}", path.display()))
+                    .at(format!("tls.{name}")),
+            );
             None
         }
     };
@@ -155,15 +160,22 @@ fn resolve_tls(spec: &TlsSpec, base_dir: &Path) -> Result<TlsConfig, Vec<Project
             cert.zip(key)
         }
         (None, None) => None,
-        _ => {
-            errors.push(ProjectError::broker(
-                "tls.client_cert and tls.client_key must be set together",
-            ));
+        (cert, _) => {
+            // Blame the one that is missing.
+            let missing = if cert.is_some() {
+                "tls.client_key"
+            } else {
+                "tls.client_cert"
+            };
+            errors.push(
+                ProjectError::broker("tls.client_cert and tls.client_key must be set together")
+                    .at(missing),
+            );
             None
         }
     };
     if spec.client_cert.is_some() && spec.ca_file.is_none() {
-        errors.push(ProjectError::broker("tls.client_cert requires tls.ca_file"));
+        errors.push(ProjectError::broker("tls.client_cert requires tls.ca_file").at("tls.ca_file"));
     }
     if !errors.is_empty() {
         return Err(errors);
@@ -182,6 +194,97 @@ mod tests {
 
     fn messages(errors: Vec<ProjectError>) -> Vec<String> {
         errors.into_iter().map(|e| e.message).collect()
+    }
+
+    fn fields(errors: Vec<ProjectError>) -> Vec<Option<String>> {
+        errors.into_iter().map(|e| e.field).collect()
+    }
+
+    fn broker_fields(spec: &BrokerSpec, base_dir: &Path) -> Vec<Option<String>> {
+        fields(resolve_broker(spec, base_dir, &no_env).unwrap_err())
+    }
+
+    fn some(names: &[&str]) -> Vec<Option<String>> {
+        names.iter().map(|n| Some(n.to_string())).collect()
+    }
+
+    #[test]
+    fn broker_problems_name_their_field() {
+        let spec = BrokerSpec {
+            host: " ".into(),
+            port: 0,
+            keep_alive: Duration::from_millis(500),
+            password: Some("x".into()),
+            password_env: Some("Y".into()),
+            ..BrokerSpec::default()
+        };
+        assert_eq!(
+            broker_fields(&spec, Path::new(".")),
+            some(&["host", "port", "keep_alive", "password_env"])
+        );
+        for keep_alive in [Duration::from_millis(1500), Duration::from_secs(65_536)] {
+            let spec = BrokerSpec {
+                keep_alive,
+                ..BrokerSpec::default()
+            };
+            assert_eq!(broker_fields(&spec, Path::new(".")), some(&["keep_alive"]));
+        }
+        let spec = BrokerSpec {
+            password: Some("x".into()),
+            ..BrokerSpec::default()
+        };
+        assert_eq!(broker_fields(&spec, Path::new(".")), some(&["username"]));
+        let spec = BrokerSpec {
+            username: Some("dev".into()),
+            password_env: Some("MQTT_PASSWORD".into()),
+            ..BrokerSpec::default()
+        };
+        assert_eq!(
+            broker_fields(&spec, Path::new(".")),
+            some(&["password_env"])
+        );
+        let spec = BrokerSpec {
+            session_expiry: Duration::from_millis(1500),
+            ..BrokerSpec::default()
+        };
+        assert_eq!(
+            broker_fields(&spec, Path::new(".")),
+            some(&["session_expiry"])
+        );
+        let spec = BrokerSpec {
+            mqtt_version: MqttVersion::V311,
+            session_expiry: Duration::from_secs(60),
+            ..BrokerSpec::default()
+        };
+        assert_eq!(
+            broker_fields(&spec, Path::new(".")),
+            some(&["session_expiry"])
+        );
+    }
+
+    #[test]
+    fn tls_problems_name_their_field() {
+        let tls = |ca: Option<&str>, cert: Option<&str>, key: Option<&str>| BrokerSpec {
+            tls: Some(TlsSpec {
+                ca_file: ca.map(PathBuf::from),
+                client_cert: cert.map(PathBuf::from),
+                client_key: key.map(PathBuf::from),
+            }),
+            ..BrokerSpec::default()
+        };
+        let nowhere = Path::new("/nonexistent");
+        assert_eq!(
+            broker_fields(&tls(None, Some("c.pem"), None), nowhere),
+            some(&["tls.client_key", "tls.ca_file"])
+        );
+        assert_eq!(
+            broker_fields(&tls(None, None, Some("k.pem")), nowhere),
+            some(&["tls.client_cert"])
+        );
+        assert_eq!(
+            broker_fields(&tls(Some("ca.pem"), Some("c.pem"), Some("k.pem")), nowhere),
+            some(&["tls.ca_file", "tls.client_cert", "tls.client_key"])
+        );
     }
 
     #[test]

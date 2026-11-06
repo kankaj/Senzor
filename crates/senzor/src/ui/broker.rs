@@ -1,15 +1,84 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, DragValue};
-use senzor_core::project::{Location, MqttVersion, TlsSpec};
+use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec};
 
 use super::{
-    Action, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, duration_edit, errors_at,
-    mqtt5_control, optional_text, replace_if_unchanged,
+    Action, BoxOrRow, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked, duration_edit,
+    errors_at, mqtt5_control, optional_text, replace_if_unchanged,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{PasswordSource, set_password_source};
+
+/// A broker to try Senzor with: its name in the Presets menu, host, port and what it is.
+struct Preset {
+    name: &'static str,
+    host: &'static str,
+    port: u16,
+    hint: &'static str,
+}
+
+/// Anyone can read what is published to the public brokers, hence their hints.
+const PRESETS: [Preset; 4] = [
+    Preset {
+        name: "Mosquitto on this computer",
+        host: "localhost",
+        port: 1883,
+        hint: "A broker running on this computer, installed or in Docker",
+    },
+    Preset {
+        name: "Mosquitto test server",
+        host: "test.mosquitto.org",
+        port: 1883,
+        hint: "Public: anyone can read what is published there",
+    },
+    Preset {
+        name: "HiveMQ public broker",
+        host: "broker.hivemq.com",
+        port: 1883,
+        hint: "Public: anyone can read what is published there",
+    },
+    Preset {
+        name: "EMQX public broker",
+        host: "broker.emqx.io",
+        port: 1883,
+        hint: "Public: anyone can read what is published there",
+    },
+];
+
+/// Points `broker` at `preset`, which needs no credentials and no TLS; the other settings stay.
+fn apply_preset(broker: &mut BrokerSpec, preset: &Preset) {
+    broker.host = preset.host.to_string();
+    broker.port = preset.port;
+    broker.username = None;
+    broker.password = None;
+    broker.password_env = None;
+    broker.tls = None;
+}
+
+/// The Presets menu, which sets the broker's address to a known broker.
+fn presets_menu(ui: &mut egui::Ui, broker: &mut BrokerSpec) {
+    ui.menu_button("Presets", |ui| {
+        for preset in &PRESETS {
+            let item = ui
+                .button(format!(
+                    "{}  ({}:{})",
+                    preset.name, preset.host, preset.port
+                ))
+                .on_hover_text(preset.hint);
+            item.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, preset.name)
+            });
+            if item.clicked() {
+                apply_preset(broker, preset);
+                ui.close();
+            }
+        }
+    })
+    .response
+    .on_hover_text("Fill in a known broker's address; credentials and TLS are cleared");
+}
 
 /// Shown under the seed box while its text is not a seed.
 const SEED_HINT: &str = "use a whole number, or leave it empty";
@@ -31,19 +100,27 @@ pub fn show(
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
-            ui.strong("Broker");
-            errors_at(ui, doc, &Location::Broker);
+            ui.horizontal(|ui| {
+                ui.strong("Broker");
+                presets_menu(ui, &mut broker);
+            });
+            let at = &Location::Broker;
+            errors_at(ui, doc, at, shown_inline);
             egui::Grid::new("broker-form")
                 .num_columns(2)
                 .show(ui, |ui| {
                     let label = ui.label("Host");
-                    ui.text_edit_singleline(&mut broker.host)
-                        .labelled_by(label.id);
+                    checked(ui, doc, at, "host", |ui| {
+                        ui.text_edit_singleline(&mut broker.host)
+                            .labelled_by(label.id)
+                    });
                     ui.end_row();
 
                     let label = ui.label("Port");
-                    ui.add(DragValue::new(&mut broker.port))
-                        .labelled_by(label.id);
+                    checked(ui, doc, at, "port", |ui| {
+                        ui.add(DragValue::new(&mut broker.port))
+                            .labelled_by(label.id)
+                    });
                     ui.end_row();
 
                     let label = ui.label("MQTT version");
@@ -67,50 +144,60 @@ pub fn show(
                     ui.end_row();
 
                     let label = ui.label("Keep alive");
-                    duration_edit(
-                        ui,
-                        &mut ui_state.buffers,
-                        "broker/keep_alive",
-                        &mut broker.keep_alive,
-                    )
-                    .labelled_by(label.id);
-                    ui.end_row();
-
-                    let label = ui.label("Session expiry");
-                    let mqtt5 = broker.mqtt_version == MqttVersion::V5;
-                    let has_value = !broker.session_expiry.is_zero();
-                    mqtt5_control(ui, mqtt5, has_value, |ui| {
+                    checked(ui, doc, at, "keep_alive", |ui| {
                         duration_edit(
                             ui,
                             &mut ui_state.buffers,
-                            "broker/session_expiry",
-                            &mut broker.session_expiry,
+                            "broker/keep_alive",
+                            &mut broker.keep_alive,
                         )
                         .labelled_by(label.id)
                     });
                     ui.end_row();
 
+                    let label = ui.label("Session expiry");
+                    let mqtt5 = broker.mqtt_version == MqttVersion::V5;
+                    let has_value = !broker.session_expiry.is_zero();
+                    checked(ui, doc, at, "session_expiry", |ui| {
+                        mqtt5_control(ui, mqtt5, has_value, |ui| {
+                            duration_edit(
+                                ui,
+                                &mut ui_state.buffers,
+                                "broker/session_expiry",
+                                &mut broker.session_expiry,
+                            )
+                            .labelled_by(label.id)
+                        })
+                    });
+                    ui.end_row();
+
                     ui.label("Username");
-                    optional_text(ui, &mut broker.username, "none");
+                    checked(ui, doc, at, "username", |ui| {
+                        optional_text(ui, &mut broker.username, "none")
+                    });
                     ui.end_row();
 
                     ui.label("Password");
-                    ui.horizontal(|ui| {
-                        let mut source = PasswordSource::of(&broker);
-                        egui::ComboBox::from_id_salt("broker-password-source")
-                            .selected_text(source.label())
-                            .show_ui(ui, |ui| {
-                                for option in PasswordSource::ALL {
-                                    ui.selectable_value(&mut source, option, option.label());
-                                }
-                            });
-                        set_password_source(&mut broker, source);
-                        if let Some(password) = &mut broker.password {
-                            ui.add(egui::TextEdit::singleline(password).password(true));
-                        }
-                        if let Some(variable) = &mut broker.password_env {
-                            ui.text_edit_singleline(variable);
-                        }
+                    checked(ui, doc, at, "password_env", |ui| {
+                        ui.horizontal(|ui| {
+                            let mut source = PasswordSource::of(&broker);
+                            egui::ComboBox::from_id_salt("broker-password-source")
+                                .selected_text(source.label())
+                                .show_ui(ui, |ui| {
+                                    for option in PasswordSource::ALL {
+                                        ui.selectable_value(&mut source, option, option.label());
+                                    }
+                                });
+                            set_password_source(&mut broker, source);
+                            if let Some(password) = &mut broker.password {
+                                ui.add(egui::TextEdit::singleline(password).password(true));
+                            }
+                            broker
+                                .password_env
+                                .as_mut()
+                                .map(|variable| ui.text_edit_singleline(variable))
+                        })
+                        .box_or_row()
                     });
                     ui.end_row();
 
@@ -121,13 +208,17 @@ pub fn show(
                     }
                     ui.end_row();
                     if let Some(tls) = &mut broker.tls {
-                        for (label, path) in [
-                            ("  CA file", &mut tls.ca_file),
-                            ("  Client certificate", &mut tls.client_cert),
-                            ("  Client key", &mut tls.client_key),
+                        for (label, field, path) in [
+                            ("  CA file", "tls.ca_file", &mut tls.ca_file),
+                            (
+                                "  Client certificate",
+                                "tls.client_cert",
+                                &mut tls.client_cert,
+                            ),
+                            ("  Client key", "tls.client_key", &mut tls.client_key),
                         ] {
                             ui.label(label);
-                            path_edit(ui, path);
+                            checked(ui, doc, at, field, |ui| path_edit(ui, path));
                             ui.end_row();
                         }
                     }
@@ -216,10 +307,19 @@ fn seed_edit(ui: &mut egui::Ui, buffers: &mut Buffers, seed: &mut Option<u64>) -
         )
 }
 
-fn path_edit(ui: &mut egui::Ui, path: &mut Option<PathBuf>) {
+fn path_edit(ui: &mut egui::Ui, path: &mut Option<PathBuf>) -> egui::Response {
     let mut text = path.as_ref().map(|p| p.display().to_string());
-    optional_text(ui, &mut text, "system roots / none");
+    let response = optional_text(ui, &mut text, "system roots / none");
     *path = text.map(PathBuf::from);
+    response
+}
+
+/// The broker fields the form shows its problems next to.
+fn shown_inline(field: &str) -> bool {
+    matches!(
+        field,
+        "host" | "port" | "keep_alive" | "session_expiry" | "username" | "password_env"
+    ) || field.starts_with("tls.")
 }
 
 #[cfg(test)]
@@ -340,6 +440,48 @@ mod tests {
         type_into_label(&mut h, "Seed", "4x");
         assert_eq!(h.state().doc.file().simulation.seed, None);
         assert!(h.query_by_label(SEED_HINT).is_some());
+    }
+
+    #[test]
+    fn a_preset_sets_the_address_and_drops_credentials_and_tls() {
+        let mut fixture = Fixture::new(
+            "[broker]\nhost = \"mq.lan\"\nport = 8883\nusername = \"me\"\npassword = \"pw\"\n\
+             keep_alive = \"45s\"\n[broker.tls]\n",
+        );
+        fixture.ui.broker_open = true;
+        let mut h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        h.get_by_label("Presets").click();
+        h.run();
+        h.get_by_label("Mosquitto test server").click();
+        h.run();
+        let broker = &h.state().doc.file().broker;
+        assert_eq!(
+            (broker.host.as_str(), broker.port),
+            ("test.mosquitto.org", 1883)
+        );
+        assert_eq!(broker.username, None);
+        assert_eq!(broker.password, None);
+        assert_eq!(broker.tls, None);
+        assert_eq!(broker.keep_alive, Duration::from_secs(45), "the rest stays");
+    }
+
+    #[test]
+    fn the_local_preset_is_localhost() {
+        let mut fixture = Fixture::new("[broker]\nhost = \"mq.lan\"\nport = 1884\n");
+        fixture.ui.broker_open = true;
+        let mut h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        h.get_by_label("Presets").click();
+        h.run();
+        h.get_by_label("Mosquitto on this computer").click();
+        h.run();
+        let broker = &h.state().doc.file().broker;
+        assert_eq!((broker.host.as_str(), broker.port), ("localhost", 1883));
     }
 
     #[test]

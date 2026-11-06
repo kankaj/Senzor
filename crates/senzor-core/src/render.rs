@@ -28,6 +28,23 @@ pub type Context = BTreeMap<String, minijinja::Value>;
 
 const AVAILABILITY_TOPIC: &str = "availability.topic";
 
+/// A compile or render problem with the TOML key path of the template that caused it, such as
+/// `messages[1].payload`; validation passes the path on as the problem's field.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TemplateError {
+    pub field: String,
+    pub message: String,
+}
+
+impl TemplateError {
+    fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            message: message.into(),
+        }
+    }
+}
+
 /// A rendered message, ready to publish.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedMessage {
@@ -113,28 +130,49 @@ fn user_property_name(index: usize, key: &str) -> String {
     format!("messages[{}].user_properties.{key}", index + 1)
 }
 
+/// The key path of message `index`'s user properties as a whole.
+fn user_properties_field(index: usize) -> String {
+    format!("messages[{}].user_properties", index + 1)
+}
+
+/// Adds the template `name` with `source` to `env`; a syntax error names `field`.
+fn add_template(
+    env: &mut Environment<'static>,
+    name: &str,
+    source: &str,
+    field: impl FnOnce() -> String,
+) -> Result<(), TemplateError> {
+    env.add_template_owned(name.to_string(), source.to_string())
+        .map_err(|e| TemplateError::new(field(), e.to_string()))
+}
+
 impl InstanceTemplates {
     /// Compiles all templates; the error names the first broken one.
     pub fn compile(
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, String> {
+        Self::compile_located(messages, availability).map_err(|e| e.message)
+    }
+
+    /// [`Self::compile`], with the key path of the broken template.
+    pub(crate) fn compile_located(
+        messages: &[MessageSpec],
+        availability: Option<&AvailabilitySpec>,
+    ) -> Result<Self, TemplateError> {
         #[cfg(test)]
         compile_count::record(messages);
         let mut env = strict_environment();
         let mut compiled = Vec::with_capacity(messages.len());
         for (i, message) in messages.iter().enumerate() {
             let topic = topic_name(i);
-            env.add_template_owned(topic.clone(), message.topic.clone())
-                .map_err(|e| e.to_string())?;
+            add_template(&mut env, &topic, &message.topic, || topic.clone())?;
             let payload = payload_name(i);
-            env.add_template_owned(payload.clone(), message.payload.clone())
-                .map_err(|e| e.to_string())?;
+            add_template(&mut env, &payload, &message.payload, || payload.clone())?;
             let mut user_properties = Vec::with_capacity(message.user_properties.len());
             for (key, value) in &message.user_properties {
                 let name = user_property_name(i, key);
-                env.add_template_owned(name.clone(), value.clone())
-                    .map_err(|e| e.to_string())?;
+                add_template(&mut env, &name, value, || user_properties_field(i))?;
                 user_properties.push((key.clone(), name));
             }
             compiled.push(CompiledMessage {
@@ -146,8 +184,9 @@ impl InstanceTemplates {
             });
         }
         if let Some(availability) = availability {
-            env.add_template_owned(AVAILABILITY_TOPIC, availability.topic.clone())
-                .map_err(|e| e.to_string())?;
+            add_template(&mut env, AVAILABILITY_TOPIC, &availability.topic, || {
+                AVAILABILITY_TOPIC.to_string()
+            })?;
         }
         Ok(Self {
             env,
@@ -158,43 +197,73 @@ impl InstanceTemplates {
 
     /// Renders the availability topic, or `None` when the template has no availability.
     pub fn availability_topic(&self, ctx: &Context) -> Result<Option<String>, String> {
+        self.availability_topic_located(ctx).map_err(|e| e.message)
+    }
+
+    /// [`Self::availability_topic`], with the key path of the template that failed.
+    pub(crate) fn availability_topic_located(
+        &self,
+        ctx: &Context,
+    ) -> Result<Option<String>, TemplateError> {
         if !self.has_availability {
             return Ok(None);
         }
-        let topic = render_named(&self.env, AVAILABILITY_TOPIC, ctx)?;
-        check_topic(&topic).map_err(|e| format!("availability topic: {e}"))?;
+        let failed = |message| TemplateError::new(AVAILABILITY_TOPIC, message);
+        let topic = render_named(&self.env, AVAILABILITY_TOPIC, ctx).map_err(failed)?;
+        check_topic(&topic).map_err(|e| failed(format!("availability topic: {e}")))?;
         Ok(Some(topic))
     }
 
     /// Renders every message. A failure affects only that message.
     pub fn render_messages(&self, ctx: &Context) -> Vec<Result<RenderedMessage, String>> {
+        self.render_messages_located(ctx)
+            .map(|rendered| rendered.map_err(|e| e.message))
+            .collect()
+    }
+
+    /// [`Self::render_messages`], with the key path of the template that failed.
+    pub(crate) fn render_messages_located(
+        &self,
+        ctx: &Context,
+    ) -> impl Iterator<Item = Result<RenderedMessage, TemplateError>> {
         self.messages
             .iter()
             .enumerate()
-            .map(|(i, message)| {
-                let topic = render_named(&self.env, &message.topic, ctx)?;
-                check_topic(&topic).map_err(|e| format!("message {} topic: {e}", i + 1))?;
-                let payload = render_named(&self.env, &message.payload, ctx)?;
-                let user_properties = message
-                    .user_properties
-                    .iter()
-                    .map(|(key, name)| {
-                        let value = render_named(&self.env, name, ctx)
-                            .map_err(|e| format!("{name}: {e}"))?;
-                        Ok((key.clone(), value))
-                    })
-                    .collect::<Result<_, String>>()?;
-                Ok(RenderedMessage {
-                    topic,
-                    payload,
-                    properties: MessageProperties {
-                        message_expiry: message.message_expiry,
-                        content_type: message.content_type.clone(),
-                        user_properties,
-                    },
-                })
+            .map(|(i, message)| self.render_message(i, message, ctx))
+    }
+
+    fn render_message(
+        &self,
+        i: usize,
+        message: &CompiledMessage,
+        ctx: &Context,
+    ) -> Result<RenderedMessage, TemplateError> {
+        let topic = render_named(&self.env, &message.topic, ctx)
+            .map_err(|e| TemplateError::new(&message.topic, e))?;
+        check_topic(&topic).map_err(|e| {
+            TemplateError::new(&message.topic, format!("message {} topic: {e}", i + 1))
+        })?;
+        let payload = render_named(&self.env, &message.payload, ctx)
+            .map_err(|e| TemplateError::new(&message.payload, e))?;
+        let user_properties = message
+            .user_properties
+            .iter()
+            .map(|(key, name)| {
+                let value = render_named(&self.env, name, ctx).map_err(|e| {
+                    TemplateError::new(user_properties_field(i), format!("{name}: {e}"))
+                })?;
+                Ok((key.clone(), value))
             })
-            .collect()
+            .collect::<Result<_, TemplateError>>()?;
+        Ok(RenderedMessage {
+            topic,
+            payload,
+            properties: MessageProperties {
+                message_expiry: message.message_expiry,
+                content_type: message.content_type.clone(),
+                user_properties,
+            },
+        })
     }
 }
 

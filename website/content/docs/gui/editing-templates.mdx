@@ -7,9 +7,11 @@ Open the **Templates** tab in the left panel and click a template under **Projec
 
 ![The template editor showing office-air with its preview](/screenshots/template-editor.png)
 
-Every change goes into the project as you make it, and Senzor validates the project again. Problems with the template appear in red under the heading. Running instances keep their settings until you restart them ([Editing while running](/docs/concepts/editing-while-running)).
+Every change goes into the project as you make it, and Senzor validates the project again. A problem with one value shows in red under that value's box, which gets a red outline; other problems with the template appear in red under the heading. Running instances keep their settings until you restart them ([Editing while running](/docs/concepts/editing-while-running)).
 
-**Delete template** removes the template from the project without asking. Devices that still use it then report an unknown template in the Problems tab.
+**Duplicate template** copies the template, with its messages, fields and all its other settings, right after the original, and selects the copy; **Duplicate** in the template's right-click menu in the **Templates** tab does the same. The copy's ID is `<id>-copy`, or `<id>-copy-2`, `<id>-copy-3` and so on when that is taken. Devices keep using the original.
+
+**Delete template**, or the Delete key while the template is selected, removes the template from the project without asking; Ctrl+Z brings it back. Devices that still use it then report an unknown template in the Problems tab.
 
 ## Settings
 

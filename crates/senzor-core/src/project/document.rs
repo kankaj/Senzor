@@ -73,6 +73,11 @@ impl Document {
         Self::from_file(None, ProjectFile::default())
     }
 
+    /// A project that has no file yet and nothing to save, such as an example.
+    pub fn untitled(file: ProjectFile) -> Self {
+        Self::from_file(None, file)
+    }
+
     pub fn open(path: &Path) -> Result<Self, OpenError> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| OpenError::Read(format!("cannot read {}: {e}", path.display())))?;
@@ -413,6 +418,17 @@ count = 2
         let mut doc = Document::open(path).unwrap();
         doc.edit(|f| f.broker.host = "mqtt.local".into());
         doc
+    }
+
+    #[test]
+    fn an_untitled_document_holds_a_project_without_unsaved_changes() {
+        let file = ProjectFile::parse("[[devices]]\nid = \"d\"\ntemplate = \"co2\"\n").unwrap();
+        let doc = Document::untitled(file.clone());
+        assert_eq!(doc.file(), &file);
+        assert_eq!(doc.path(), None);
+        assert!(!doc.is_dirty());
+        assert!(!doc.can_undo());
+        assert!(doc.validated().errors.is_empty());
     }
 
     #[test]

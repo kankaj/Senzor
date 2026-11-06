@@ -54,6 +54,7 @@ pub fn show(
                     actions.push(Action::Open);
                 }
                 recent_menu(ui, recent, actions);
+                examples_menu(ui, actions);
                 if save_button(ui, doc.is_dirty()).clicked() {
                     actions.push(Action::Save);
                 }
@@ -171,6 +172,23 @@ fn recent_menu(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>)
     });
     let response = menu.response.on_hover_text("Recent projects");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Recent"));
+}
+
+/// The Examples menu, books next to Recent, listing the example projects.
+fn examples_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    let menu = ui.menu_button(icons::BOOKS, |ui| {
+        for (index, example) in crate::examples::EXAMPLES.iter().enumerate() {
+            if ui
+                .button(example.name)
+                .on_hover_text(example.summary)
+                .clicked()
+            {
+                actions.push(Action::OpenExample(index));
+            }
+        }
+    });
+    let response = menu.response.on_hover_text("Open an example project");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Examples"));
 }
 
 /// An Undo or Redo button: icon, name, enabled, shortcut and action.

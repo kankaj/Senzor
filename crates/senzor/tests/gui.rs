@@ -675,6 +675,117 @@ fn the_zoom_buttons_in_settings_zoom_the_window_and_the_zoom_is_saved() {
     assert_eq!(AppSettings::load(Some(&storage)).zoom, 0.9);
 }
 
+/// A port nothing listens on right now.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn mcp_port(harness: &App) -> Option<u16> {
+    match harness.state().mcp_status() {
+        senzor::McpStatus::Listening(address) => Some(address.port()),
+        senzor::McpStatus::Off { .. } => None,
+    }
+}
+
+#[test]
+fn the_mcp_port_set_in_settings_is_used_and_saved_with_mcp_on() {
+    use senzor::settings::AppSettings;
+    let port = free_port();
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+    let field = harness.get_by_label("MCP port");
+    field.focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness
+        .get_by_label("MCP port")
+        .type_text(&port.to_string());
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    click(&mut harness, "MCP");
+    harness.run();
+    assert_eq!(mcp_port(&harness), Some(port));
+
+    let mut storage = MemoryStorage::default();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    let saved = AppSettings::load(Some(&storage));
+    assert_eq!((saved.mcp_port, saved.mcp_on), (port, true));
+
+    click(&mut harness, "MCP");
+    harness.run();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    assert!(!AppSettings::load(Some(&storage)).mcp_on);
+}
+
+#[test]
+fn the_mcp_flag_uses_the_port_in_the_settings() {
+    let port = free_port();
+    let settings = senzor::settings::AppSettings {
+        mcp_port: port,
+        ..Default::default()
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+                .with_mcp_on()
+        });
+    harness.step();
+    assert_eq!(mcp_port(&harness), Some(port));
+    assert!(!harness.state().settings().mcp_on, "the flag is not saved");
+}
+
+/// A window started with `settings`, as if they had been saved by an earlier launch.
+fn app_with_settings(settings: senzor::settings::AppSettings) -> App {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+        });
+    harness.step();
+    harness
+}
+
+#[test]
+fn mcp_left_on_starts_with_the_next_window() {
+    let port = free_port();
+    let harness = app_with_settings(senzor::settings::AppSettings {
+        mcp_on: true,
+        mcp_port: port,
+        ..Default::default()
+    });
+    assert_eq!(mcp_port(&harness), Some(port));
+}
+
+#[test]
+fn the_mcp_port_flag_wins_over_the_saved_port_for_this_launch() {
+    let saved = free_port();
+    let flag = free_port();
+    let settings = senzor::settings::AppSettings {
+        mcp_on: true,
+        mcp_port: saved,
+        ..Default::default()
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+                .with_mcp(flag)
+        });
+    harness.step();
+    assert_eq!(mcp_port(&harness), Some(flag));
+    assert_eq!(
+        harness.state().settings().mcp_port,
+        saved,
+        "the flag is not saved"
+    );
+}
+
 /// The app's recent projects, the latest first.
 fn recent(harness: &App) -> Vec<PathBuf> {
     harness.state().settings().recent.clone()
@@ -800,6 +911,36 @@ fn the_welcome_screen_lists_the_recent_projects_and_opens_one() {
 }
 
 #[test]
+fn an_example_opens_from_the_welcome_screen_as_an_untitled_project() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Quick start");
+    let doc = harness.state().document();
+    assert_eq!(doc.path(), None, "saving asks where");
+    assert!(doc.file().devices.iter().any(|d| d.id == "office"));
+    assert!(doc.validated().errors.is_empty());
+    assert!(harness.query_by_label(WELCOME).is_none());
+}
+
+#[test]
+fn the_examples_menu_opens_an_example_after_asking_about_unsaved_changes() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Add your first device");
+    click(&mut harness, "Examples");
+    click(&mut harness, "Fleet");
+    assert!(harness.query_by_label("Unsaved changes").is_some());
+    click(&mut harness, "Discard");
+    let ids: Vec<String> = harness
+        .state()
+        .document()
+        .file()
+        .devices
+        .iter()
+        .map(|d| d.id.clone())
+        .collect();
+    assert!(ids.iter().any(|id| id.starts_with("floor")), "{ids:?}");
+}
+
+#[test]
 fn adding_the_first_device_from_the_welcome_screen_leaves_it() {
     let mut harness = app(None, FakeDialogs::default());
     click(&mut harness, "Add your first device");
@@ -906,6 +1047,77 @@ fn shortcuts_wait_while_a_dialog_is_open() {
     press(&mut harness, CTRL, egui::Key::O);
     assert_eq!(harness.state().document().path(), Some(a.as_path()));
     assert!(harness.query_by_label("Unsaved changes").is_some());
+}
+
+#[test]
+fn delete_removes_the_selected_device_and_ctrl_z_brings_it_back() {
+    let path = write_project(
+        "shortcut-delete-device",
+        "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\n\n[[devices]]\nid = \"b\"\ntemplate = \"co2\"\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "b ×1");
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Delete);
+    let ids = |h: &App| -> Vec<String> {
+        h.state()
+            .document()
+            .file()
+            .devices
+            .iter()
+            .map(|d| d.id.clone())
+            .collect()
+    };
+    assert_eq!(ids(&harness), ["a"]);
+    assert!(harness.query_by_label("Device b").is_none());
+
+    press(&mut harness, CTRL, egui::Key::Z);
+    assert_eq!(ids(&harness), ["a", "b"]);
+}
+
+#[test]
+fn delete_removes_the_selected_template() {
+    let path = write_project(
+        "shortcut-delete-template",
+        "[[templates]]\nid = \"t\"\nmessages = [{ topic = \"x\", payload = \"1\" }]\n\
+         fields.v = { generator = \"constant\", value = 1 }\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Templates");
+    click(&mut harness, "t");
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Delete);
+    assert!(harness.state().document().file().templates.is_empty());
+}
+
+#[test]
+fn delete_in_a_text_box_deletes_text_not_the_device() {
+    let path = write_project(
+        "shortcut-delete-typing",
+        "[[devices]]\nid = \"d\"\ntemplate = \"co2\"\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "d ×1");
+    harness.get_by_label("ID").focus();
+    harness.run();
+    harness.key_press(egui::Key::Home);
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Delete);
+    assert_eq!(device_count(&harness), 1);
+}
+
+#[test]
+fn ctrl_f_shows_the_message_log_and_puts_the_cursor_in_its_filter() {
+    let path = write_project(
+        "shortcut-find",
+        "[[devices]]\nid = \"bad\"\ntemplate = \"nope\"\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Problems (1)");
+    press(&mut harness, CTRL, egui::Key::F);
+    harness.event(egui::Event::Text("office".into()));
+    harness.run();
+    assert!(
+        harness.query_all_by_value("office").next().is_some(),
+        "typed into the filter"
+    );
 }
 
 #[test]
@@ -1059,6 +1271,64 @@ fn duplicate_device_adds_a_copy_after_it_and_selects_it() {
         .collect();
     assert_eq!(ids, ["d", "d-copy"]);
     assert!(harness.query_by_label("Device d-copy").is_some());
+}
+
+#[test]
+fn duplicate_template_adds_a_copy_after_it_and_selects_it() {
+    let path = write_project(
+        "duplicate-template",
+        "[[templates]]\nid = \"t\"\nmessages = [{ topic = \"x\", payload = \"{{ v }}\" }]\n\
+         fields.v = { generator = \"constant\", value = 1 }\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Templates");
+    click(&mut harness, "t");
+    click(&mut harness, "Duplicate template");
+    let ids: Vec<String> = harness
+        .state()
+        .document()
+        .file()
+        .templates
+        .iter()
+        .map(|t| t.id.clone())
+        .collect();
+    assert_eq!(ids, ["t", "t-copy"]);
+    assert!(harness.query_by_label("Template t-copy").is_some());
+}
+
+/// Whether the widget labelled `label` has the keyboard.
+fn has_focus(harness: &App, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    harness.get_by_label(label).accesskit_node().is_focused()
+}
+
+#[test]
+fn clicking_a_problem_puts_the_cursor_in_the_box_it_is_about() {
+    let path = write_project(
+        "problem-focus",
+        "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\n\n\
+         [[devices]]\nid = \"d\"\ntemplate = \"co2\"\ncount = 2\ninstance_id = \"x\"\n",
+    );
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Problems (1)");
+    click(
+        &mut harness,
+        "device `d`: instance id `x` repeats; include {{ index }} in instance_id",
+    );
+    harness.run();
+    assert!(harness.query_by_label("Device d").is_some());
+    assert!(has_focus(&harness, "Instance IDs"));
+}
+
+#[test]
+fn clicking_a_broker_problem_opens_the_settings_at_its_box() {
+    let path = write_project("problem-focus-broker", "[broker]\nport = 0\n");
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Problems (1)");
+    click(&mut harness, "broker: port must not be 0");
+    harness.run();
+    assert!(harness.query_by_label("Project settings").is_some());
+    assert!(has_focus(&harness, "Port"));
 }
 
 const ONE_DEVICE: &str = "[[devices]]\nid = \"a\"\ntemplate = \"co2\"\nautostart = false\n";

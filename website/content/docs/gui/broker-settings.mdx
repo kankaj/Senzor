@@ -3,11 +3,11 @@ title: Broker settings
 description: Set the MQTT broker every instance connects to, with its client IDs, credentials and TLS.
 ---
 
-All instances of a project connect to one broker. To change it, click the **Broker: localhost:1883** button in the top bar, which shows the current host and port. Clicking a broker problem in the Problems tab opens the same window.
+All instances of a project connect to one broker. To change it, click the **Broker: localhost:1883** button in the top bar, which shows the current host and port. Clicking a broker problem in the Problems tab opens the same window, with the cursor in the box the problem is about. A problem with one value shows in red under that value's box, which gets a red outline.
 
 ![The Broker window](/screenshots/broker.png)
 
-The broker button opens **Project settings**, whose **Broker** section edits the project's `[broker]` section; its **Simulation** section holds the [seed](/docs/concepts/reproducible-runs). Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. While the broker settings have problems, they show **device has errors** instead, and cannot be restarted until you fix them. Problems with the broker settings appear in red at the top of the window, and while there are any, no device can start.
+The broker button opens **Project settings**, whose **Broker** section edits the project's `[broker]` section; its **Simulation** section holds the [seed](/docs/concepts/reproducible-runs). Changes go into the project as you type. Instances that are already running keep their connection and show **restart to apply** until you restart them. While the broker settings have problems, they show **device has errors** instead, and cannot be restarted until you fix them. Problems with the broker settings appear in red under the box they are about, or at the top of the window, and while there are any, no device can start.
 
 | Label                | Key in the file              | Default     |
 | -------------------- | ---------------------------- | ----------- |
@@ -20,6 +20,19 @@ The broker button opens **Project settings**, whose **Broker** section edits the
 | **Username**         | `username`                   | none        |
 | **Password**         | `password` or `password_env` | none        |
 | **TLS**              | `[broker.tls]`               | off         |
+
+## Presets
+
+**Presets**, next to **Broker**, fills in the address of a known broker. Choosing one sets **Host** and **Port**, and clears the username, the password and TLS, which these brokers do not need; the other settings stay.
+
+| Preset                         | Host and port             |
+| ------------------------------ | ------------------------- |
+| **Mosquitto on this computer** | `localhost:1883`          |
+| **Mosquitto test server**      | `test.mosquitto.org:1883` |
+| **HiveMQ public broker**       | `broker.hivemq.com:1883`  |
+| **EMQX public broker**         | `broker.emqx.io:1883`     |
+
+<Callout type="warn">The three public brokers are shared with everyone on the internet: anyone can read what your devices publish there. Do not send anything private.</Callout>
 
 ## MQTT version
 

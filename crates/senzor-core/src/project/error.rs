@@ -6,6 +6,10 @@ use std::fmt;
 pub struct ProjectError {
     pub location: Location,
     pub message: String,
+    /// The TOML key path, relative to the location's table, of the value the problem is about:
+    /// `port`, `tls.ca_file`, `fields.co2`, `messages[1].payload`, `availability.will_delay`.
+    /// Messages count from 1, as the problem texts do. `None` when no single value is to blame.
+    pub field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +47,14 @@ impl ProjectError {
         Self {
             location,
             message: message.into(),
+            field: None,
         }
+    }
+
+    /// The same problem, naming `field` as the value it is about.
+    pub fn at(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
     }
 
     pub fn broker(message: impl Into<String>) -> Self {
@@ -81,6 +92,15 @@ mod tests {
         assert_eq!(line_column(text, offset), (1, 9));
         let offset = text.find("key").unwrap();
         assert_eq!(line_column(text, offset), (2, 1));
+    }
+
+    #[test]
+    fn a_problem_names_its_field_without_changing_its_text() {
+        let err = ProjectError::broker("port must not be 0");
+        assert_eq!(err.field, None);
+        let err = err.at("port");
+        assert_eq!(err.field.as_deref(), Some("port"));
+        assert_eq!(err.to_string(), "broker: port must not be 0");
     }
 
     #[test]

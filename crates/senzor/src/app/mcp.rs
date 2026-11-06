@@ -56,9 +56,23 @@ enum Selected {
 }
 
 impl SenzorApp {
-    /// Turns MCP on at launch, on `port` (the `--mcp` and `--mcp-port` flags).
+    /// Turns MCP on at launch, on `port` (the `--mcp` and `--mcp-port` flags), also when the
+    /// settings had already turned it on at another port. The settings keep their port.
     pub fn with_mcp(mut self, port: u16) -> Self {
+        if self
+            .mcp
+            .as_ref()
+            .is_some_and(|mcp| mcp.address.port() != port)
+        {
+            self.stop_mcp();
+        }
         self.start_mcp(port);
+        self
+    }
+
+    /// Turns MCP on at launch on the port in the settings (the `--mcp` flag).
+    pub fn with_mcp_on(mut self) -> Self {
+        self.start_mcp(self.mcp_port);
         self
     }
 

@@ -42,6 +42,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
                 let what = match pending {
                     Pending::New => "starting a new project",
                     Pending::Open | Pending::OpenPath(_) => "opening another project",
+                    Pending::OpenExample(_) => "opening the example",
                     Pending::Close => "closing",
                 };
                 ui.label(format!("Save the changes to this project before {what}?"));

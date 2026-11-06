@@ -1,7 +1,7 @@
 use eframe::egui::{self, RichText, TextEdit, TextStyle};
 use senzor_core::engine::{EngineState, LogEntry};
 
-use super::{Action, BottomTab, ERROR, UiState};
+use super::{Action, BottomTab, ERROR, UiState, request_field_focus, shortcuts};
 use crate::document::Document;
 use crate::format;
 use crate::selection::problem_target;
@@ -33,8 +33,17 @@ pub fn show(
 fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState) {
     ui.horizontal(|ui| {
         let label = ui.label("Filter");
-        ui.add(TextEdit::singleline(&mut ui_state.log_filter).hint_text("topic contains…"))
-            .labelled_by(label.id);
+        let filter = ui
+            .add(TextEdit::singleline(&mut ui_state.log_filter).hint_text("topic contains…"))
+            .labelled_by(label.id)
+            .on_hover_text(shortcuts::tip(
+                ui.ctx(),
+                "Show only messages whose topic contains this",
+                &shortcuts::FIND,
+            ));
+        if std::mem::take(&mut ui_state.focus_log_filter) {
+            filter.request_focus();
+        }
         let paused = ui_state.log_frozen.is_some();
         if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
             ui_state.log_frozen = if paused {
@@ -86,6 +95,9 @@ fn problems(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
                     && let Some(target) = problem_target(&error.location, doc.file())
                 {
                     actions.push(Action::GoTo(target));
+                    if let Some(field) = &error.field {
+                        request_field_focus(ui.ctx(), error.location.clone(), field.clone());
+                    }
                 }
             }
         });

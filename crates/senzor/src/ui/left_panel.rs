@@ -6,7 +6,8 @@ use super::{Action, FIX_PROBLEMS_FIRST, LeftTab, UiState, WARNING, status_dot};
 use crate::document::Document;
 use crate::selection::Selection;
 use crate::tree::{
-    DeviceNode, InstanceNode, OrphanCause, device_tree, instance_ids, is_restartable, orphan_cause,
+    DeviceNode, InstanceNode, OrphanCause, StatusFilter, TreeFilter, device_tree, filter_tree,
+    instance_ids, is_restartable, orphan_cause,
 };
 
 /// Devices with more instances than this start collapsed: laying out thousands of rows every
@@ -25,13 +26,47 @@ pub fn show(
         ui.selectable_value(&mut ui_state.left_tab, LeftTab::Templates, "Templates");
     });
     ui.separator();
+    if ui_state.left_tab == LeftTab::Devices {
+        filter_row(ui, &mut ui_state.tree_filter);
+    }
     let selection = ui_state.selection.as_ref();
     egui::ScrollArea::vertical()
         .auto_shrink([false; 2])
         .show(ui, |ui| match ui_state.left_tab {
-            LeftTab::Devices => devices(ui, doc, state, selection, actions),
+            LeftTab::Devices => devices(ui, doc, state, selection, &ui_state.tree_filter, actions),
             LeftTab::Templates => templates(ui, doc, selection, actions),
         });
+}
+
+/// The search box and the status filter above the device tree.
+fn filter_row(ui: &mut egui::Ui, filter: &mut TreeFilter) {
+    ui.horizontal(|ui| {
+        let icon = ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
+        icon.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Find devices")
+        });
+        let status = egui::ComboBox::from_id_salt("tree-status")
+            .selected_text(filter.status.label())
+            .width(80.0);
+        // The box takes what the status filter leaves of the row.
+        let box_width = (ui.available_width() - 100.0).max(60.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut filter.text)
+                .hint_text("device or instance")
+                .desired_width(box_width),
+        )
+        .labelled_by(icon.id);
+        let response = status
+            .show_ui(ui, |ui| {
+                for option in StatusFilter::ALL {
+                    ui.selectable_value(&mut filter.status, option, option.label());
+                }
+            })
+            .response;
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Status"));
+        response.on_hover_text("Show only instances in this state");
+    });
 }
 
 fn devices(
@@ -39,13 +74,36 @@ fn devices(
     doc: &Document,
     state: &EngineState,
     selection: Option<&Selection>,
+    filter: &TreeFilter,
     actions: &mut Vec<Action>,
 ) {
     if ui.button("Add device").clicked() {
         actions.push(Action::AddDevice);
     }
-    for node in device_tree(doc.file(), doc.validated(), state) {
-        let id = ui.make_persistent_id(("device", node.index, &node.id));
+    let tree = device_tree(doc.file(), doc.validated(), state);
+    // Counted before the filter hides instances.
+    let online: Vec<Option<String>> = tree.iter().map(online_badge).collect();
+    let filtering = filter.is_active();
+    let shown: Vec<(DeviceNode, Option<String>)> = if filtering {
+        let kept = filter_tree(tree.clone(), filter);
+        kept.into_iter()
+            .map(|node| {
+                let at = tree
+                    .iter()
+                    .position(|n| n.index == node.index && n.id == node.id);
+                let badge = at.and_then(|at| online[at].clone());
+                (node, badge)
+            })
+            .collect()
+    } else {
+        tree.into_iter().zip(online).collect()
+    };
+    if filtering && shown.is_empty() {
+        ui.weak("No device or instance matches.");
+    }
+    for (node, badge) in shown {
+        // A filtered tree opens what it found, without changing what stays open afterwards.
+        let id = ui.make_persistent_id(("device", node.index, &node.id, filtering));
         let default_open = node.instances.len() <= OPEN_BY_DEFAULT_MAX_INSTANCES;
         egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
@@ -68,6 +126,9 @@ fn devices(
                 actions.push(Action::Select(Some(Selection::Device(index))));
             }
             response.context_menu(|ui| device_menu(ui, &node, actions));
+            if let Some(badge) = badge {
+                ui.weak(badge);
+            }
         })
         .body(|ui| {
             let orphan_cause = orphan_cause(doc.validated(), &node.id);
@@ -76,6 +137,15 @@ fn devices(
             }
         });
     }
+}
+
+/// "3/5 online" for a device with an instance that is not stopped; nothing for a stopped one.
+fn online_badge(node: &DeviceNode) -> Option<String> {
+    let active = node
+        .instances
+        .iter()
+        .any(|i| i.status != senzor_core::engine::InstanceStatus::Stopped);
+    active.then(|| format!("{}/{} online", node.online(), node.instances.len()))
 }
 
 /// One instance under its device; `orphan_cause` is what its badge says if it is an orphan.
@@ -213,9 +283,16 @@ fn templates(
     ui.weak("Project");
     for (index, template) in doc.file().templates.iter().enumerate() {
         let selected = selection == Some(&Selection::Template(index));
-        if ui.selectable_label(selected, &template.id).clicked() {
+        let response = ui.selectable_label(selected, &template.id);
+        if response.clicked() {
             actions.push(Action::Select(Some(Selection::Template(index))));
         }
+        response.context_menu(|ui| {
+            if ui.button("Duplicate").clicked() {
+                actions.push(Action::DuplicateTemplate(template.id.clone()));
+                ui.close();
+            }
+        });
     }
 }
 
@@ -341,6 +418,23 @@ count = 3
     }
 
     #[test]
+    fn duplicate_in_a_template_menu_asks_to_copy_that_template() {
+        let mut h = harness_with(
+            "[[templates]]\nid = \"mine\"\nmessages = [{ topic = \"t\", payload = \"1\" }]\nfields.v = { generator = \"constant\", value = 1 }\n",
+            EngineState::default(),
+        );
+        h.state_mut().ui.left_tab = LeftTab::Templates;
+        h.run();
+        choose_from_context_menu(&mut h, "mine", "Duplicate");
+        assert!(
+            h.state()
+                .actions
+                .iter()
+                .any(|a| matches!(a, Action::DuplicateTemplate(id) if id == "mine"))
+        );
+    }
+
+    #[test]
     fn restart_in_an_instance_menu_restarts_that_instance() {
         let mut h = harness();
         choose_from_context_menu(&mut h, "small-1", "Restart");
@@ -425,6 +519,58 @@ count = 3
     #[test]
     fn the_menu_of_a_device_with_errors_offers_no_restart() {
         menu_offers_no_restart("bad ×1 (has errors)");
+    }
+
+    #[test]
+    fn typing_in_find_devices_hides_the_devices_that_do_not_match() {
+        let mut h = harness();
+        let find = h.get_by_label("Find devices");
+        find.focus();
+        find.type_text("SMA");
+        h.run();
+        assert!(h.query_by_label("big ×60").is_none());
+        assert!(h.query_by_label("small ×3").is_some());
+        assert!(h.query_by_label("small-2").is_some());
+    }
+
+    #[test]
+    fn a_filter_that_matches_nothing_says_so() {
+        let mut h = harness();
+        let find = h.get_by_label("Find devices");
+        find.focus();
+        find.type_text("nothing-like-this");
+        h.run();
+        assert!(h.query_by_label("No device or instance matches.").is_some());
+    }
+
+    #[test]
+    fn the_status_filter_shows_only_instances_in_that_status() {
+        let mut state = EngineState::default();
+        state
+            .instances
+            .insert("small-1".into(), instance("small", InstanceStatus::Online));
+        let mut h = harness_with(SRC, state);
+        h.get_by_label("Status").click();
+        h.run();
+        h.get_by_label("Online").click();
+        h.run();
+        assert!(h.query_by_label("small-1").is_some());
+        assert!(h.query_by_label("small-0").is_none());
+        assert!(h.query_by_label("big ×60").is_none());
+    }
+
+    #[test]
+    fn a_running_device_shows_how_many_of_its_instances_are_online() {
+        let mut state = EngineState::default();
+        state
+            .instances
+            .insert("small-1".into(), instance("small", InstanceStatus::Online));
+        let h = harness_with(SRC, state);
+        assert!(h.query_by_label("1/3 online").is_some());
+        assert!(
+            h.query_by_label("0/60 online").is_none(),
+            "a stopped device shows no count"
+        );
     }
 
     #[test]

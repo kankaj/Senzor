@@ -8,6 +8,7 @@ pub mod left_panel;
 pub mod modals;
 pub mod settings;
 pub mod shortcuts;
+pub mod status_bar;
 pub mod switch;
 pub mod template;
 pub mod top_bar;
@@ -31,7 +32,7 @@ use crate::settings::Theme;
 pub const ERROR: Color32 = Color32::from_rgb(220, 70, 70);
 pub const WARNING: Color32 = Color32::from_rgb(220, 160, 40);
 pub const ONLINE: Color32 = Color32::from_rgb(60, 180, 90);
-const STOPPED: Color32 = Color32::from_gray(140);
+pub const STOPPED: Color32 = Color32::from_gray(140);
 
 /// Hover hint of a disabled Start: the Problems tab lists what blocks the device.
 pub const FIX_PROBLEMS_FIRST: &str = "Fix the problems in the Problems tab first";
@@ -60,15 +61,25 @@ pub enum Action {
     TestConnection,
     /// Copy the device with this ID, and select the copy.
     DuplicateDevice(String),
+    /// Copy the project template with this ID, and select the copy.
+    DuplicateTemplate(String),
     Undo,
     Redo,
+    /// Delete the selected device or template.
+    DeleteSelected,
+    /// Show the message log and put the cursor in its filter.
+    FindInLog,
     /// Open a project from the Recent menu.
     OpenRecent(PathBuf),
+    /// Open the example at this index of [`crate::examples::EXAMPLES`].
+    OpenExample(usize),
     ClearRecent,
     SetTheme(Theme),
     GoTo(ProblemTarget),
     /// Turn the MCP endpoint on or off.
     ToggleMcp,
+    /// Use this port the next time MCP is turned on.
+    SetMcpPort(u16),
 }
 
 /// Order in which a frame's actions are applied: edits, then renames, then removals, then the rest.
@@ -131,6 +142,8 @@ pub enum Pending {
     Open,
     /// Open this file, chosen from the recent projects.
     OpenPath(PathBuf),
+    /// Open the example at this index of [`crate::examples::EXAMPLES`].
+    OpenExample(usize),
     Close,
 }
 
@@ -196,6 +209,10 @@ pub struct UiState {
     /// Pin box text per (instance ID, field name).
     pub pin_inputs: HashMap<(String, String), String>,
     pub log_filter: String,
+    /// Which devices and instances the device tree shows.
+    pub tree_filter: crate::tree::TreeFilter,
+    /// The log filter takes the keyboard when it is next drawn.
+    pub focus_log_filter: bool,
     /// A frozen copy of the log while it is paused.
     pub log_frozen: Option<VecDeque<LogEntry>>,
     pub broker_open: bool,
@@ -446,10 +463,16 @@ pub fn optional_text(ui: &mut egui::Ui, value: &mut Option<String>, hint: &str) 
     response
 }
 
-/// Validation errors located at `location`, in red; returns whether there were any. Drawn in
+/// Validation errors located at `location` that the form does not show next to a box (`inline`
+/// says which fields it does), in red; returns whether `location` has any errors at all. Drawn in
 /// their own scope so a changing number of errors does not shift the IDs (and focus) of the
 /// widgets below.
-pub fn errors_at(ui: &mut egui::Ui, doc: &Document, location: &Location) -> bool {
+pub fn errors_at(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    location: &Location,
+    inline: impl Fn(&str) -> bool,
+) -> bool {
     ui.push_id("errors", |ui| {
         let mut any = false;
         for error in doc
@@ -458,10 +481,79 @@ pub fn errors_at(ui: &mut egui::Ui, doc: &Document, location: &Location) -> bool
             .iter()
             .filter(|e| &e.location == location)
         {
-            ui.colored_label(ERROR, &error.message);
+            if !error.field.as_deref().is_some_and(&inline) {
+                ui.colored_label(ERROR, &error.message);
+            }
             any = true;
         }
         any
+    })
+    .inner
+}
+
+/// A row of widgets around the box that holds a value, such as a checkbox and the box it turns on.
+pub trait BoxOrRow {
+    /// The box when the row has one, otherwise the whole row: what [`checked`] outlines and
+    /// gives the keyboard.
+    fn box_or_row(self) -> egui::Response;
+}
+
+impl BoxOrRow for egui::InnerResponse<Option<egui::Response>> {
+    fn box_or_row(self) -> egui::Response {
+        self.inner.unwrap_or(self.response)
+    }
+}
+
+/// Where the field the Problems tab asked for is kept until its form draws it.
+fn focus_request_id() -> egui::Id {
+    egui::Id::new("senzor/focus-field")
+}
+
+/// Asks the form that shows `field` of `location` to scroll to it and give it the keyboard.
+pub fn request_field_focus(ctx: &egui::Context, location: Location, field: String) {
+    ctx.data_mut(|d| d.insert_temp(focus_request_id(), (location, field)));
+}
+
+/// Draws one value of a form with `add`, in a cell of its own. While validation finds problems
+/// with `field` at `location`, the value is outlined in red and the problems are listed under it.
+/// When the Problems tab asked for this field, it scrolls into view and takes the keyboard.
+/// Returns what `add` returned.
+pub fn checked(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    location: &Location,
+    field: &str,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        let response = add(ui);
+        let mut problems = doc
+            .validated()
+            .errors
+            .iter()
+            .filter(|e| &e.location == location && e.field.as_deref() == Some(field))
+            .peekable();
+        if problems.peek().is_some() {
+            ui.painter().rect_stroke(
+                response.rect.expand(2.0),
+                3.0,
+                egui::Stroke::new(1.5, ERROR),
+                egui::StrokeKind::Outside,
+            );
+            for problem in problems {
+                ui.colored_label(ERROR, &problem.message);
+            }
+        }
+        let asked = ui
+            .ctx()
+            .data(|d| d.get_temp::<(Location, String)>(focus_request_id()));
+        if asked.is_some_and(|(at, asked)| &at == location && asked == field) {
+            ui.ctx()
+                .data_mut(|d| d.remove::<(Location, String)>(focus_request_id()));
+            response.request_focus();
+            response.scroll_to_me(Some(egui::Align::Center));
+        }
+        response
     })
     .inner
 }

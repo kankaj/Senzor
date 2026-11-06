@@ -6,13 +6,14 @@ use eframe::egui;
 use senzor_core::engine::{
     CONNECTION_TEST_TIMEOUT, Command, Engine, EngineHandle, EngineState, Target, test_connection,
 };
-use senzor_core::project::edit::duplicate_device;
+use senzor_core::project::edit::{duplicate_device, duplicate_template};
 use senzor_core::project::{BrokerConfig, ProjectFile};
 use tokio::task::JoinHandle;
 
 use crate::dialogs::{FileDialogs, project_file_path};
 use crate::document::Document;
 use crate::edits;
+use crate::rate::MessageRate;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
 use crate::settings::AppSettings;
 use crate::ui::modals::{self, Outcome, UnsavedChoice};
@@ -59,6 +60,8 @@ pub struct SenzorApp {
     connection_test: Option<ConnectionTestRun>,
     /// When the project's file was last checked for changes made elsewhere.
     disk_checked: Instant,
+    /// How fast the engine publishes, for the status bar.
+    rate: MessageRate,
 }
 
 /// How often the window looks whether another program changed the project's file.
@@ -72,14 +75,26 @@ struct ConnectionTestRun {
 }
 
 impl SenzorApp {
-    /// Opens `path` if given (a file that fails to parse shows its errors and leaves an empty project).
+    /// Opens `path` if given (a file that fails to parse shows its errors and leaves an empty
+    /// project), with the settings the last window saved.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
         dialogs: Box<dyn FileDialogs>,
     ) -> Self {
-        ui::install_icon_font(&cc.egui_ctx);
         let settings = AppSettings::load(cc.storage);
+        Self::with_settings(cc, path, dialogs, settings)
+    }
+
+    /// Like [`SenzorApp::new`], with `settings` instead of the saved ones. MCP starts when the
+    /// settings say it was on.
+    pub fn with_settings(
+        cc: &eframe::CreationContext<'_>,
+        path: Option<PathBuf>,
+        dialogs: Box<dyn FileDialogs>,
+        settings: AppSettings,
+    ) -> Self {
+        ui::install_icon_font(&cc.egui_ctx);
         settings.apply(&cc.egui_ctx);
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime starts");
         let mut app = Self {
@@ -98,15 +113,19 @@ impl SenzorApp {
             engine_generation: 0,
             open_error: None,
             mcp: None,
-            mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
+            mcp_port: settings.mcp_port,
             mcp_error: None,
             settings,
             connection_test: None,
             disk_checked: Instant::now(),
+            rate: MessageRate::default(),
         };
         match path {
             Some(path) => app.open_path(&path),
             None => app.replace_document(Document::new_empty()),
+        }
+        if app.settings.mcp_on {
+            app.start_mcp(app.settings.mcp_port);
         }
         app
     }
@@ -151,6 +170,7 @@ impl SenzorApp {
         self.doc = doc;
         self.open_error = None;
         self.connection_test = None;
+        self.rate.clear();
         self.engine_generation += 1;
         self.ui.reset();
         let ctx = self.ctx.clone();
@@ -317,6 +337,10 @@ impl SenzorApp {
                 }
             }
             Pending::OpenPath(path) => self.open_path(&path),
+            Pending::OpenExample(index) => {
+                let project = crate::examples::EXAMPLES[index].project();
+                self.replace_document(Document::untitled(project));
+            }
             Pending::Close => {
                 self.allow_close = true;
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -452,6 +476,24 @@ impl SenzorApp {
                     self.reveal(Selection::Device(index));
                 }
             }
+            Action::DuplicateTemplate(id) => {
+                if let Some(index) = self.edit(|f| duplicate_template(f, &id)) {
+                    self.reveal(Selection::Template(index));
+                }
+            }
+            Action::DeleteSelected => {
+                let removal = match self.ui.selection {
+                    Some(Selection::Device(index)) => edits::Removal::Device(index),
+                    Some(Selection::Template(index)) => edits::Removal::Template(index),
+                    _ => return,
+                };
+                self.apply(Action::Remove(removal));
+                self.select(None);
+            }
+            Action::FindInLog => {
+                self.ui.bottom_tab = ui::BottomTab::Log;
+                self.ui.focus_log_filter = true;
+            }
             Action::Undo => {
                 if self.doc.undo() {
                     self.after_undo_or_redo();
@@ -473,6 +515,7 @@ impl SenzorApp {
                     )));
                 }
             }
+            Action::OpenExample(index) => self.guard(Pending::OpenExample(index)),
             Action::ClearRecent => self.settings.recent.clear(),
             Action::SetTheme(theme) => {
                 self.settings.theme = theme;
@@ -484,6 +527,12 @@ impl SenzorApp {
                 } else {
                     self.start_mcp(self.mcp_port);
                 }
+                self.settings.mcp_on = self.mcp.is_some();
+            }
+            Action::SetMcpPort(port) => {
+                self.settings.mcp_port = port;
+                self.mcp_port = port;
+                self.mcp_error = None;
             }
             Action::GoTo(ProblemTarget::Broker) => self.ui.broker_open = true,
             Action::GoTo(ProblemTarget::Select(selection)) => self.reveal(selection),
@@ -548,6 +597,14 @@ impl eframe::App for SenzorApp {
         self.autostart_when_ready();
         self.handle_mcp_requests();
         self.state = self.engine().snapshot();
+        let now = Instant::now();
+        self.rate
+            .record(now, self.state.log.back().map(|entry| entry.seq));
+        let rate = self.rate.per_second(now);
+        if rate > 0.0 {
+            // Nothing repaints once publishing stops; the rate still has to fall to 0.
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
         self.update_connection_test();
         self.check_disk();
         self.handle_close_request(&ctx);
@@ -576,6 +633,20 @@ impl eframe::App for SenzorApp {
                 &self.doc,
                 &self.settings.recent,
                 starting,
+                mcp,
+                &mut actions,
+            );
+        });
+        egui::Panel::bottom("status-bar").show(ui, |ui| {
+            let mcp = match self.mcp_status() {
+                McpStatus::Listening(address) => Some(address),
+                McpStatus::Off { .. } => None,
+            };
+            ui::status_bar::show(
+                ui,
+                &self.state,
+                &self.doc.file().broker,
+                rate,
                 mcp,
                 &mut actions,
             );

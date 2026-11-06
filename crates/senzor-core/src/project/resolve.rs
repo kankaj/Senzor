@@ -11,7 +11,7 @@ use super::file::{
 use super::model::{DeviceConfig, InstanceConfig, Project, SharedTemplates, Validated};
 use crate::generator::GeneratorSpec;
 use crate::render::{
-    CompiledTemplate, base_context, instance_id_context, is_reserved, tick_context,
+    CompiledTemplate, TemplateError, base_context, instance_id_context, is_reserved, tick_context,
 };
 use crate::value::Value;
 
@@ -73,31 +73,27 @@ impl ProjectFile {
             .collect();
         for template in &self.templates {
             if is_builtin(&template.id) {
-                errors.push(ProjectError::template(
-                    &template.id,
-                    format!(
-                        "`{}` is a built-in template id; choose another id",
-                        template.id
-                    ),
-                ));
+                errors.push(
+                    ProjectError::template(
+                        &template.id,
+                        format!(
+                            "`{}` is a built-in template id; choose another id",
+                            template.id
+                        ),
+                    )
+                    .at("id"),
+                );
                 continue;
             }
             if templates.contains_key(&template.id) {
-                errors.push(ProjectError::template(
-                    &template.id,
-                    "duplicate template id",
-                ));
+                errors.push(ProjectError::template(&template.id, "duplicate template id").at("id"));
                 templates.insert(template.id.clone(), TemplateStatus::Broken);
                 continue;
             }
             let status = match check_template(template, &self.broker) {
                 Ok(compiled) => TemplateStatus::Usable(template, compiled),
-                Err(messages) => {
-                    errors.extend(
-                        messages
-                            .into_iter()
-                            .map(|m| ProjectError::template(&template.id, m)),
-                    );
+                Err(mut problems) => {
+                    errors.append(&mut problems);
                     TemplateStatus::Broken
                 }
             };
@@ -128,7 +124,9 @@ impl ProjectFile {
                 // Reported at the first entry with this ID.
                 Err(Vec::new())
             } else {
-                Err(vec!["duplicate device id".to_string()])
+                Err(vec![
+                    ProjectError::device(&spec.id, "duplicate device id").at("id"),
+                ])
             };
             match resolved {
                 Ok(device) => {
@@ -137,12 +135,8 @@ impl ProjectFile {
                     }
                     devices.push(device);
                 }
-                Err(messages) => {
-                    errors.extend(
-                        messages
-                            .into_iter()
-                            .map(|m| ProjectError::device(&spec.id, m)),
-                    );
+                Err(mut problems) => {
+                    errors.append(&mut problems);
                     blocked.insert(spec.id.clone());
                 }
             }
@@ -159,15 +153,22 @@ fn resolve_entry(
     templates: &HashMap<String, TemplateStatus<'_>>,
     instance_owners: &HashMap<String, String>,
     seed: Option<u64>,
-) -> Result<DeviceConfig, Vec<String>> {
+) -> Result<DeviceConfig, Vec<ProjectError>> {
     let (template, compiled) = match templates.get(spec.template.as_str()) {
         Some(TemplateStatus::Usable(template, compiled)) => (*template, compiled),
         Some(TemplateStatus::Broken) => return Err(Vec::new()),
-        None => return Err(vec![format!("unknown template `{}`", spec.template)]),
+        None => {
+            return Err(vec![
+                ProjectError::device(&spec.id, format!("unknown template `{}`", spec.template))
+                    .at("template"),
+            ]);
+        }
     };
     let device = resolve_device(spec, template, compiled, seed)?;
     match instance_clash(&device, instance_owners) {
-        Some(message) => Err(vec![message]),
+        Some(message) => Err(vec![
+            ProjectError::device(&spec.id, message).at("instance_id"),
+        ]),
         None => Ok(device),
     }
 }
@@ -188,34 +189,39 @@ fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Op
 fn check_template(
     template: &TemplateSpec,
     broker: &BrokerSpec,
-) -> Result<SharedTemplates, Vec<String>> {
-    let mut messages = check_properties(template, broker);
+) -> Result<SharedTemplates, Vec<ProjectError>> {
+    let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
+    let mut problems = check_properties(template, broker);
     if template.messages.is_empty() {
-        messages.push("at least one message is required".to_string());
+        problems.push(at("messages", "at least one message is required".into()));
     }
     if template.fields.is_empty() {
-        messages.push("at least one field is required".to_string());
+        problems.push(at("fields", "at least one field is required".into()));
     }
     if template.qos > 2 {
-        messages.push(format!("qos must be 0, 1 or 2, got {}", template.qos));
+        problems.push(at(
+            "qos",
+            format!("qos must be 0, 1 or 2, got {}", template.qos),
+        ));
     }
     if template.interval.is_zero() {
-        messages.push("interval must be greater than 0".to_string());
+        problems.push(at("interval", "interval must be greater than 0".into()));
     }
     for (name, generator) in &template.fields {
+        let field = format!("fields.{name}");
         if is_reserved(name) {
-            messages.push(format!("field `{name}` uses a reserved name"));
+            problems.push(at(&field, format!("field `{name}` uses a reserved name")));
         }
         if let Err(e) = generator.validate() {
-            messages.push(format!("field `{name}`: {e}"));
+            problems.push(at(&field, format!("field `{name}`: {e}")));
         }
     }
-    match SharedTemplates::compile(&template.messages, template.availability.as_ref()) {
-        Ok(compiled) if messages.is_empty() => Ok(compiled),
-        Ok(_) => Err(messages),
+    match SharedTemplates::compile_located(&template.messages, template.availability.as_ref()) {
+        Ok(compiled) if problems.is_empty() => Ok(compiled),
+        Ok(_) => Err(problems),
         Err(e) => {
-            messages.push(e);
-            Err(messages)
+            problems.push(at(&e.field, e.message));
+            Err(problems)
         }
     }
 }
@@ -225,17 +231,18 @@ fn resolve_device(
     template: &TemplateSpec,
     compiled: &SharedTemplates,
     seed: Option<u64>,
-) -> Result<DeviceConfig, Vec<String>> {
-    let mut messages = check_device(spec, template);
-    let fields = merge_fields(template, &spec.fields).unwrap_or_else(|mut e| {
-        messages.append(&mut e);
+) -> Result<DeviceConfig, Vec<ProjectError>> {
+    let mut problems = check_device(spec, template);
+    let fields = merge_fields(spec, template).unwrap_or_else(|mut e| {
+        problems.append(&mut e);
         BTreeMap::new()
     });
-    if !messages.is_empty() {
-        return Err(messages);
+    if !problems.is_empty() {
+        return Err(problems);
     }
 
-    let ids = instance_ids(spec).map_err(|e| vec![e])?;
+    let ids = instance_ids(spec)
+        .map_err(|e| vec![ProjectError::device(&spec.id, e).at("instance_id")])?;
     let instances: Vec<InstanceConfig> = (0..spec.count)
         .zip(ids)
         .map(|(index, id)| InstanceConfig {
@@ -254,7 +261,9 @@ fn resolve_device(
             seed,
         })
         .collect();
-    sample_render(&instances[0]).map_err(|e| vec![e])?;
+    // The field is the template's key path: the device's values make that template fail.
+    sample_render(&instances[0])
+        .map_err(|e| vec![ProjectError::device(&spec.id, e.message).at(e.field)])?;
     Ok(DeviceConfig {
         id: spec.id.clone(),
         autostart: spec.autostart,
@@ -263,22 +272,27 @@ fn resolve_device(
 }
 
 /// Checks the device's count, interval and param names.
-fn check_device(spec: &DeviceSpec, template: &TemplateSpec) -> Vec<String> {
-    let mut messages = Vec::new();
+fn check_device(spec: &DeviceSpec, template: &TemplateSpec) -> Vec<ProjectError> {
+    let at = |field: &str, message: String| ProjectError::device(&spec.id, message).at(field);
+    let mut problems = Vec::new();
     if spec.count == 0 {
-        messages.push("count must be at least 1".to_string());
+        problems.push(at("count", "count must be at least 1".into()));
     }
     if spec.interval.is_some_and(|i| i.is_zero()) {
-        messages.push("interval must be greater than 0".to_string());
+        problems.push(at("interval", "interval must be greater than 0".into()));
     }
     for name in spec.params.keys() {
+        let field = format!("params.{name}");
         if is_reserved(name) {
-            messages.push(format!("param `{name}` uses a reserved name"));
+            problems.push(at(&field, format!("param `{name}` uses a reserved name")));
         } else if template.fields.contains_key(name) {
-            messages.push(format!("param `{name}` has the same name as a field"));
+            problems.push(at(
+                &field,
+                format!("param `{name}` has the same name as a field"),
+            ));
         }
     }
-    messages
+    problems
 }
 
 /// Renders `instance_id` (or the default pattern) for every index. Fails on the first ID that is
@@ -312,63 +326,75 @@ pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
 }
 
 /// Checks the MQTT 5 properties of `template`'s messages and availability against `broker`.
-fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<String> {
+fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<ProjectError> {
+    let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
     let mut problems = Vec::new();
     let mqtt5 = broker.mqtt_version == MqttVersion::V5;
     for (i, message) in template.messages.iter().enumerate() {
         let key = |name: &str| format!("messages[{}].{name}", i + 1);
         if let Some(expiry) = message.message_expiry {
-            match whole_seconds(&key("message_expiry"), expiry) {
-                Err(e) => problems.push(e),
-                Ok(0) => problems.push(format!("{} must be at least 1s", key("message_expiry"))),
+            let field = key("message_expiry");
+            match whole_seconds(&field, expiry) {
+                Err(e) => problems.push(at(&field, e)),
+                Ok(0) => problems.push(at(&field, format!("{field} must be at least 1s"))),
                 Ok(_) => {}
             }
         }
         if message.content_type.as_deref() == Some("") {
-            problems.push(format!("{} must not be empty", key("content_type")));
+            let field = key("content_type");
+            problems.push(at(&field, format!("{field} must not be empty")));
         }
         if !mqtt5 {
+            let mut needs = |field: String| problems.push(at(&field, needs_mqtt5(&field)));
             if message.message_expiry.is_some() {
-                problems.push(needs_mqtt5(&key("message_expiry")));
+                needs(key("message_expiry"));
             }
             if message.content_type.is_some() {
-                problems.push(needs_mqtt5(&key("content_type")));
+                needs(key("content_type"));
             }
             if !message.user_properties.is_empty() {
-                problems.push(needs_mqtt5(&key("user_properties")));
+                needs(key("user_properties"));
             }
         }
     }
     let Some(delay) = template.availability.as_ref().and_then(|a| a.will_delay) else {
         return problems;
     };
-    if let Err(e) = whole_seconds("availability.will_delay", delay) {
-        problems.push(e);
+    const WILL_DELAY: &str = "availability.will_delay";
+    if let Err(e) = whole_seconds(WILL_DELAY, delay) {
+        problems.push(at(WILL_DELAY, e));
     } else if !mqtt5 {
-        problems.push(needs_mqtt5("availability.will_delay"));
+        problems.push(at(WILL_DELAY, needs_mqtt5(WILL_DELAY)));
     } else if delay > broker.session_expiry {
         let show = |d| humantime::format_duration(d).to_string();
-        problems.push(format!(
-            "availability.will_delay {} is longer than the broker's session_expiry {}; \
-             set session_expiry to at least {}",
-            show(delay),
-            show(broker.session_expiry),
-            show(delay)
+        problems.push(at(
+            WILL_DELAY,
+            format!(
+                "availability.will_delay {} is longer than the broker's session_expiry {}; \
+                 set session_expiry to at least {}",
+                show(delay),
+                show(broker.session_expiry),
+                show(delay)
+            ),
         ));
     }
     problems
 }
 
-/// Applies device overrides: with `generator` the override replaces the field, otherwise keys merge.
+/// Applies the device's field overrides to `template`'s fields: with `generator` the override
+/// replaces the field, otherwise keys merge.
 fn merge_fields(
+    spec: &DeviceSpec,
     template: &TemplateSpec,
-    overrides: &BTreeMap<String, toml::Table>,
-) -> Result<BTreeMap<String, GeneratorSpec>, Vec<String>> {
+) -> Result<BTreeMap<String, GeneratorSpec>, Vec<ProjectError>> {
+    let at = |name: &str, message: String| {
+        ProjectError::device(&spec.id, message).at(format!("fields.{name}"))
+    };
     let mut fields = template.fields.clone();
-    let mut messages = Vec::new();
-    for (name, table) in overrides {
+    let mut problems = Vec::new();
+    for (name, table) in &spec.fields {
         let Some(base) = fields.get(name) else {
-            messages.push(format!("override of unknown field `{name}`"));
+            problems.push(at(name, format!("override of unknown field `{name}`")));
             continue;
         };
         let merged = if table.contains_key("generator") {
@@ -387,18 +413,18 @@ fn merge_fields(
             Ok(spec) => {
                 fields.insert(name.clone(), spec);
             }
-            Err(e) => messages.push(format!("field `{name}` override: {e}")),
+            Err(e) => problems.push(at(name, format!("field `{name}` override: {e}"))),
         }
     }
-    if messages.is_empty() {
+    if problems.is_empty() {
         Ok(fields)
     } else {
-        Err(messages)
+        Err(problems)
     }
 }
 
 /// Renders every template once for index 0 with sample values, so errors show up at load time.
-fn sample_render(instance: &InstanceConfig) -> Result<(), String> {
+fn sample_render(instance: &InstanceConfig) -> Result<(), TemplateError> {
     let templates = &instance.templates;
     let base = base_context(
         &instance.id,
@@ -406,14 +432,14 @@ fn sample_render(instance: &InstanceConfig) -> Result<(), String> {
         &instance.template_id,
         &instance.params,
     );
-    templates.availability_topic(&base)?;
+    templates.availability_topic_located(&base)?;
     let values: BTreeMap<String, Value> = instance
         .fields
         .iter()
         .map(|(name, g)| (name.clone(), g.initial_value()))
         .collect();
     let ctx = tick_context(&base, &values, SystemTime::now(), 0);
-    for rendered in templates.render_messages(&ctx) {
+    for rendered in templates.render_messages_located(&ctx) {
         rendered?;
     }
     Ok(())
@@ -992,5 +1018,263 @@ params = {{ room = "a" }}
             "{}",
             errors[0]
         );
+    }
+
+    /// Each problem's text with the field it names.
+    fn error_fields(validated: &Validated) -> Vec<(String, Option<String>)> {
+        validated
+            .errors
+            .iter()
+            .map(|e| (e.to_string(), e.field.clone()))
+            .collect()
+    }
+
+    fn fields_of(validated: &Validated) -> Vec<Option<&str>> {
+        validated
+            .errors
+            .iter()
+            .map(|e| e.field.as_deref())
+            .collect()
+    }
+
+    #[test]
+    fn every_error_class_names_its_field() {
+        let validated = validate(&format!("[broker]\nport = 0\n{}", every_error_class()));
+        assert_eq!(
+            fields_of(&validated),
+            [
+                Some("port"),
+                Some("id"),
+                Some("fields.seq"),
+                Some("fields.v"),
+                Some("messages[1].payload"),
+                Some("template"),
+                Some("id"),
+                Some("instance_id"),
+                Some("params.index"),
+                Some("fields.temp"),
+                Some("availability.topic"),
+                Some("count"),
+            ],
+            "{:#?}",
+            error_fields(&validated)
+        );
+    }
+
+    #[test]
+    fn template_problems_name_their_field() {
+        let validated = validate(
+            r#"
+[[templates]]
+id = "bad"
+qos = 3
+interval = "0s"
+messages = []
+fields = {}
+
+[[templates]]
+id = "x"
+messages = [{ topic = "t", payload = "p" }]
+fields.v = { generator = "constant", value = 1 }
+
+[[templates]]
+id = "x"
+messages = [{ topic = "t", payload = "p" }]
+fields.v = { generator = "constant", value = 1 }
+"#,
+        );
+        assert_eq!(
+            fields_of(&validated),
+            [
+                Some("messages"),
+                Some("fields"),
+                Some("qos"),
+                Some("interval"),
+                Some("id"),
+            ],
+            "{:#?}",
+            error_fields(&validated)
+        );
+    }
+
+    /// Template `t` with one message (`topic`, `payload`, plus `extra` keys in its inline table)
+    /// and the `availability` line (empty for none), used by device `d` with `room` as its param.
+    fn template_project(
+        topic: &str,
+        payload: &str,
+        extra: &str,
+        availability: &str,
+        room: &str,
+    ) -> Validated {
+        validate(&format!(
+            r#"
+[[templates]]
+id = "t"
+{availability}
+messages = [{{ topic = "{topic}", payload = "{payload}"{extra} }}]
+fields.v = {{ generator = "constant", value = 1 }}
+
+[[devices]]
+id = "d"
+template = "t"
+params = {{ room = "{room}" }}
+"#
+        ))
+    }
+
+    fn availability(topic: &str) -> String {
+        format!(r#"availability = {{ topic = "{topic}", online = "on", offline = "off" }}"#)
+    }
+
+    #[test]
+    fn template_compile_problems_name_the_broken_template() {
+        let cases = [
+            (
+                template_project("{{ x", "p", "", "", "a"),
+                "messages[1].topic",
+            ),
+            (
+                template_project("t", "{{ x", "", "", "a"),
+                "messages[1].payload",
+            ),
+            (
+                template_project("t", "p", r#", user_properties = { k = "{{ x" }"#, "", "a"),
+                "messages[1].user_properties",
+            ),
+            (
+                template_project("t", "p", "", &availability("{{ x"), "a"),
+                "availability.topic",
+            ),
+        ];
+        for (validated, field) in cases {
+            assert_eq!(
+                fields_of(&validated),
+                [Some(field)],
+                "{:#?}",
+                error_fields(&validated)
+            );
+        }
+    }
+
+    #[test]
+    fn render_problems_name_the_template_that_failed() {
+        let cases = [
+            (
+                template_project("t/{{ room }}", "p", "", "", "+"),
+                "messages[1].topic",
+            ),
+            (
+                template_project("t", "{{ rom }}", "", "", "a"),
+                "messages[1].payload",
+            ),
+            (
+                template_project(
+                    "t",
+                    "p",
+                    r#", user_properties = { k = "{{ rom }}" }"#,
+                    "",
+                    "a",
+                ),
+                "messages[1].user_properties",
+            ),
+            (
+                template_project("t", "p", "", &availability("s/{{ room }}"), "+"),
+                "availability.topic",
+            ),
+            (
+                template_project("t", "p", "", &availability("s/{{ rom }}"), "a"),
+                "availability.topic",
+            ),
+        ];
+        for (validated, field) in cases {
+            assert_eq!(
+                fields_of(&validated),
+                [Some(field)],
+                "{:#?}",
+                error_fields(&validated)
+            );
+        }
+    }
+
+    #[test]
+    fn message_property_problems_name_their_field() {
+        let cases = [
+            (
+                properties_project("", r#", message_expiry = "1500ms""#, ""),
+                vec!["messages[1].message_expiry"],
+            ),
+            (
+                properties_project("", r#", message_expiry = "0s""#, ""),
+                vec!["messages[1].message_expiry"],
+            ),
+            (
+                properties_project("", r#", content_type = """#, ""),
+                vec!["messages[1].content_type"],
+            ),
+            (
+                properties_project(
+                    r#"mqtt_version = "3.1.1""#,
+                    r#", message_expiry = "60s", content_type = "text/plain", user_properties = { a = "b" }"#,
+                    r#", will_delay = "5s""#,
+                ),
+                vec![
+                    "messages[1].message_expiry",
+                    "messages[1].content_type",
+                    "messages[1].user_properties",
+                    "availability.will_delay",
+                ],
+            ),
+            (
+                properties_project("", "", r#", will_delay = "30s""#),
+                vec!["availability.will_delay"],
+            ),
+            (
+                properties_project(
+                    r#"session_expiry = "60s""#,
+                    "",
+                    r#", will_delay = "2500ms""#,
+                ),
+                vec!["availability.will_delay"],
+            ),
+        ];
+        for (validated, expected) in cases {
+            let expected: Vec<Option<&str>> = expected.into_iter().map(Some).collect();
+            assert_eq!(
+                fields_of(&validated),
+                expected,
+                "{:#?}",
+                error_fields(&validated)
+            );
+        }
+    }
+
+    #[test]
+    fn device_problems_name_their_field() {
+        let cases = [
+            ("interval = \"0s\"\n", "interval"),
+            ("fields.co2 = { min = 5000 }\n", "fields.co2"),
+            ("instance_id = \"{{ id \"\n", "instance_id"),
+            ("instance_id = \"{{ idx }}\"\n", "instance_id"),
+            ("instance_id = \"\"\n", "instance_id"),
+            ("count = 2\ninstance_id = \"x\"\n", "instance_id"),
+        ];
+        for (lines, field) in cases {
+            let validated = validate_device(lines);
+            assert_eq!(
+                fields_of(&validated),
+                [Some(field)],
+                "{lines}: {:#?}",
+                error_fields(&validated)
+            );
+        }
+        let src = format!(
+            "{TEMPLATE}
+[[devices]]
+id = \"d\"
+template = \"air\"
+params = {{ room = \"a\", co2 = 1 }}
+"
+        );
+        assert_eq!(fields_of(&validate(&src)), [Some("params.co2")]);
     }
 }

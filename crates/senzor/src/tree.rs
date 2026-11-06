@@ -114,6 +114,92 @@ fn instance_node(id: &str, state: &EngineState) -> InstanceNode {
     }
 }
 
+impl DeviceNode {
+    /// How many of the instances shown under the device are online.
+    pub fn online(&self) -> usize {
+        self.instances
+            .iter()
+            .filter(|i| i.status == InstanceStatus::Online)
+            .count()
+    }
+}
+
+/// Which instances the device tree shows, by status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusFilter {
+    #[default]
+    All,
+    Online,
+    /// Reconnecting or failed.
+    Problems,
+    Stopped,
+}
+
+impl StatusFilter {
+    pub const ALL: [StatusFilter; 4] = [
+        StatusFilter::All,
+        StatusFilter::Online,
+        StatusFilter::Problems,
+        StatusFilter::Stopped,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StatusFilter::All => "All",
+            StatusFilter::Online => "Online",
+            StatusFilter::Problems => "Problems",
+            StatusFilter::Stopped => "Stopped",
+        }
+    }
+
+    fn keeps(self, status: &InstanceStatus) -> bool {
+        match self {
+            StatusFilter::All => true,
+            StatusFilter::Online => *status == InstanceStatus::Online,
+            StatusFilter::Problems => matches!(
+                status,
+                InstanceStatus::Reconnecting { .. } | InstanceStatus::Failed { .. }
+            ),
+            StatusFilter::Stopped => *status == InstanceStatus::Stopped,
+        }
+    }
+}
+
+/// What the device tree shows: devices and instances whose ID contains `text` (in any case),
+/// limited to instances in `status`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TreeFilter {
+    pub text: String,
+    pub status: StatusFilter,
+}
+
+impl TreeFilter {
+    pub fn is_active(&self) -> bool {
+        !self.text.trim().is_empty() || self.status != StatusFilter::All
+    }
+}
+
+/// The devices and instances `filter` lets through. A device whose ID matches keeps every
+/// instance the status allows; otherwise only its instances whose ID matches stay. A device left
+/// with no instance is left out, unless only its name was asked for.
+pub fn filter_tree(tree: Vec<DeviceNode>, filter: &TreeFilter) -> Vec<DeviceNode> {
+    if !filter.is_active() {
+        return tree;
+    }
+    let text = filter.text.trim().to_lowercase();
+    let matches = |id: &str| id.to_lowercase().contains(&text);
+    tree.into_iter()
+        .filter_map(|mut node| {
+            let device_matches = matches(&node.id);
+            node.instances
+                .retain(|i| filter.status.keeps(&i.status) && (device_matches || matches(&i.id)));
+            let keep = !node.instances.is_empty()
+                || (device_matches && filter.status == StatusFilter::All);
+            keep.then_some(node)
+        })
+        .collect()
+}
+
 /// Why a running instance is an orphan (no longer part of the engine's project).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrphanCause {
@@ -196,6 +282,124 @@ mod tests {
         assert!(tree[0].blocked);
         assert_eq!(tree[0].instances[0].id, "d");
         assert!(tree[0].instances[0].orphaned);
+    }
+
+    fn ids(tree: &[DeviceNode]) -> Vec<(String, Vec<String>)> {
+        tree.iter()
+            .map(|d| (d.id.clone(), instance_ids(d)))
+            .collect()
+    }
+
+    fn two_devices() -> Vec<DeviceNode> {
+        let (file, validated) = file(
+            "[[devices]]\nid = \"office\"\ntemplate = \"co2\"\ncount = 3\n\n\
+             [[devices]]\nid = \"lab\"\ntemplate = \"co2\"\ncount = 2\n",
+        );
+        let state = state(&[
+            ("office-0", "office", InstanceStatus::Online, false),
+            (
+                "office-1",
+                "office",
+                InstanceStatus::Failed {
+                    reason: "refused".into(),
+                },
+                false,
+            ),
+            (
+                "lab-1",
+                "lab",
+                InstanceStatus::Reconnecting {
+                    attempt: 1,
+                    last_error: "gone".into(),
+                },
+                false,
+            ),
+        ]);
+        device_tree(&file, &validated, &state)
+    }
+
+    #[test]
+    fn no_filter_keeps_everything() {
+        let tree = two_devices();
+        assert_eq!(filter_tree(tree.clone(), &TreeFilter::default()), tree);
+        assert!(!TreeFilter::default().is_active());
+    }
+
+    #[test]
+    fn a_device_whose_name_matches_keeps_all_its_instances() {
+        let filter = TreeFilter {
+            text: "OFF".into(),
+            status: StatusFilter::All,
+        };
+        assert_eq!(
+            ids(&filter_tree(two_devices(), &filter)),
+            [(
+                "office".to_string(),
+                vec!["office-0".to_string(), "office-1".into(), "office-2".into()]
+            )]
+        );
+    }
+
+    #[test]
+    fn an_instance_whose_name_matches_is_kept_without_its_siblings() {
+        let filter = TreeFilter {
+            text: "-1".into(),
+            status: StatusFilter::All,
+        };
+        assert_eq!(
+            ids(&filter_tree(two_devices(), &filter)),
+            [
+                ("office".to_string(), vec!["office-1".to_string()]),
+                ("lab".to_string(), vec!["lab-1".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_status_filter_keeps_matching_instances() {
+        let only = |status| {
+            ids(&filter_tree(
+                two_devices(),
+                &TreeFilter {
+                    text: String::new(),
+                    status,
+                },
+            ))
+        };
+        assert_eq!(
+            only(StatusFilter::Online),
+            [("office".to_string(), vec!["office-0".to_string()])]
+        );
+        assert_eq!(
+            only(StatusFilter::Problems),
+            [
+                ("office".to_string(), vec!["office-1".to_string()]),
+                ("lab".to_string(), vec!["lab-1".to_string()]),
+            ]
+        );
+        assert_eq!(
+            only(StatusFilter::Stopped),
+            [
+                ("office".to_string(), vec!["office-2".to_string()]),
+                ("lab".to_string(), vec!["lab-0".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn text_and_status_filters_combine() {
+        let filter = TreeFilter {
+            text: "lab".into(),
+            status: StatusFilter::Online,
+        };
+        assert!(filter_tree(two_devices(), &filter).is_empty());
+    }
+
+    #[test]
+    fn online_counts_the_instances_that_are_online() {
+        let tree = two_devices();
+        assert_eq!(tree[0].online(), 1);
+        assert_eq!(tree[1].online(), 0);
     }
 
     #[test]

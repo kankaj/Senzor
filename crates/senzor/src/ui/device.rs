@@ -2,12 +2,12 @@ use eframe::egui::{self, Button, DragValue, TextEdit};
 use senzor_core::engine::{Command, Target};
 use senzor_core::project::builtin::builtin_templates;
 use senzor_core::project::file::{DEFAULT_INTERVAL, default_instance_id_pattern};
-use senzor_core::project::{DeviceSpec, Location, ProjectFile};
+use senzor_core::project::{DeviceSpec, Location};
 use senzor_core::value::Value;
 
 use super::{
-    Action, ERROR, FIX_PROBLEMS_FIRST, ParsedEdit, UiState, duration_edit, errors_at, name_edit,
-    replace_if_unchanged, value_edit,
+    Action, BoxOrRow, ERROR, FIX_PROBLEMS_FIRST, ParsedEdit, UiState, checked, duration_edit,
+    errors_at, name_edit, replace_if_unchanged, shortcuts, value_edit,
 };
 use crate::document::Document;
 use crate::edits::{
@@ -25,18 +25,15 @@ pub fn show(
     let original = &doc.file().devices[index];
     let mut device = original.clone();
     ui.heading(format!("Device {}", original.id));
-    let has_errors = errors_at(
-        ui,
-        doc,
-        &Location::Device {
-            id: original.id.clone(),
-        },
-    );
+    let at = &Location::Device {
+        id: original.id.clone(),
+    };
+    let has_errors = errors_at(ui, doc, at, shown_inline);
     ui.horizontal(|ui| {
-        // A blocked device cannot start; its own errors are above, a broken template's or
+        // A blocked device cannot start; its own errors are on this page, a broken template's or
         // broker's are only in the Problems tab.
         let hint = if has_errors {
-            "Fix the problems listed above first"
+            FIX_PROBLEMS_HERE
         } else {
             FIX_PROBLEMS_FIRST
         };
@@ -55,7 +52,15 @@ pub fn show(
         if ui.button("Duplicate device").clicked() {
             actions.push(Action::DuplicateDevice(original.id.clone()));
         }
-        if ui.button("Delete device").clicked() {
+        if ui
+            .button("Delete device")
+            .on_hover_text(shortcuts::tip(
+                ui.ctx(),
+                "Delete the device",
+                &shortcuts::DELETE,
+            ))
+            .clicked()
+        {
             actions.push(Action::Remove(Removal::Device(index)));
             actions.push(Action::Select(None));
         }
@@ -66,67 +71,79 @@ pub fn show(
         .num_columns(2)
         .show(ui, |ui| {
             let label = ui.label("ID");
-            let (response, rename) = name_edit(
-                ui,
-                ui_state,
-                &format!("device/{index}/id"),
-                &original.id,
-                doc.file(),
-                |to| Rename::Device {
-                    index,
-                    from: original.id.clone(),
-                    to,
-                },
-            );
-            response.labelled_by(label.id);
-            actions.extend(rename.map(Action::Rename));
+            checked(ui, doc, at, "id", |ui| {
+                let (response, rename) = name_edit(
+                    ui,
+                    ui_state,
+                    &format!("device/{index}/id"),
+                    &original.id,
+                    doc.file(),
+                    |to| Rename::Device {
+                        index,
+                        from: original.id.clone(),
+                        to,
+                    },
+                );
+                actions.extend(rename.map(Action::Rename));
+                response.labelled_by(label.id)
+            });
             ui.end_row();
 
             ui.label("Template");
-            egui::ComboBox::from_id_salt("device-template")
-                .selected_text(device.template.clone())
-                .show_ui(ui, |ui| {
-                    for id in template_ids(doc) {
-                        ui.selectable_value(&mut device.template, id.clone(), id);
-                    }
-                });
+            checked(ui, doc, at, "template", |ui| {
+                egui::ComboBox::from_id_salt("device-template")
+                    .selected_text(device.template.clone())
+                    .show_ui(ui, |ui| {
+                        for id in template_ids(doc) {
+                            ui.selectable_value(&mut device.template, id.clone(), id);
+                        }
+                    })
+                    .response
+            });
             ui.end_row();
 
             let label = ui.label("Count");
             let mut count = device.count;
-            ui.add(DragValue::new(&mut count).range(1..=10_000))
-                .labelled_by(label.id);
+            checked(ui, doc, at, "count", |ui| {
+                ui.add(DragValue::new(&mut count).range(1..=10_000))
+                    .labelled_by(label.id)
+            });
             set_count(&mut device, count);
             ui.end_row();
 
             let label = ui.label("Instance IDs");
-            ui.horizontal(|ui| {
-                let mut custom = device.instance_id.is_some();
-                // Starting from the pattern in use keeps the instance IDs until the user types.
-                if ui.checkbox(&mut custom, "custom").changed() {
-                    device.instance_id =
-                        custom.then(|| default_instance_id_pattern(device.count).to_string());
-                }
-                match &mut device.instance_id {
-                    Some(pattern) => {
-                        ui.add(
-                            TextEdit::singleline(pattern)
-                                .id_salt(format!("device/{index}/instance_id")),
-                        )
-                        .labelled_by(label.id);
+            checked(ui, doc, at, "instance_id", |ui| {
+                ui.horizontal(|ui| {
+                    let mut custom = device.instance_id.is_some();
+                    // Starting from the pattern in use keeps the instance IDs until the user types.
+                    if ui.checkbox(&mut custom, "custom").changed() {
+                        device.instance_id =
+                            custom.then(|| default_instance_id_pattern(device.count).to_string());
                     }
-                    None if device.count == 1 => {
-                        ui.weak(&device.id);
+                    match &mut device.instance_id {
+                        Some(pattern) => Some(
+                            ui.add(
+                                TextEdit::singleline(pattern)
+                                    .id_salt(format!("device/{index}/instance_id")),
+                            )
+                            .labelled_by(label.id),
+                        ),
+                        None if device.count == 1 => {
+                            ui.weak(&device.id);
+                            None
+                        }
+                        None => {
+                            ui.weak(format!(
+                                "{}-0 … {}-{}",
+                                device.id,
+                                device.id,
+                                device.count - 1
+                            ));
+                            None
+                        }
                     }
-                    None => {
-                        ui.weak(format!(
-                            "{}-0 … {}-{}",
-                            device.id,
-                            device.id,
-                            device.count - 1
-                        ));
-                    }
-                }
+                })
+                .box_or_row()
             });
             ui.end_row();
 
@@ -135,34 +152,50 @@ pub fn show(
             ui.end_row();
 
             let label = ui.label("Interval");
-            ui.horizontal(|ui| {
-                let mut custom = device.interval.is_some();
-                if ui.checkbox(&mut custom, "override").changed() {
-                    device.interval = custom.then(|| {
-                        template_interval(doc.file(), &device.template).unwrap_or(DEFAULT_INTERVAL)
-                    });
-                }
-                if let Some(interval) = &mut device.interval {
-                    duration_edit(
-                        ui,
-                        &mut ui_state.buffers,
-                        &format!("device/{index}/interval"),
-                        interval,
-                    )
-                    .labelled_by(label.id);
-                }
+            checked(ui, doc, at, "interval", |ui| {
+                ui.horizontal(|ui| {
+                    let mut custom = device.interval.is_some();
+                    if ui.checkbox(&mut custom, "override").changed() {
+                        device.interval = custom.then(|| {
+                            template_interval(doc.file(), &device.template)
+                                .unwrap_or(DEFAULT_INTERVAL)
+                        });
+                    }
+                    device.interval.as_mut().map(|interval| {
+                        duration_edit(
+                            ui,
+                            &mut ui_state.buffers,
+                            &format!("device/{index}/interval"),
+                            interval,
+                        )
+                        .labelled_by(label.id)
+                    })
+                })
+                .box_or_row()
             });
             ui.end_row();
         });
 
     ui.separator();
-    params(ui, index, &mut device, doc.file(), ui_state, actions);
+    params(ui, index, &mut device, doc, ui_state, actions);
     ui.separator();
     overrides(ui, index, &mut device, doc, ui_state);
 
     actions.extend(replace_if_unchanged(original, device, move |f| {
         f.devices.get_mut(index)
     }));
+}
+
+/// Hover hint of a disabled Start device whose own problems are on its page.
+const FIX_PROBLEMS_HERE: &str = "Fix the problems marked in red first";
+
+/// The device fields the form shows its problems next to.
+fn shown_inline(field: &str) -> bool {
+    matches!(
+        field,
+        "id" | "template" | "count" | "instance_id" | "interval"
+    ) || field.starts_with("params.")
+        || field.starts_with("fields.")
 }
 
 fn template_ids(doc: &Document) -> Vec<String> {
@@ -178,39 +211,47 @@ fn params(
     ui: &mut egui::Ui,
     index: usize,
     device: &mut DeviceSpec,
-    file: &ProjectFile,
+    doc: &Document,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
     ui.strong("Params");
+    let file = doc.file();
+    let at = &Location::Device {
+        id: file.devices[index].id.clone(),
+    };
     let keys: Vec<String> = device.params.keys().cloned().collect();
     for key in keys {
-        ui.horizontal(|ui| {
-            let (_, rename) = name_edit(
-                ui,
-                ui_state,
-                &format!("device/{index}/param/{key}"),
-                &key,
-                file,
-                |to| Rename::Param {
-                    device: index,
-                    from: key.clone(),
-                    to,
-                },
-            );
-            actions.extend(rename.map(Action::Rename));
-
-            if let Some(value) = device.params.get_mut(&key) {
-                value_edit(
+        checked(ui, doc, at, &format!("params.{key}"), |ui| {
+            ui.horizontal(|ui| {
+                let (name_box, rename) = name_edit(
                     ui,
-                    &mut ui_state.buffers,
-                    &format!("device/{index}/param/{key}/value"),
-                    value,
+                    ui_state,
+                    &format!("device/{index}/param/{key}"),
+                    &key,
+                    file,
+                    |to| Rename::Param {
+                        device: index,
+                        from: key.clone(),
+                        to,
+                    },
                 );
-            }
-            if ui.button("Remove").clicked() {
-                device.params.remove(&key);
-            }
+                actions.extend(rename.map(Action::Rename));
+
+                if let Some(value) = device.params.get_mut(&key) {
+                    value_edit(
+                        ui,
+                        &mut ui_state.buffers,
+                        &format!("device/{index}/param/{key}/value"),
+                        value,
+                    );
+                }
+                if ui.button("Remove").clicked() {
+                    device.params.remove(&key);
+                }
+                Some(name_box)
+            })
+            .box_or_row()
         });
     }
     if ui.button("Add param").clicked() {
@@ -228,6 +269,9 @@ fn overrides(
     doc: &Document,
     ui_state: &mut UiState,
 ) {
+    let at = &Location::Device {
+        id: doc.file().devices[index].id.clone(),
+    };
     ui.strong("Field overrides");
     ui.weak("Keys are merged onto the template's field; with `generator` they replace it.");
     let fields: Vec<String> = find_template(doc.file(), &device.template)
@@ -245,8 +289,8 @@ fn overrides(
             for field in fields {
                 let label = ui.label(&field);
                 let mut table = device.fields.remove(&field);
-                // Vertical, so a parse error goes under the box.
-                ui.vertical(|ui| {
+                // In a cell of its own, so a parse error goes under the box.
+                checked(ui, doc, at, &format!("fields.{field}"), |ui| {
                     ParsedEdit::new(&format!("device/{index}/override/{field}"), 280.0)
                         .hint("e.g. { start = 1200 }")
                         .show(
@@ -256,7 +300,7 @@ fn overrides(
                             |table| table.as_ref().map(override_to_text).unwrap_or_default(),
                             override_from_text,
                         )
-                        .labelled_by(label.id);
+                        .labelled_by(label.id)
                 });
                 if let Some(table) = table {
                     device.fields.insert(field, table);
@@ -264,7 +308,9 @@ fn overrides(
                 ui.end_row();
             }
             for field in stranded {
-                ui.colored_label(ERROR, format!("{field} (not in the template)"));
+                checked(ui, doc, at, &format!("fields.{field}"), |ui| {
+                    ui.colored_label(ERROR, format!("{field} (not in the template)"))
+                });
                 if ui.button("Remove override").clicked() {
                     device.fields.remove(&field);
                 }
@@ -304,6 +350,42 @@ fields.co2 = { start = 1200 }
                 show(ui, 0, &fx.doc, &mut fx.ui, &mut fx.actions);
             }
         })
+    }
+
+    fn rect_of(h: &Harness<'static, Fixture>, label: &str) -> egui::Rect {
+        h.get_by_label(label).rect()
+    }
+
+    #[test]
+    fn a_problem_with_a_value_shows_once_under_its_box() {
+        let h = harness_for(
+            "[[devices]]\nid = \"d\"\ntemplate = \"co2\"\ncount = 2\ninstance_id = \"x\"\n",
+        );
+        let message = "instance id `x` repeats; include {{ index }} in instance_id";
+        assert_eq!(
+            h.query_all_by_label(message).count(),
+            1,
+            "not also at the top"
+        );
+        assert!(rect_of(&h, message).top() >= rect_of(&h, "Instance IDs").bottom());
+        assert!(
+            rect_of(&h, message).bottom() <= rect_of(&h, "Autostart").top(),
+            "right under the box, before the next row"
+        );
+    }
+
+    /// The device's params break its template's topic; the form has no box for the topic.
+    #[test]
+    fn a_problem_the_form_has_no_box_for_shows_at_the_top() {
+        let h = harness_for(
+            "[[templates]]\nid = \"t\"\nmessages = [{ topic = \"a/{{ room }}\", payload = \"1\" }]\n\
+             fields.v = { generator = \"constant\", value = 1 }\n\n\
+             [[devices]]\nid = \"d\"\ntemplate = \"t\"\n",
+        );
+        let errors = &h.state().doc.validated().errors;
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let message = h.get_by_label(&errors[0].message).rect();
+        assert!(message.bottom() <= rect_of(&h, "ID").top());
     }
 
     #[test]
@@ -359,11 +441,7 @@ fields.co2 = { start = 1200 }
     #[test]
     fn start_device_is_disabled_while_the_device_has_problems() {
         let mut h = harness_for("[[devices]]\nid = \"office\"\ntemplate = \"gone\"\n");
-        assert_disabled_with_hint(
-            &mut h,
-            "Start device",
-            "Fix the problems listed above first",
-        );
+        assert_disabled_with_hint(&mut h, "Start device", FIX_PROBLEMS_HERE);
     }
 
     #[test]

@@ -25,6 +25,12 @@ A file goes to the top of the list when it opens, including a file named on the 
 
 If a file in the list no longer exists, clicking it shows **Something went wrong** with `<path> no longer exists, so it was taken off the recent projects.`, and the current project stays open. Senzor keeps the list with its [settings](/docs/gui/settings#where-senzor-keeps-them).
 
+## Examples
+
+The books next to the clock, **Examples** when you hover over them, list example projects; the welcome screen lists them too. They are the files in the repository's `examples/` folder that the documentation shows: **Quick start**, **IKEA Zigbee2MQTT**, **Home Assistant Statestream**, **Fleet** and **Showcase**. Hover over one for what it simulates.
+
+An example opens as an **untitled** project, the way **Open** opens a file: Senzor asks about unsaved changes first, and the current project's instances stop. It has nothing to save until you change it, and **Save** asks where to save it. Its autostart devices start right away, so **Quick start** connects to a broker at `localhost:1883`; change the broker in [Project settings](/docs/gui/broker-settings) if yours is elsewhere.
+
 ## When the file changes on disk
 
 About once a second, Senzor checks whether another program, such as your text editor, changed the project's file. When the file now holds a different project, the window asks: **project.toml changed on disk** (with your file's name). Changes that leave the project as it was, such as a new comment or other formatting, and a file that is not valid TOML yet do not ask: Senzor waits until the file reads as a project.
@@ -57,7 +63,7 @@ Senzor writes the whole file from the project, so comments and your own formatti
 
 ## Unsaved changes
 
-When the project has unsaved changes, **New**, **Open** and closing the window first ask **Unsaved changes**, for example **Save the changes to this project before opening another project?**
+When the project has unsaved changes, **New**, **Open**, opening a recent project or an example, and closing the window first ask **Unsaved changes**, for example **Save the changes to this project before opening another project?**
 
 - **Save** saves the project, then goes on. For a project without a file, Senzor asks where to save first; if you cancel that dialog, nothing else happens and the project stays as it is.
 - **Discard** drops the changes and goes on.
