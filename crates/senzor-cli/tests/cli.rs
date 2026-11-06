@@ -273,6 +273,142 @@ async fn run_exits_3_and_names_the_instances_the_broker_refused() {
     );
 }
 
+/// [`project_toml`] with `retain = true`, so the state topics are retained too.
+fn retained_project_toml(port: u16) -> String {
+    project_toml(port, true).replace(
+        "interval = \"200ms\"\n",
+        "interval = \"200ms\"\nretain = true\n",
+    )
+}
+
+/// The topics a new subscriber to `filter` gets a retained message on, sorted.
+async fn retained_topics_on(port: u16, filter: &str) -> Vec<String> {
+    let mut subscriber = Subscriber::connect(port, filter).await;
+    let mut topics: Vec<String> = subscriber
+        .collect(Duration::from_millis(500))
+        .await
+        .into_iter()
+        .filter(|m| m.retain)
+        .map(|m| m.topic)
+        .collect();
+    topics.sort();
+    topics
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_retained_deletes_the_project_s_retained_messages_and_lists_them() {
+    let port = start_broker();
+    let path = write_project("clear", &retained_project_toml(port));
+    let output = run_cli_async(
+        "run",
+        path.to_path_buf(),
+        &["--only", "dev,other", "--duration", "1s"],
+    )
+    .await;
+    assert_exit(&output, 0);
+    assert_eq!(retained_topics_on(port, "cli/#").await.len(), 6);
+
+    let output = run_cli_async("clear-retained", path.to_path_buf(), &[]).await;
+    assert_exit(&output, 0);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!(
+            "cli/dev-0/state\ncli/dev-0/status\ncli/dev-1/state\ncli/dev-1/status\n\
+             cli/other/state\ncli/other/status\n\
+             cleared 6 retained topics on 127.0.0.1:{port}\n"
+        )
+    );
+    assert_eq!(
+        retained_topics_on(port, "cli/#").await,
+        Vec::<String>::new()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_retained_only_clears_the_devices_named_in_only() {
+    let port = start_broker();
+    let path = write_project("clear-only", &retained_project_toml(port));
+    let output = run_cli_async(
+        "run",
+        path.to_path_buf(),
+        &["--only", "dev,other", "--duration", "1s"],
+    )
+    .await;
+    assert_exit(&output, 0);
+
+    let output = run_cli_async("clear-retained", path.to_path_buf(), &["--only", " other"]).await;
+    assert_exit(&output, 0);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!(
+            "cli/other/state\ncli/other/status\ncleared 2 retained topics on 127.0.0.1:{port}\n"
+        )
+    );
+    assert_eq!(
+        retained_topics_on(port, "cli/#").await,
+        [
+            "cli/dev-0/state",
+            "cli/dev-0/status",
+            "cli/dev-1/state",
+            "cli/dev-1/status"
+        ]
+    );
+}
+
+#[test]
+fn clear_retained_with_nothing_retained_does_not_connect() {
+    let content = project_toml(free_port(), true).replace("availability = ", "# availability = ");
+    let path = write_project("clear-nothing", &content);
+    let output = run_cli("clear-retained", &path, &[]);
+    assert_exit(&output, 0);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "no retained topics to clear\n"
+    );
+}
+
+#[test]
+fn clear_retained_with_unknown_only_id_exits_2() {
+    let path = write_project("clear-unknown", &project_toml(1883, true));
+    let output = run_cli("clear-retained", &path, &["--only", "ghost"]);
+    assert_exit(&output, 2);
+    assert!(stderr(&output).contains("error: unknown device id(s): ghost"));
+}
+
+#[test]
+fn clear_retained_refuses_a_project_with_problems() {
+    let content = project_toml(0, true);
+    let path = write_project("clear-invalid", &content);
+    let output = run_cli("clear-retained", &path, &[]);
+    assert_exit(&output, 2);
+    assert!(stderr(&output).contains("broker: port must not be 0"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_retained_exits_1_with_the_reason_when_the_broker_refuses() {
+    let port = refusing_broker(ConnectReturnCode::NotAuthorized).await;
+    let path = write_project("clear-refused", &project_toml(port, true));
+    let output = run_cli_async("clear-retained", path.to_path_buf(), &[]).await;
+    assert_exit(&output, 1);
+    assert_eq!(
+        stderr(&output),
+        "error: cannot clear retained topics: broker refused the connection: NotAuthorized\n"
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+}
+
+#[test]
+fn clear_retained_exits_1_when_nothing_listens() {
+    let path = write_project("clear-unreachable", &project_toml(free_port(), true));
+    let output = run_cli("clear-retained", &path, &[]);
+    assert_exit(&output, 1);
+    assert!(
+        stderr(&output).starts_with("error: cannot clear retained topics: "),
+        "{}",
+        stderr(&output)
+    );
+}
+
 #[test]
 fn the_log_has_no_colour_codes_when_stderr_is_not_a_terminal() {
     let path = write_project("no-colour", &project_toml(free_port(), true));

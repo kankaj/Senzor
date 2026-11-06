@@ -4,7 +4,7 @@ use eframe::egui::{self, Button, TextEdit};
 use senzor_core::engine::{Command, EngineState, InstanceState, Target};
 use senzor_core::value::Value;
 
-use super::{Action, ERROR, UiState, WARNING, status_dot};
+use super::{Action, ERROR, UiState, WARNING, kill_button, status_dot, stop_button};
 use crate::document::Document;
 use crate::format;
 use crate::tree::{OrphanCause, is_restartable, orphan_cause};
@@ -79,7 +79,7 @@ fn show_controls(ui: &mut egui::Ui, id: &str, instance: &InstanceState, actions:
             }
             return;
         }
-        if ui.button("Stop").clicked() {
+        if stop_button(ui).clicked() {
             actions.push(Action::Engine(Command::Stop(target())));
         }
         if is_restartable(&instance.status, instance.orphaned)
@@ -90,11 +90,7 @@ fn show_controls(ui: &mut egui::Ui, id: &str, instance: &InstanceState, actions:
         {
             actions.push(Action::Engine(Command::Restart(target())));
         }
-        if ui
-            .button("Kill")
-            .on_hover_text("Drop the connection; the broker publishes the Last Will")
-            .clicked()
-        {
+        if kill_button(ui).clicked() {
             actions.push(Action::Engine(Command::Kill(target())));
         }
     });
@@ -258,6 +254,24 @@ template = "air"
         let h = harness(SRC, "old-0", orphan("old"));
         assert!(h.query_by_label("Restart").is_none());
         assert!(h.query_by_label("Stop").is_some());
+    }
+
+    /// Whether hovering over `label` shows `tip`.
+    fn hover_shows(h: &mut Harness<'static, Fixture>, label: &str, tip: &str) -> bool {
+        h.get_by_label(label).hover();
+        // Tooltips wait for the pointer to rest.
+        for _ in 0..10 {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+        h.query_by_label(tip).is_some()
+    }
+
+    #[test]
+    fn stop_and_kill_say_how_they_differ() {
+        let mut h = harness(SRC, "office", running("office"));
+        assert!(hover_shows(&mut h, "Stop", crate::ui::STOP_HINT));
+        assert!(hover_shows(&mut h, "Kill", crate::ui::KILL_HINT));
     }
 
     #[test]

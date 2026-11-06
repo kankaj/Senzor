@@ -142,7 +142,7 @@ async fn run(
                         shared.record_error(id, &format!("publish online: {e}"));
                     }
                 }
-                Ok(ConnEvent::Other) => {}
+                Ok(ConnEvent::PubAck { .. } | ConnEvent::Other) => {}
                 Err(ConnError::Refused(reason)) => {
                     return Err(format!("broker refused the connection: {reason}"));
                 }

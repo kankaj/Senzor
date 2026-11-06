@@ -4,8 +4,9 @@ use eframe::egui::{self, DragValue};
 use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec};
 
 use super::{
-    Action, BoxOrRow, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked, duration_edit,
-    errors_at, mqtt5_control, optional_text, replace_if_unchanged,
+    Action, BoxOrRow, ClearRetained, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked,
+    duration_edit, errors_at, mqtt5_control, optional_text, replace_if_unchanged,
+    retained_topics_text,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -225,6 +226,7 @@ pub fn show(
                 });
             ui.weak("Relative paths are resolved against the project file's folder.");
             connection_test(ui, doc, ui_state.connection_test.as_ref(), actions);
+            clear_retained(ui, doc, ui_state, actions);
 
             ui.separator();
             ui.strong("Simulation");
@@ -288,6 +290,63 @@ fn connection_test(
     }
 }
 
+/// Hover hint of Clear retained messages while the project's devices run.
+const CLEAR_WHILE_RUNNING: &str =
+    "Stop the devices first: running instances would publish their retained messages again";
+
+/// Clear retained messages…, then how it went.
+fn clear_retained(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    ui_state: &UiState,
+    actions: &mut Vec<Action>,
+) {
+    let clearing = matches!(ui_state.clear_retained, Some(ClearRetained::Running));
+    let problems = doc
+        .validated()
+        .errors
+        .iter()
+        .any(|e| e.location == Location::Broker);
+    let hint = if ui_state.devices_running {
+        CLEAR_WHILE_RUNNING
+    } else if problems {
+        "Fix the broker problems first"
+    } else {
+        "Clearing…"
+    };
+    let button = ui
+        .add_enabled(
+            !clearing && !problems && !ui_state.devices_running,
+            egui::Button::new("Clear retained messages…"),
+        )
+        .on_hover_text(
+            "Delete the retained messages this project's instances leave on the broker, \
+             such as their last offline",
+        )
+        .on_disabled_hover_text(hint);
+    if button.clicked() {
+        actions.push(Action::AskClearRetained);
+    }
+    match &ui_state.clear_retained {
+        Some(ClearRetained::Running) => {
+            ui.horizontal(|ui| {
+                ui.weak(egui_phosphor::regular::HOURGLASS_MEDIUM);
+                ui.weak("clearing…");
+            });
+        }
+        Some(ClearRetained::Cleared(count)) => {
+            ui.colored_label(ONLINE, format!("Cleared {}", retained_topics_text(*count)));
+        }
+        Some(ClearRetained::Nothing) => {
+            ui.weak("Nothing to clear: no template has availability or retains its messages.");
+        }
+        Some(ClearRetained::Failed(reason)) => {
+            ui.colored_label(ERROR, reason);
+        }
+        None => {}
+    }
+}
+
 /// The seed: a whole number, or empty for none, which makes every run draw fresh random values.
 fn seed_edit(ui: &mut egui::Ui, buffers: &mut Buffers, seed: &mut Option<u64>) -> egui::Response {
     ParsedEdit::new("simulation/seed", 160.0)
@@ -330,7 +389,9 @@ mod tests {
     use egui_kittest::kittest::{NodeT, Queryable};
 
     use super::*;
-    use crate::ui::test_support::{Fixture, type_into_label, type_per_frame};
+    use crate::ui::test_support::{
+        Fixture, assert_disabled_with_hint, type_into_label, type_per_frame,
+    };
 
     fn harness() -> Harness<'static, Fixture> {
         let mut fixture = Fixture::new("");
@@ -362,6 +423,35 @@ mod tests {
             let ctx = ui.ctx().clone();
             show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
         })
+    }
+
+    fn harness_with_running(running: bool) -> Harness<'static, Fixture> {
+        let mut fixture = Fixture::new("");
+        fixture.ui.broker_open = true;
+        fixture.ui.devices_running = running;
+        fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        })
+    }
+
+    #[test]
+    fn clear_retained_asks_the_app_to_clear() {
+        let mut h = harness_with_running(false);
+        h.get_by_label("Clear retained messages…").click();
+        h.run();
+        assert!(
+            h.state()
+                .other
+                .iter()
+                .any(|a| matches!(a, Action::AskClearRetained))
+        );
+    }
+
+    #[test]
+    fn clear_retained_waits_until_the_devices_stop() {
+        let mut h = harness_with_running(true);
+        assert_disabled_with_hint(&mut h, "Clear retained messages…", CLEAR_WHILE_RUNNING);
     }
 
     #[test]

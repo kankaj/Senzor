@@ -35,6 +35,30 @@ impl Theme {
     }
 }
 
+/// The left panel's tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LeftTab {
+    #[default]
+    Devices,
+    Templates,
+}
+
+/// The bottom panel's tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BottomTab {
+    #[default]
+    Log,
+    Problems,
+}
+
+/// The tabs selected in the side panels when the window closed. (egui keeps the panels' sizes.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelTabs {
+    pub left: LeftTab,
+    pub bottom: BottomTab,
+}
+
 /// Everything the settings window changes. A field missing from the stored settings, for
 /// example one added in a later version, takes its default.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +73,10 @@ pub struct AppSettings {
     pub mcp_port: u16,
     /// MCP was on when the window closed, so the next window turns it on again.
     pub mcp_on: bool,
+    /// The tabs selected when the window closed.
+    pub tabs: PanelTabs,
+    /// The version of Senzor that last ran with these settings, for telling what is new.
+    pub last_version: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -59,6 +87,8 @@ impl Default for AppSettings {
             recent: Vec::new(),
             mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
             mcp_on: false,
+            tabs: PanelTabs::default(),
+            last_version: None,
         }
     }
 }
@@ -142,6 +172,11 @@ mod tests {
             recent: vec![PathBuf::from("/projects/a.toml")],
             mcp_port: 18900,
             mcp_on: true,
+            tabs: PanelTabs {
+                left: LeftTab::Templates,
+                bottom: BottomTab::Problems,
+            },
+            last_version: Some("1.0.0".into()),
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);

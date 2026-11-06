@@ -56,9 +56,58 @@ pub fn preview(template: &TemplateSpec, project: &Project, now: SystemTime) -> P
     }
 }
 
+/// Why `payload` should be JSON but is not: it starts with `{` or `[`, or the message's
+/// `content_type` names JSON. `None` when it parses or nothing says it should be JSON.
+pub fn json_problem(payload: &str, content_type: Option<&str>) -> Option<String> {
+    let looks_like_json = matches!(payload.trim_start().chars().next(), Some('{' | '['));
+    let declared = content_type.is_some_and(|t| t.to_ascii_lowercase().contains("json"));
+    if !looks_like_json && !declared {
+        return None;
+    }
+    let error = serde_json::from_str::<serde_json::Value>(payload).err()?;
+    Some(if looks_like_json {
+        format!("looks like JSON but is not valid JSON: {error}")
+    } else {
+        format!("the content type is JSON, but the payload is not valid JSON: {error}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_payload_that_starts_like_json_must_parse() {
+        assert_eq!(json_problem(r#"{"co2": 600}"#, None), None);
+        assert_eq!(json_problem(" [1, 2] ", None), None);
+        let problem = json_problem(r#"{"co2": 600,}"#, None).unwrap();
+        assert!(
+            problem.starts_with("looks like JSON but is not valid JSON: "),
+            "{problem}"
+        );
+        assert!(json_problem("[1, 2", None).is_some());
+    }
+
+    #[test]
+    fn a_payload_that_does_not_look_like_json_is_left_alone() {
+        assert_eq!(json_problem("600", None), None);
+        assert_eq!(json_problem("on", None), None);
+    }
+
+    #[test]
+    fn a_json_content_type_asks_for_json() {
+        let problem = json_problem("600 ppm", Some("application/json")).unwrap();
+        assert!(
+            problem.starts_with("the content type is JSON, but the payload is not valid JSON: "),
+            "{problem}"
+        );
+        assert_eq!(
+            json_problem("600", Some("application/json")),
+            None,
+            "a number is JSON"
+        );
+        assert_eq!(json_problem("600 ppm", Some("text/plain")), None);
+    }
     use senzor_core::project::ProjectFile;
     use std::path::Path;
     use std::time::{Duration, UNIX_EPOCH};

@@ -112,7 +112,13 @@ On Linux and macOS, check the limit with `ulimit -n` and raise it in the shell b
 
 **Connections on the broker.** Brokers can limit the number of connected clients, such as Mosquitto with [`max_connections`](https://mosquitto.org/man/mosquitto-conf-5.html), and hosted brokers often limit connections per plan. If the broker refuses an instance's connection with an error code, the instance shows **Failed** and does not retry. If the broker closes the connection instead, the instance shows **Reconnecting** and tries again after 1 s, 2 s, 4 s and so on, up to 30 s. The status and the error are in the [instance view](/docs/gui/instance-view), and in the log of `senzor-cli`.
 
-**Retained status messages.** Every instance with availability leaves a retained status message on the broker: 200 for this project, each `offline` after the run. New subscribers receive all of them first. To remove one, publish an empty retained message to its topic; with the broker from the Quick start:
+**Retained status messages.** Every instance with availability leaves a retained status message on the broker: 200 for this project, each `offline` after the run. New subscribers receive all of them first. To remove them all, stop the project and run [`clear-retained`](/docs/reference/cli#clear-retained):
+
+```bash
+senzor-cli clear-retained examples/fleet.toml
+```
+
+To remove one, publish an empty retained message to its topic; with the broker from the Quick start:
 
 ```bash
 docker exec mosquitto mosquitto_pub -r -n -t 'building/1/f1-room-0/status'

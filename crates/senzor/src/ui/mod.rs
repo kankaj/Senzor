@@ -34,6 +34,28 @@ pub const WARNING: Color32 = Color32::from_rgb(220, 160, 40);
 pub const ONLINE: Color32 = Color32::from_rgb(60, 180, 90);
 pub const STOPPED: Color32 = Color32::from_gray(140);
 
+/// Hover hint of Stop, wherever it is offered.
+pub const STOP_HINT: &str =
+    "Disconnect cleanly, publishing offline first when the template has availability";
+/// Hover hint of Kill, wherever it is offered.
+pub const KILL_HINT: &str = "Drop the connection without offline, like a device losing power: \
+     the broker publishes the Last Will";
+
+/// Stop, with what it does on hover.
+pub fn stop_button(ui: &mut egui::Ui) -> egui::Response {
+    ui.button("Stop").on_hover_text(STOP_HINT)
+}
+
+/// Kill, drawn as a warning (red, with a lightning bolt) so it is not taken for Stop. Screen
+/// readers and tests know it as "Kill".
+pub fn kill_button(ui: &mut egui::Ui) -> egui::Response {
+    let text =
+        egui::RichText::new(format!("{} Kill", egui_phosphor::regular::LIGHTNING)).color(ERROR);
+    let response = ui.button(text).on_hover_text(KILL_HINT);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Kill"));
+    response
+}
+
 /// Hover hint of a disabled Start: the Problems tab lists what blocks the device.
 pub const FIX_PROBLEMS_FIRST: &str = "Fix the problems in the Problems tab first";
 
@@ -59,6 +81,8 @@ pub enum Action {
     OpenSettings,
     /// Connect once with the broker settings and show how it went.
     TestConnection,
+    /// Ask before clearing the retained messages the project leaves on the broker.
+    AskClearRetained,
     /// Copy the device with this ID, and select the copy.
     DuplicateDevice(String),
     /// Copy the project template with this ID, and select the copy.
@@ -71,6 +95,8 @@ pub enum Action {
     FindInLog,
     /// Open a project from the Recent menu.
     OpenRecent(PathBuf),
+    /// Open this file, dropped on the window.
+    OpenDropped(PathBuf),
     /// Open the example at this index of [`crate::examples::EXAMPLES`].
     OpenExample(usize),
     ClearRecent,
@@ -166,6 +192,11 @@ pub enum Modal {
         then: Option<Pending>,
     },
     Error(String),
+    /// Clearing these retained topics on `broker` (host and port) waits for the user to confirm.
+    ClearRetained {
+        topics: Vec<String>,
+        broker: String,
+    },
     /// The project's file now holds another project. `name` is the file's name; `unsaved`
     /// whether reloading would drop unsaved changes.
     FileChanged {
@@ -174,19 +205,7 @@ pub enum Modal {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LeftTab {
-    #[default]
-    Devices,
-    Templates,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BottomTab {
-    #[default]
-    Log,
-    Problems,
-}
+pub use crate::settings::{BottomTab, LeftTab};
 
 /// The broker connection test, as Project settings shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -195,6 +214,26 @@ pub enum ConnectionTest {
     Passed,
     /// Why the connection failed.
     Failed(String),
+}
+
+/// Clearing the project's retained messages, as Project settings shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClearRetained {
+    Running,
+    /// How many topics were cleared.
+    Cleared(usize),
+    /// The project's instances leave no retained messages.
+    Nothing,
+    /// Why clearing failed.
+    Failed(String),
+}
+
+/// "1 retained topic", "3 retained topics".
+pub fn retained_topics_text(count: usize) -> String {
+    match count {
+        1 => "1 retained topic".to_string(),
+        n => format!("{n} retained topics"),
+    }
 }
 
 /// GUI-only state that is not part of the project.
@@ -219,6 +258,10 @@ pub struct UiState {
     pub settings_open: bool,
     /// The connection test for the current broker settings, set by the app every frame.
     pub connection_test: Option<ConnectionTest>,
+    /// The latest clearing of retained messages, set by the app every frame.
+    pub clear_retained: Option<ClearRetained>,
+    /// Some instance of the project is running, set by the app every frame.
+    pub devices_running: bool,
     pub modal: Option<Modal>,
 }
 
@@ -556,6 +599,40 @@ pub fn checked(
         response
     })
     .inner
+}
+
+/// The first file dropped on the window this frame; the rest are left alone, as one window holds
+/// one project.
+pub fn dropped_file(ctx: &egui::Context) -> Option<PathBuf> {
+    ctx.input(|i| {
+        i.raw
+            .dropped_files
+            .first()
+            .map(|file| file.path().to_path_buf())
+    })
+}
+
+/// While a file is dragged over the window, a veil over it saying that dropping opens the file.
+pub fn drop_hint(ctx: &egui::Context) {
+    if ctx.input(|i| i.raw.hovered_files.is_empty()) {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("drop-hint"),
+    ));
+    painter.rect_filled(screen, 0.0, Color32::from_black_alpha(180));
+    painter.text(
+        screen.center(),
+        egui::Align2::CENTER_CENTER,
+        format!(
+            "{} Drop to open the project",
+            egui_phosphor::regular::FOLDER_OPEN
+        ),
+        egui::FontId::proportional(24.0),
+        Color32::WHITE,
+    );
 }
 
 /// Where the documentation lives.

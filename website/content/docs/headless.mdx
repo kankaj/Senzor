@@ -3,9 +3,9 @@ title: Running headless
 description: Validate and run a project from the command line with senzor-cli, for example in CI or a container.
 ---
 
-`senzor-cli` runs the same project file as the GUI, without a window. It has three commands:
+`senzor-cli` runs the same project file as the GUI, without a window. It has four commands:
 `validate` checks a project, `run` connects its devices to the broker and publishes until you stop
-it, and `mcp` lets an AI agent control the project (see [Let an agent drive it](#let-an-agent-drive-it)).
+it, `clear-retained` deletes the retained messages a run leaves on the broker, and `mcp` lets an AI agent control the project (see [Let an agent drive it](#let-an-agent-drive-it)).
 This page shows how to use them; the [CLI reference](/docs/reference/cli) lists every flag and
 message.
 
@@ -110,6 +110,31 @@ the broker does not send its Last Will. Senzor waits up to 2 seconds for the ins
 then drops any connection that is still open, and exits with code 0. If any instance had failed, it
 prints `error: <n> instances failed: <ids>` instead and exits with code 3.
 
+## Clear retained messages
+
+Status messages are retained, and so are the messages of a template with `retain = true`. The broker
+keeps them after the run, and every new subscriber receives them first. `clear-retained` deletes them:
+
+```bash
+senzor-cli clear-retained examples/quick-start.toml
+```
+
+```text
+senzor/kitchen/status
+senzor/office-0/status
+senzor/office-1/status
+cleared 3 retained topics on localhost:1883
+```
+
+It validates the project like `run`, connects once with the project's broker settings, and publishes
+an empty retained message to each topic, which tells the broker to delete the retained message there.
+Stop the project first, or its instances publish their retained messages again. With `--only`, it
+clears only the topics of the devices you list, written as for `run`.
+
+A topic that uses a field value is cleared only for the field's initial value. If the broker cannot
+be reached or refuses, `clear-retained` prints `error: cannot clear retained topics: <reason>` and
+exits with code 1. The [CLI reference](/docs/reference/cli#clear-retained) lists every case.
+
 ## Logging
 
 `senzor-cli` logs to stderr. By default it logs at `info` level:
@@ -146,8 +171,8 @@ text. Set `NO_COLOR=1` to turn the colours off in a terminal too.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: stopped by Ctrl+C, SIGTERM or `--duration`, and no instance failed. |
-| `1` | The async runtime could not start. |
+| `0` | `validate`: the project is valid. `run`: stopped by Ctrl+C, SIGTERM or `--duration`, and no instance failed. `clear-retained`: every topic is cleared. |
+| `1` | The async runtime could not start, or `clear-retained` could not clear the topics. |
 | `2` | The file cannot be read, the project has problems, the arguments are invalid, or there are no devices to start. |
 | `3` | `run`: stopped by Ctrl+C, SIGTERM or `--duration`, and at least one instance had failed, for example because the broker refused a wrong password. |
 

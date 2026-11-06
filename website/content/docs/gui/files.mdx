@@ -17,6 +17,8 @@ senzor examples/showcase.toml
 
 A file opens even when it has validation problems: they appear in the Problems tab, and you can fix them in the GUI. A file that cannot be read, that is not valid TOML, or that does not match the project format (an unknown key, for example) does not open. Senzor then shows **Cannot open** with the file's path, the note **Fix the file in a text editor, then open it again.** and the errors with their line and column. The current project stays open; if you named the file on the command line, Senzor starts with an empty project instead. To check a file from the command line, run `senzor-cli validate` ([CLI reference](/docs/reference/cli)).
 
+You can also drop a project file on the window, from a file manager for example, to open it the way **Open** does. While you drag a file over the window, it reads **Drop to open the project**. When you drop several files, Senzor opens the first.
+
 ## Recent projects
 
 The clock button next to **Open** lists the project files you opened or saved lately, the latest first; hovering over it reads **Recent projects**. Each entry shows the file name and, smaller, its folder. Click one to open it the way **Open** does: Senzor asks about unsaved changes first, and the current project's instances stop.

@@ -2,7 +2,9 @@ use eframe::egui::{self, Button};
 use senzor_core::engine::{Command, EngineState, Target};
 use senzor_core::project::builtin::builtin_templates;
 
-use super::{Action, FIX_PROBLEMS_FIRST, LeftTab, UiState, WARNING, status_dot};
+use super::{
+    Action, FIX_PROBLEMS_FIRST, LeftTab, UiState, WARNING, kill_button, status_dot, stop_button,
+};
 use crate::document::Document;
 use crate::selection::Selection;
 use crate::tree::{
@@ -191,7 +193,7 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
         ))));
         ui.close();
     }
-    if ui.button("Stop").clicked() {
+    if stop_button(ui).clicked() {
         for id in instance_ids(node) {
             actions.push(Action::Engine(Command::Stop(Target::Instance(id))));
         }
@@ -217,7 +219,7 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
             ui.close();
         }
     }
-    if ui.button("Kill").clicked() {
+    if kill_button(ui).clicked() {
         for id in instance_ids(node) {
             actions.push(Action::Engine(Command::Kill(Target::Instance(id))));
         }
@@ -244,7 +246,7 @@ fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<A
         actions.push(Action::Engine(Command::Start(target())));
         ui.close();
     }
-    if ui.button("Stop").clicked() {
+    if stop_button(ui).clicked() {
         actions.push(Action::Engine(Command::Stop(target())));
         ui.close();
     }
@@ -254,7 +256,7 @@ fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<A
         actions.push(Action::Engine(Command::Restart(target())));
         ui.close();
     }
-    if ui.button("Kill").clicked() {
+    if kill_button(ui).clicked() {
         actions.push(Action::Engine(Command::Kill(target())));
         ui.close();
     }

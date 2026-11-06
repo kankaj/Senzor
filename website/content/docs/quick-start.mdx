@@ -86,7 +86,7 @@ senzor/office-0/status offline
 senzor/kitchen/status offline
 ```
 
-Because status messages are retained, the broker keeps `offline` for each instance, and new subscribers see the sensors as offline.
+Because status messages are retained, the broker keeps `offline` for each instance, and new subscribers see the sensors as offline. To delete them, run `senzor-cli clear-retained examples/quick-start.toml` (see [Clear retained messages](/docs/headless#clear-retained-messages)).
 
 To watch a device drop off instead, start the project again in the GUI and use **Kill** on one instance. The instance closes its connection without a word, and the broker publishes its Last Will, `offline`, on its behalf. [Simulating a device dropping off](/docs/recipes/device-dropping-off) walks through it.
 

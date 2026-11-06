@@ -25,32 +25,45 @@ pub async fn test_connection(broker: &BrokerConfig, timeout: Duration) -> Result
                     let _ = tokio::time::timeout(Duration::from_secs(1), connection.poll()).await;
                     return Ok(());
                 }
-                Ok(ConnEvent::Other) => {}
-                Err(ConnError::Refused(reason)) => {
-                    return Err(format!("broker refused the connection: {reason}"));
-                }
-                Err(ConnError::UnsupportedVersion) => return Err(MQTT5_UNSUPPORTED.to_string()),
-                Err(ConnError::Aborted(text)) if broker.mqtt_version == MqttVersion::V5 => {
-                    return Err(match answers_mqtt311(broker, CLIENT_ID).await {
-                        Some(true) => MQTT5_UNSUPPORTED.to_string(),
-                        Some(false) => text,
-                        None => format!("{text}; {MAYBE_MQTT311_ONLY}"),
-                    });
-                }
-                Err(ConnError::Aborted(error) | ConnError::Other(error)) => return Err(error),
+                Ok(ConnEvent::PubAck { .. } | ConnEvent::Other) => {}
+                Err(error) => return Err(connect_failure(broker, CLIENT_ID, error).await),
             }
         }
     };
     tokio::time::timeout(timeout, attempt)
         .await
-        .unwrap_or_else(|_| {
-            Err(format!(
-                "no answer from {}:{} within {} s",
-                broker.host,
-                broker.port,
-                timeout.as_secs_f32()
-            ))
-        })
+        .unwrap_or_else(|_| Err(no_answer(broker, timeout)))
+}
+
+/// Why a one-off connection with client ID `client_id` failed before the broker accepted it, in
+/// the words a failed instance uses.
+pub(super) async fn connect_failure(
+    broker: &BrokerConfig,
+    client_id: &str,
+    error: ConnError,
+) -> String {
+    match error {
+        ConnError::Refused(reason) => format!("broker refused the connection: {reason}"),
+        ConnError::UnsupportedVersion => MQTT5_UNSUPPORTED.to_string(),
+        ConnError::Aborted(text) if broker.mqtt_version == MqttVersion::V5 => {
+            match answers_mqtt311(broker, client_id).await {
+                Some(true) => MQTT5_UNSUPPORTED.to_string(),
+                Some(false) => text,
+                None => format!("{text}; {MAYBE_MQTT311_ONLY}"),
+            }
+        }
+        ConnError::Aborted(error) | ConnError::Other(error) => error,
+    }
+}
+
+/// The broker did not accept a connection within `timeout`.
+pub(super) fn no_answer(broker: &BrokerConfig, timeout: Duration) -> String {
+    format!(
+        "no answer from {}:{} within {} s",
+        broker.host,
+        broker.port,
+        timeout.as_secs_f32()
+    )
 }
 
 #[cfg(test)]

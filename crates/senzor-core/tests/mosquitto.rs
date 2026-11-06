@@ -303,3 +303,54 @@ async fn the_connection_test_names_a_broker_without_mqtt_5() {
         Ok(())
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the Docker brokers in dev/compose.yaml"]
+async fn clearing_deletes_the_retained_messages_on_mosquitto_2() {
+    use senzor_core::engine::{CLEAR_RETAINED_TIMEOUT, clear_retained, retained_topics};
+
+    let port = mosquitto_port();
+    for version in ["5", "3.1.1"] {
+        let prefix = unique("clear");
+        let mut project = project(
+            port,
+            &prefix,
+            &format!("mqtt_version = \"{version}\""),
+            "",
+            "",
+        );
+        for instance in project
+            .devices
+            .iter_mut()
+            .flat_map(|d| d.instances.iter_mut())
+        {
+            instance.retain = true;
+        }
+        let mut sub = Subscriber::connect(port, &format!("{prefix}/state")).await;
+        let engine = spawn(project.clone());
+        start_online(&engine).await;
+        sub.wait_for(WAIT, |_| true).await.unwrap();
+        engine.shutdown().await;
+        let mut before = Subscriber::connect(port, &format!("{prefix}/#")).await;
+        assert_eq!(
+            before.collect(Duration::from_millis(500)).await.len(),
+            2,
+            "MQTT {version}: state and status are retained"
+        );
+
+        let topics = retained_topics(&project, None);
+        assert_eq!(
+            topics,
+            [format!("{prefix}/state"), format!("{prefix}/status")]
+        );
+        clear_retained(&project.broker, &topics, CLEAR_RETAINED_TIMEOUT)
+            .await
+            .unwrap();
+        let mut after = Subscriber::connect(port, &format!("{prefix}/#")).await;
+        assert_eq!(
+            after.collect(Duration::from_millis(500)).await,
+            [],
+            "MQTT {version}"
+        );
+    }
+}

@@ -4,20 +4,19 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use senzor::SenzorApp;
 use senzor::document::Document;
 use senzor::testing::{
     App, FRAME_PAUSE, FakeDialogs, TIMEOUT, click, status, test_dir, wait_online, wait_until,
-    write_project,
+    window_builder, write_project,
 };
 use senzor_core::engine::InstanceStatus;
 use senzor_core::project::ProjectFile;
 use senzor_testkit::{Subscriber, slow_broker, start_broker};
 
 fn app(path: Option<PathBuf>, dialogs: FakeDialogs) -> App {
-    let mut harness = Harness::builder()
+    let mut harness = window_builder()
         .with_size(egui::vec2(1400.0, 900.0))
         .build_eframe(move |cc| SenzorApp::new(cc, path, Box::new(dialogs)));
     harness.step();
@@ -50,6 +49,46 @@ template = "air"
 autostart = false
 "#
     )
+}
+
+#[test]
+fn clear_retained_messages_empties_the_projects_retained_topics() {
+    let port = start_broker();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let path = write_project("clear-retained", &project(port, true));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    wait_online(&mut harness, "office-0");
+    wait_online(&mut harness, "office-1");
+    click(&mut harness, "Stop all");
+    wait_until(&mut harness, "everything stopped", |h| {
+        h.state()
+            .engine_state()
+            .instances
+            .values()
+            .all(|i| !i.status.is_running())
+    });
+    let before = runtime.block_on(async {
+        let mut sub = Subscriber::connect(port, "gui/+/status").await;
+        sub.collect(Duration::from_millis(500)).await
+    });
+    assert!(before.iter().any(|m| m.retain), "offline is retained");
+
+    click(&mut harness, &format!("Broker: 127.0.0.1:{port}"));
+    harness.run();
+    click(&mut harness, "Clear retained messages…");
+    harness.run();
+    assert!(harness.query_by_label("Clear 3 retained topics?").is_some());
+    assert!(harness.query_by_label("gui/spare/status").is_some());
+    click(&mut harness, "Clear");
+    wait_until(&mut harness, "the topics cleared", |h| {
+        h.query_by_label("Cleared 3 retained topics").is_some()
+    });
+
+    let after = runtime.block_on(async {
+        let mut sub = Subscriber::connect(port, "gui/+/status").await;
+        sub.collect(Duration::from_millis(500)).await
+    });
+    assert!(after.iter().all(|m| !m.retain), "{after:?}");
 }
 
 /// Asks to close the window, as its close button does.
@@ -729,7 +768,7 @@ fn the_mcp_flag_uses_the_port_in_the_settings() {
         mcp_port: port,
         ..Default::default()
     };
-    let mut harness = Harness::builder()
+    let mut harness = window_builder()
         .with_size(egui::vec2(1400.0, 900.0))
         .build_eframe(move |cc| {
             SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
@@ -742,13 +781,52 @@ fn the_mcp_flag_uses_the_port_in_the_settings() {
 
 /// A window started with `settings`, as if they had been saved by an earlier launch.
 fn app_with_settings(settings: senzor::settings::AppSettings) -> App {
-    let mut harness = Harness::builder()
+    let mut harness = window_builder()
         .with_size(egui::vec2(1400.0, 900.0))
         .build_eframe(move |cc| {
             SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
         });
     harness.step();
     harness
+}
+
+#[test]
+fn the_selected_tabs_are_saved_and_come_back() {
+    use senzor::settings::{AppSettings, PanelTabs};
+    let mut harness = app_with_settings(AppSettings {
+        tabs: PanelTabs {
+            left: senzor::settings::LeftTab::Templates,
+            bottom: senzor::settings::BottomTab::Problems,
+        },
+        ..Default::default()
+    });
+    assert!(harness.query_by_label("Add template").is_some());
+    assert!(harness.query_by_label("No problems.").is_some());
+
+    click(&mut harness, "Devices");
+    click(&mut harness, "Message log");
+    let mut storage = MemoryStorage::default();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    let saved = AppSettings::load(Some(&storage)).tabs;
+    assert_eq!(saved.left, senzor::settings::LeftTab::Devices);
+    assert_eq!(saved.bottom, senzor::settings::BottomTab::Log);
+}
+
+#[test]
+fn the_window_remembers_the_last_version_seen() {
+    use senzor::settings::AppSettings;
+    let harness = app_with_settings(AppSettings {
+        last_version: Some("0.9.0".into()),
+        ..Default::default()
+    });
+    assert_eq!(harness.state().version_seen_before(), Some("0.9.0"));
+    assert_eq!(
+        harness.state().settings().last_version.as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+
+    let first = app_with_settings(AppSettings::default());
+    assert_eq!(first.state().version_seen_before(), None, "a first launch");
 }
 
 #[test]
@@ -771,7 +849,7 @@ fn the_mcp_port_flag_wins_over_the_saved_port_for_this_launch() {
         mcp_port: saved,
         ..Default::default()
     };
-    let mut harness = Harness::builder()
+    let mut harness = window_builder()
         .with_size(egui::vec2(1400.0, 900.0))
         .build_eframe(move |cc| {
             SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
@@ -878,6 +956,62 @@ fn save_stands_out_while_there_are_unsaved_changes() {
     click(&mut harness, "Add device");
     assert!(harness.state().document().is_dirty());
     assert!(shows_tooltip(&mut harness, "Save", TIP));
+}
+
+/// A file on disk, dropped on the window.
+#[derive(Debug)]
+struct DroppedPath(PathBuf);
+
+impl egui::DroppedFile for DroppedPath {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// Drops `path` on the window, as a file manager does.
+fn drop_file(harness: &mut App, path: &std::path::Path) {
+    harness
+        .input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(DroppedPath(path.to_path_buf())));
+    harness.run_steps(2);
+}
+
+#[test]
+fn a_project_file_dropped_on_the_window_opens() {
+    let path = write_project(
+        "drop-open",
+        "[[devices]]\nid = \"dropped\"\ntemplate = \"co2\"\n",
+    );
+    let mut harness = app(None, FakeDialogs::default());
+    drop_file(&mut harness, &path);
+    assert_eq!(harness.state().document().path(), Some(path.as_path()));
+    assert!(harness.query_by_label("dropped ×1").is_some());
+}
+
+#[test]
+fn dropping_a_file_asks_about_unsaved_changes_first() {
+    let path = write_project("drop-unsaved", "");
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Add your first device");
+    drop_file(&mut harness, &path);
+    assert!(harness.query_by_label("Unsaved changes").is_some());
+    click(&mut harness, "Discard");
+    assert_eq!(harness.state().document().path(), Some(path.as_path()));
+}
+
+#[test]
+fn a_dropped_file_that_is_not_a_project_says_why() {
+    let path = test_dir("drop-not-a-project").join("notes.txt");
+    std::fs::write(&path, "not a project = [").unwrap();
+    let mut harness = app(None, FakeDialogs::default());
+    drop_file(&mut harness, &path);
+    assert!(harness.query_by_label_contains("Cannot open").is_some());
+    assert_eq!(harness.state().document().path(), None);
 }
 
 const WELCOME: &str = "Welcome to Senzor";

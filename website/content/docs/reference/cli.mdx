@@ -11,6 +11,7 @@ description: The senzor-cli commands, options, exit codes, messages and logging.
 ```text
 senzor-cli [OPTIONS] validate <PROJECT>
 senzor-cli [OPTIONS] run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+senzor-cli [OPTIONS] clear-retained <PROJECT> [--only <ID>[,<ID>…]]
 senzor-cli [OPTIONS] mcp [PROJECT] [--no-autostart]
 senzor-cli help [COMMAND]
 senzor-cli --version
@@ -70,6 +71,63 @@ senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
 6. Exits with 0 if no instance ended **Failed**. If any did, it prints
    `error: <n> instances failed: <ids>` to stderr and exits with 3.
 
+## clear-retained
+
+```text
+senzor-cli clear-retained <PROJECT> [--only <ID>[,<ID>…]]
+```
+
+Deletes the retained messages that the project's instances leave on the broker.
+
+| Option | Meaning |
+| --- | --- |
+| `--only <ID>[,<ID>…]` | Device IDs whose topics to clear instead of every device's, with or without `autostart`. Written as for `run`. |
+
+`clear-retained` does the following:
+
+1. Loads and validates the project like `validate`. If there is any problem, it prints the problems
+   and exits with 2 without connecting.
+2. Lists the topics on which the selected devices' instances can leave a retained message:
+   - the availability topic of each instance, if its template has availability;
+   - the message topics of each instance, if its template has `retain = true`.
+
+   Each topic is listed once, even if several instances publish on it. Topics are rendered as
+   validation renders them: with each field's initial value, `seq` 0 and the current time. A topic
+   that uses a field, `seq`, `now_ms` or `now_iso` is cleared only for that one value.
+3. If there is no such topic, prints `no retained topics to clear` to stdout and exits with 0
+   without connecting.
+4. Connects once to the broker with the project's broker settings and MQTT version, with the client
+   ID `<client_id_prefix>clear-retained` and no Last Will. It publishes an empty retained message
+   with QoS 1 to each topic, which tells the broker to delete the retained message there. A topic
+   without a retained message is not an error.
+5. Waits until the broker has acknowledged every message, then disconnects. It waits 10 seconds at
+   most in all.
+6. Prints each topic on its own line to stdout, in sorted order, then a summary, and exits with 0:
+
+   ```text
+   senzor/kitchen/status
+   senzor/office-0/status
+   senzor/office-1/status
+   cleared 3 retained topics on localhost:1883
+   ```
+
+If it fails, it prints `error: cannot clear retained topics: <reason>` to stderr and exits with 1.
+`<reason>` is one of:
+
+- a connection error in the words a failed instance uses, such as
+  `broker refused the connection: NotAuthorized` or
+  `I/O: Connection refused (os error 111)` (see [Logging](#logging));
+- `no answer from <host>:<port> within 10 s`: the broker did not accept the connection in time;
+- `the broker at <host>:<port> acknowledged <n> of <m> topics within 10 s`;
+- `the connection dropped after the broker acknowledged <n> of <m> topics: <error>`;
+- with MQTT 5, `the broker refused to clear <n> of <m> topics: <reasons>`, where `<reasons>` are the
+  broker's MQTT 5 reason codes, for example `NotAuthorized` when its access control does not let
+  the client publish there. With MQTT 3.1.1 a broker cannot report this.
+
+Stop the project before you clear it: a running instance publishes its retained messages again. If
+a topic uses a field value, the topics that other values left behind are not cleared; delete them
+by hand, for example with `mosquitto_pub -r -n -t <topic>`.
+
 ## mcp
 
 ```text
@@ -106,8 +164,8 @@ stdout carries only MCP messages; the log and warnings go to stderr. `-v` works 
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and no instance ended **Failed**. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
-| `1` | The async runtime could not start. |
+| `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and no instance ended **Failed**. `clear-retained`: the broker acknowledged every topic, or there was none. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
+| `1` | The async runtime could not start, or `clear-retained` could not clear: the broker could not be reached, refused the connection, did not acknowledge every topic in time, or refused to clear a topic. |
 | `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
 | `3` | `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and at least one instance had ended **Failed**: the broker refused its connection, for example because of a wrong password or because the broker does not support MQTT 5, or the instance hit an internal error. |
 
@@ -118,7 +176,7 @@ when instances failed.
 
 ## Messages
 
-`senzor-cli` prints these errors to stderr itself. All but the last are printed before anything
+`senzor-cli` prints these errors to stderr itself. All but the last two are printed before anything
 runs.
 
 | Message | Exit code | Cause |
@@ -127,7 +185,8 @@ runs.
 | `error: no devices to start (none has autostart = true; use --only)` | 2 | `run` without `--only`, and no device has autostart on. |
 | `error: --only names no devices` | 2 | `--only` contains only commas or spaces. |
 | `error: unknown device id(s): <ids>` | 2 | `--only` names IDs that are not devices of the project, listed with a comma and a space. |
-| `error: cannot start the async runtime: <reason>` | 1 | `run` or `mcp` could not create the runtime that drives the instances. |
+| `error: cannot start the async runtime: <reason>` | 1 | `run`, `clear-retained` or `mcp` could not create the runtime that drives the MQTT connections. |
+| `error: cannot clear retained topics: <reason>` | 1 | `clear-retained` failed; see [clear-retained](#clear-retained) for the reasons. |
 | `error: <n> instances failed: <ids>` | 3 | `run` stopped, and these instances had ended **Failed**. The IDs are listed with a comma and a space, sorted as text (`dev-10` before `dev-2`); a count of 1 takes the singular, as in `error: 1 instance failed: kitchen`. The reason for each is in the log, in its `failed: <reason>` line. |
 
 Invalid arguments are reported by the argument parser and exit with 2, for example:
@@ -138,8 +197,8 @@ error: invalid value '30' for '--duration <DURATION>': time unit needed, for exa
 
 ## Output
 
-- stdout gets only the `OK` line of `validate`, the MCP messages of `mcp`, and the output of
-  `--help` and `--version`.
+- stdout gets only the `OK` line of `validate`, the topics and summary of `clear-retained`, the
+  MCP messages of `mcp`, and the output of `--help` and `--version`.
 - stderr gets everything else: problems, errors and the log.
 
 ## Logging
@@ -189,4 +248,4 @@ supports only MQTT 3.1.1, the reason is `the broker does not support MQTT 5; set
 | --- | --- |
 | `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored; an empty value logs only errors. |
 | `NO_COLOR` | Any non-empty value turns off colours in the log, also when stderr is a terminal. |
-| The name in `password_env` | The broker password. Needed by `validate`, `run` and `mcp`. |
+| The name in `password_env` | The broker password. Needed by `validate`, `run`, `clear-retained` and `mcp`. |

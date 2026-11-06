@@ -336,7 +336,6 @@ impl Host for SenzorApp {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use rmcp::model::{CallToolRequestParams, CallToolResult};
     use rmcp::service::RunningService;
@@ -345,7 +344,9 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
-    use crate::testing::{App, FRAME_PAUSE, FakeDialogs, TIMEOUT, wait_online, write_project};
+    use crate::testing::{
+        App, FRAME_PAUSE, FakeDialogs, TIMEOUT, wait_online, window_builder, write_project,
+    };
     use crate::ui::Pending;
 
     /// Devices `a`, `b` and `c` (built-in `co2`, not autostarting) on the broker at `port`.
@@ -419,7 +420,7 @@ mod tests {
     /// The window with `src` opened and MCP on a free port.
     fn window(name: &str, src: &str) -> App {
         let path = write_project(name, src);
-        let mut h = Harness::builder().build_eframe(move |cc| {
+        let mut h = window_builder().build_eframe(move |cc| {
             SenzorApp::new(cc, Some(path), Box::new(FakeDialogs::default())).with_mcp(0)
         });
         h.run_steps(2);
@@ -596,7 +597,7 @@ mod tests {
     /// The window with `src` opened, MCP off, and its toggle set to `port`.
     fn window_with_mcp_off(name: &str, port: u16) -> App {
         let path = write_project(name, &three_devices(1));
-        let mut h = Harness::builder().build_eframe(move |cc| {
+        let mut h = window_builder().build_eframe(move |cc| {
             SenzorApp::new(cc, Some(path), Box::new(FakeDialogs::default())).with_mcp_port(port)
         });
         h.run_steps(2);
@@ -735,7 +736,7 @@ mod tests {
         let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = taken.local_addr().unwrap().port();
         let path = write_project("mcp-taken", &three_devices(1));
-        let mut h = Harness::builder().build_eframe(move |cc| {
+        let mut h = window_builder().build_eframe(move |cc| {
             SenzorApp::new(cc, Some(path), Box::new(FakeDialogs::default())).with_mcp(port)
         });
         h.run_steps(2);

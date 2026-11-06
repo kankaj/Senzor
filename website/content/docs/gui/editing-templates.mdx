@@ -97,6 +97,8 @@ If no valid device uses the template, the preview says **No valid device uses th
 
 The preview shows the availability topic (as `availability: …`) and each message's topic and payload, followed by the MQTT 5 properties the message sets, such as `content type: application/json`, `message expiry: 300 s` and `user property: room = office`. A message that fails to render shows its error in red, such as `message 1: …`.
 
+When a rendered payload starts with `{` or `[` but is not valid JSON, the preview warns under it in amber: **looks like JSON but is not valid JSON**, followed by where the JSON breaks, such as a comma before `}`. A message whose **Content type** names JSON, such as `application/json`, gets the same check for any payload. The warning is not a problem: the device still runs, so you can publish broken JSON on purpose to test how your consumer copes.
+
 ## Built-in templates
 
 Click a template under **Built-in** to look at it. Built-in templates are read-only: the view shows the template's settings greyed out, with its preview, and the note **Built-in templates are read-only. Copy one into the project to change it.**

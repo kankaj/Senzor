@@ -28,6 +28,8 @@ pub enum Outcome {
     Reload,
     /// Keep the project in the window over the one in the file.
     KeepMine,
+    /// Clear these retained topics.
+    ClearRetained(Vec<String>),
     Dismissed,
 }
 
@@ -47,6 +49,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
             Modal::ConfirmReplace { path, then } => confirm_replace(ui, path, then.as_ref()),
             Modal::Error(message) => error(ui, message),
             Modal::FileChanged { name, unsaved } => file_changed(ui, name, *unsaved),
+            Modal::ClearRetained { topics, broker } => clear_retained(ui, topics, broker),
         };
     });
     if outcome.is_none() && response.should_close() {
@@ -152,6 +155,32 @@ fn confirm_replace(ui: &mut egui::Ui, path: &Path, then: Option<&Pending>) -> Op
                     then: then.cloned(),
                 },
             ),
+            ("Cancel", Outcome::Dismissed),
+        ],
+    )
+}
+
+fn clear_retained(ui: &mut egui::Ui, topics: &[String], broker: &str) -> Option<Outcome> {
+    ui.heading(format!(
+        "Clear {}?",
+        super::retained_topics_text(topics.len())
+    ));
+    ui.label(format!(
+        "Senzor publishes an empty retained message to each topic on {broker}, which makes \
+         the broker forget the message it keeps there. Subscribers then get nothing until the \
+         devices publish again."
+    ));
+    egui::ScrollArea::vertical()
+        .max_height(200.0)
+        .show(ui, |ui| {
+            for topic in topics {
+                ui.label(RichText::new(topic).monospace());
+            }
+        });
+    buttons(
+        ui,
+        [
+            ("Clear", Outcome::ClearRetained(topics.to_vec())),
             ("Cancel", Outcome::Dismissed),
         ],
     )

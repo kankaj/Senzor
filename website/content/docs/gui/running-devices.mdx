@@ -38,7 +38,7 @@ Right-click a device to act on all of its instances:
 - **Start** starts the device's stopped and failed instances. It is disabled for a device with problems; hover over it to read **Fix the problems in the Problems tab first**.
 - **Stop** stops every instance listed under the device: each one that is online publishes `offline` (if the template has availability) and disconnects.
 - **Restart** stops each running instance and starts it again with the project's current settings. Stopped instances stay stopped. When none of the device's own instances runs (orphans do not count), the item is disabled with the hint **No running instances to restart**. A device with problems has no **Restart**.
-- **Kill** drops the connection of every listed instance without publishing `offline`. If the template has availability, the broker then publishes the instance's Last Will, as it would for a device that lost power. See [Availability and Last Will](/docs/concepts/availability).
+- **Kill**, in red, drops the connection of every listed instance without publishing `offline`. If the template has availability, the broker then publishes the instance's Last Will, as it would for a device that lost power. See [Availability and Last Will](/docs/concepts/availability).
 - **Duplicate**, below a line, copies the device; see [Duplicate device](/docs/gui/editing-devices#duplicate-device).
 
 ## Instance menu

@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use senzor_core::engine::{Command, Engine, EngineState, InstanceStatus, Target};
+use senzor_core::engine::{
+    CLEAR_RETAINED_TIMEOUT, Command, Engine, EngineState, InstanceStatus, Target, clear_retained,
+    retained_topics,
+};
 use senzor_core::project::{Project, ProjectError, ProjectFile};
 use senzor_mcp::{Session, serve_stdio};
 use tracing_subscriber::EnvFilter;
@@ -40,6 +43,13 @@ enum Cmd {
         #[arg(long, value_parser = humantime::parse_duration)]
         duration: Option<Duration>,
     },
+    /// Delete the retained messages the project's instances leave on the broker.
+    ClearRetained {
+        project: PathBuf,
+        /// Device IDs whose topics to clear instead of every device's.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+    },
     /// Serve the Model Context Protocol on stdin/stdout, so an AI agent can control Senzor.
     Mcp {
         /// Project file to open; without it, an empty project.
@@ -60,6 +70,7 @@ fn main() -> ExitCode {
             only,
             duration,
         } => run(&project, &only, duration),
+        Cmd::ClearRetained { project, only } => clear(&project, &only),
         Cmd::Mcp {
             project,
             no_autostart,
@@ -149,6 +160,11 @@ fn select_devices(project: &Project, only: &[String]) -> Result<Vec<String>, Str
         }
         return Ok(autostart);
     }
+    requested_devices(project, only)
+}
+
+/// The device IDs in a non-empty `--only`, trimmed; an error when it names none or unknown ones.
+fn requested_devices(project: &Project, only: &[String]) -> Result<Vec<String>, String> {
     let requested: Vec<String> = only
         .iter()
         .map(|id| id.trim().to_string())
@@ -240,6 +256,57 @@ fn failed_instances(state: &EngineState) -> Vec<String> {
         .filter(|(_, instance)| matches!(instance.status, InstanceStatus::Failed { .. }))
         .map(|(id, _)| id.clone())
         .collect()
+}
+
+/// Deletes the retained messages of the devices in `--only`, or of every device, then lists the
+/// topics it cleared.
+fn clear(path: &Path, only: &[String]) -> ExitCode {
+    let project = match load(path) {
+        Ok(project) => project,
+        Err(code) => return code,
+    };
+    let devices = if only.is_empty() {
+        None
+    } else {
+        match requested_devices(&project, only) {
+            Ok(devices) => Some(devices),
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(INVALID);
+            }
+        }
+    };
+    let topics = retained_topics(&project, devices.as_deref());
+    if topics.is_empty() {
+        println!("no retained topics to clear");
+        return ExitCode::SUCCESS;
+    }
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("error: cannot start the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let broker = &project.broker;
+    match runtime.block_on(clear_retained(broker, &topics, CLEAR_RETAINED_TIMEOUT)) {
+        Ok(()) => {
+            for topic in &topics {
+                println!("{topic}");
+            }
+            println!(
+                "cleared {} on {}:{}",
+                count_noun(topics.len(), "retained topic"),
+                broker.host,
+                broker.port
+            );
+            ExitCode::SUCCESS
+        }
+        Err(reason) => {
+            eprintln!("error: cannot clear retained topics: {reason}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Serves MCP until the client disconnects, Ctrl+C or SIGTERM. stdout carries only the protocol.

@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use senzor_core::engine::{
-    CONNECTION_TEST_TIMEOUT, Command, Engine, EngineHandle, EngineState, Target, test_connection,
+    CLEAR_RETAINED_TIMEOUT, CONNECTION_TEST_TIMEOUT, Command, Engine, EngineHandle, EngineState,
+    Target, clear_retained, retained_topics, test_connection,
 };
 use senzor_core::project::edit::{duplicate_device, duplicate_template};
 use senzor_core::project::{BrokerConfig, ProjectFile};
@@ -15,7 +16,7 @@ use crate::document::Document;
 use crate::edits;
 use crate::rate::MessageRate;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, PanelTabs};
 use crate::ui::modals::{self, Outcome, UnsavedChoice};
 use crate::ui::{self, Action, Modal, Pending, UiState};
 
@@ -58,14 +59,24 @@ pub struct SenzorApp {
     settings: AppSettings,
     /// The latest broker connection test.
     connection_test: Option<ConnectionTestRun>,
+    /// The latest clearing of retained messages: how far it is, and where its result comes in.
+    clear_retained: Option<ClearRetainedRun>,
     /// When the project's file was last checked for changes made elsewhere.
     disk_checked: Instant,
+    /// The version of Senzor that ran before this launch, if any ran with these settings.
+    version_seen_before: Option<String>,
     /// How fast the engine publishes, for the status bar.
     rate: MessageRate,
 }
 
 /// How often the window looks whether another program changed the project's file.
 const DISK_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Clearing retained messages: how far it is, and where its result (the topics cleared) comes in.
+struct ClearRetainedRun {
+    state: ui::ClearRetained,
+    result: Option<std::sync::mpsc::Receiver<Result<usize, String>>>,
+}
 
 /// A connection test: the broker settings it tests, how far it is, and where its result comes in.
 struct ConnectionTestRun {
@@ -94,8 +105,12 @@ impl SenzorApp {
         dialogs: Box<dyn FileDialogs>,
         settings: AppSettings,
     ) -> Self {
+        let mut settings = settings;
         ui::install_icon_font(&cc.egui_ctx);
         settings.apply(&cc.egui_ctx);
+        let version_seen_before = settings
+            .last_version
+            .replace(env!("CARGO_PKG_VERSION").to_string());
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime starts");
         let mut app = Self {
             runtime,
@@ -117,13 +132,18 @@ impl SenzorApp {
             mcp_error: None,
             settings,
             connection_test: None,
+            clear_retained: None,
             disk_checked: Instant::now(),
             rate: MessageRate::default(),
+            version_seen_before,
         };
         match path {
             Some(path) => app.open_path(&path),
             None => app.replace_document(Document::new_empty()),
         }
+        // After the document, whose arrival resets the panels.
+        app.ui.left_tab = app.settings.tabs.left;
+        app.ui.bottom_tab = app.settings.tabs.bottom;
         if app.settings.mcp_on {
             app.start_mcp(app.settings.mcp_port);
         }
@@ -133,6 +153,11 @@ impl SenzorApp {
     /// The app's own settings, saved between launches.
     pub fn settings(&self) -> &AppSettings {
         &self.settings
+    }
+
+    /// The version of Senzor that ran before this launch, or `None` on the first launch.
+    pub fn version_seen_before(&self) -> Option<&str> {
+        self.version_seen_before.as_deref()
     }
 
     pub fn document(&self) -> &Document {
@@ -170,6 +195,7 @@ impl SenzorApp {
         self.doc = doc;
         self.open_error = None;
         self.connection_test = None;
+        self.clear_retained = None;
         self.rate.clear();
         self.engine_generation += 1;
         self.ui.reset();
@@ -407,6 +433,54 @@ impl SenzorApp {
         });
     }
 
+    /// Asks to confirm clearing the retained topics of the project's instances, or says there are
+    /// none.
+    fn ask_clear_retained(&mut self) {
+        let project = &self.doc.validated().project;
+        let topics = retained_topics(project, None);
+        if topics.is_empty() {
+            self.clear_retained = Some(ClearRetainedRun {
+                state: ui::ClearRetained::Nothing,
+                result: None,
+            });
+            return;
+        }
+        let broker = format!("{}:{}", project.broker.host, project.broker.port);
+        self.ui.modal = Some(Modal::ClearRetained { topics, broker });
+    }
+
+    /// Clears `topics` on the project's broker, in the background.
+    fn start_clear_retained(&mut self, topics: Vec<String>) {
+        let broker = self.doc.validated().project.broker.clone();
+        let (send, result) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            let cleared = clear_retained(&broker, &topics, CLEAR_RETAINED_TIMEOUT)
+                .await
+                .map(|()| topics.len());
+            let _ = send.send(cleared);
+            ctx.request_repaint();
+        });
+        self.clear_retained = Some(ClearRetainedRun {
+            state: ui::ClearRetained::Running,
+            result: Some(result),
+        });
+    }
+
+    /// Takes in the result of clearing once it is there.
+    fn update_clear_retained(&mut self) {
+        if let Some(run) = &mut self.clear_retained
+            && let Some(Ok(outcome)) = run.result.as_ref().map(|r| r.try_recv())
+        {
+            run.state = match outcome {
+                Ok(count) => ui::ClearRetained::Cleared(count),
+                Err(reason) => ui::ClearRetained::Failed(format!("Could not clear: {reason}")),
+            };
+            run.result = None;
+        }
+        self.ui.clear_retained = self.clear_retained.as_ref().map(|run| run.state.clone());
+    }
+
     /// Takes in a finished test's result, and shows it only while the broker settings are the
     /// ones it tested.
     fn update_connection_test(&mut self) {
@@ -471,6 +545,7 @@ impl SenzorApp {
             Action::OpenBroker => self.ui.broker_open = true,
             Action::OpenSettings => self.ui.settings_open = true,
             Action::TestConnection => self.start_connection_test(),
+            Action::AskClearRetained => self.ask_clear_retained(),
             Action::DuplicateDevice(id) => {
                 if let Some(index) = self.edit(|f| duplicate_device(f, &id)) {
                     self.reveal(Selection::Device(index));
@@ -516,6 +591,7 @@ impl SenzorApp {
                 }
             }
             Action::OpenExample(index) => self.guard(Pending::OpenExample(index)),
+            Action::OpenDropped(path) => self.guard(Pending::OpenPath(path)),
             Action::ClearRecent => self.settings.recent.clear(),
             Action::SetTheme(theme) => {
                 self.settings.theme = theme;
@@ -550,6 +626,7 @@ impl SenzorApp {
                 self.after_undo_or_redo();
             }
             Outcome::KeepMine => self.doc.keep_mine(),
+            Outcome::ClearRetained(topics) => self.start_clear_retained(topics),
             Outcome::Replace { path, then } => {
                 let result = self.doc.save_as(path);
                 self.finish_save(result, then);
@@ -587,6 +664,10 @@ impl SenzorApp {
 
 impl eframe::App for SenzorApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.settings.tabs = PanelTabs {
+            left: self.ui.left_tab,
+            bottom: self.ui.bottom_tab,
+        };
         self.settings.save(storage);
     }
 
@@ -606,6 +687,8 @@ impl eframe::App for SenzorApp {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.update_connection_test();
+        self.update_clear_retained();
+        self.ui.devices_running = self.state.instances.values().any(|i| i.status.is_running());
         self.check_disk();
         self.handle_close_request(&ctx);
         // The panels record a rename still being typed again while they draw.
@@ -618,9 +701,10 @@ impl eframe::App for SenzorApp {
         }
 
         let mut actions = Vec::new();
-        // While a dialog asks something, it gets the keys.
+        // While a dialog asks something, it gets the keys, and dropped files are ignored.
         if self.ui.modal.is_none() {
             actions.extend(ui::shortcuts::pressed(&ctx));
+            actions.extend(ui::dropped_file(&ctx).map(Action::OpenDropped));
         }
         let starting = self.starting_soon();
         egui::Panel::top("top-bar").show(ui, |ui| {
@@ -699,6 +783,7 @@ impl eframe::App for SenzorApp {
         if self.ui.broker_open {
             ui::broker::show(&ctx, &self.doc, &mut self.ui, &mut actions);
         }
+        ui::drop_hint(&ctx);
         if self.ui.settings_open {
             let mcp = self.mcp_status();
             ui::settings::show(&ctx, &mut self.ui, &self.settings, &mcp, &mut actions);
@@ -741,7 +826,6 @@ impl eframe::App for SenzorApp {
 mod tests {
     use std::time::Instant;
 
-    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use senzor_core::engine::InstanceStatus;
     use senzor_testkit::slow_broker;
@@ -749,7 +833,7 @@ mod tests {
     use super::*;
     use crate::testing::{
         App, FRAME_PAUSE, FakeDialogs, TIMEOUT, click, status, wait_online, wait_until,
-        write_project,
+        window_builder, write_project,
     };
 
     /// Device `d`, which starts when its project opens.
@@ -771,7 +855,7 @@ mod tests {
         );
         let path = write_project(name, &project(port, &devices));
         let opened = path.clone();
-        let mut harness = Harness::builder().build_eframe(move |cc| {
+        let mut harness = window_builder().build_eframe(move |cc| {
             SenzorApp::new(cc, Some(opened), Box::new(FakeDialogs::default()))
         });
         wait_online(&mut harness, "d");
@@ -804,7 +888,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let port = runtime.block_on(slow_broker(Duration::ZERO));
         let path = write_project("exit", &project(port, AUTOSTART_D));
-        let mut harness = Harness::builder().build_eframe(move |cc| {
+        let mut harness = window_builder().build_eframe(move |cc| {
             SenzorApp::new(cc, Some(path), Box::new(FakeDialogs::default()))
         });
         wait_online(&mut harness, "d");

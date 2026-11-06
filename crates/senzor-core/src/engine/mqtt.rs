@@ -4,7 +4,8 @@
 use std::time::Duration;
 
 use rumqttc::v5::mqttbytes::v5::{
-    ConnectReturnCode as Reason, LastWill as LastWill5, LastWillProperties, PublishProperties,
+    ConnectReturnCode as Reason, LastWill as LastWill5, LastWillProperties, PubAckReason,
+    PublishProperties,
 };
 use rumqttc::{LastWill, MqttOptions, TlsConfiguration, Transport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -55,6 +56,11 @@ pub(crate) enum ConnEvent {
     /// accepts; rumqttc treats a larger publish as a connection error.
     ConnAck {
         max_packet_size: Option<u32>,
+    },
+    /// The broker acknowledged a QoS 1 publish. On MQTT 5, `refused` is its reason when it did
+    /// not accept the message, e.g. `NotAuthorized`; MQTT 3.1.1 has no way to say so.
+    PubAck {
+        refused: Option<String>,
     },
     Other,
 }
@@ -243,6 +249,9 @@ impl Connection {
                         max_packet_size: None,
                     })
                 }
+                Ok(rumqttc::Event::Incoming(rumqttc::Packet::PubAck(_))) => {
+                    Ok(ConnEvent::PubAck { refused: None })
+                }
                 Ok(_) => Ok(ConnEvent::Other),
                 Err(rumqttc::ConnectionError::ConnectionRefused(code)) => {
                     Err(ConnError::Refused(format!("{code:?}")))
@@ -254,6 +263,11 @@ impl Connection {
                     ack,
                 ))) => Ok(ConnEvent::ConnAck {
                     max_packet_size: ack.properties.and_then(|p| p.max_packet_size),
+                }),
+                Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::PubAck(
+                    ack,
+                ))) => Ok(ConnEvent::PubAck {
+                    refused: v5_puback_refusal(ack.reason),
                 }),
                 Ok(_) => Ok(ConnEvent::Other),
                 Err(rumqttc::v5::ConnectionError::ConnectionRefused(reason)) => {
@@ -329,6 +343,14 @@ fn v5_refusal(reason: Reason) -> ConnError {
     match reason {
         Reason::UnsupportedProtocolVersion => ConnError::UnsupportedVersion,
         other => ConnError::Refused(format!("{other:?}")),
+    }
+}
+
+/// Why an MQTT 5 broker did not accept a publish, or `None` when it did.
+fn v5_puback_refusal(reason: PubAckReason) -> Option<String> {
+    match reason {
+        PubAckReason::Success | PubAckReason::NoMatchingSubscribers => None,
+        other => Some(format!("{other:?}")),
     }
 }
 
@@ -485,6 +507,16 @@ mod tests {
         assert_eq!(
             publish_properties(&MessageProperties::default()),
             PublishProperties::default()
+        );
+    }
+
+    #[test]
+    fn mqtt5_pubacks_name_the_reason_only_when_the_broker_did_not_accept() {
+        assert_eq!(v5_puback_refusal(PubAckReason::Success), None);
+        assert_eq!(v5_puback_refusal(PubAckReason::NoMatchingSubscribers), None);
+        assert_eq!(
+            v5_puback_refusal(PubAckReason::NotAuthorized),
+            Some("NotAuthorized".into())
         );
     }
 

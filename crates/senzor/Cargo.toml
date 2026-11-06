@@ -24,6 +24,7 @@ rfd.workspace = true
 senzor-core.workspace = true
 senzor-mcp.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true
 
@@ -34,7 +35,6 @@ winresource.workspace = true
 [dev-dependencies]
 egui_kittest.workspace = true
 rmcp = { workspace = true, features = ["client"] }
-serde_json.workspace = true
 # Turns on `test-support` for this package's own tests, so `cargo test` needs no flags.
 senzor = { path = ".", features = ["test-support"] }
 senzor-testkit.workspace = true

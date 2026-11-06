@@ -63,6 +63,9 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - GUI tests use `egui_kittest`, which finds widgets by accessible label: give inputs a label via
   `.labelled_by(label.id)`. The test window is 800×600, and a widget outside it cannot be
   clicked.
+- Build whole-window harnesses with `testing::window_builder()`: the engine and the disk check
+  ask for repaints from other threads and the real clock, so `Harness::run` needs more than
+  egui_kittest's default 4 frames to settle on a busy machine.
 
 ## Documentation
 

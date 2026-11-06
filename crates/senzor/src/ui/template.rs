@@ -7,8 +7,9 @@ use senzor_core::project::builtin::builtin_template;
 use senzor_core::project::{Location, MessageSpec, MqttVersion, TemplateSpec};
 
 use super::{
-    Action, BoxOrRow, ERROR, ParsedEdit, UiState, checked, duration_edit, errors_at, mqtt5_control,
-    name_edit, optional_duration_edit, optional_text, replace_if_unchanged, shortcuts, value_edit,
+    Action, BoxOrRow, ERROR, ParsedEdit, UiState, WARNING, checked, duration_edit, errors_at,
+    mqtt5_control, name_edit, optional_duration_edit, optional_text, replace_if_unchanged,
+    shortcuts, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -16,7 +17,7 @@ use crate::edits::{
     DEFAULT_NOISE, GeneratorKind, Removal, Rename, default_generator, new_availability,
     new_message, parse_sequence, sequence_text, set_generator_kind, unique_name,
 };
-use crate::preview::preview;
+use crate::preview::{json_problem, preview};
 
 /// The editor for project template `index`.
 pub fn show_user(
@@ -622,6 +623,14 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
                 ui.label(RichText::new(&message.topic).monospace().strong());
                 ui.label(RichText::new(&message.payload).monospace());
                 let properties = &message.properties;
+                if let Some(problem) =
+                    json_problem(&message.payload, properties.content_type.as_deref())
+                {
+                    ui.colored_label(
+                        WARNING,
+                        format!("{} {problem}", egui_phosphor::regular::WARNING),
+                    );
+                }
                 if let Some(content_type) = &properties.content_type {
                     ui.weak(format!("content type: {content_type}"));
                 }
@@ -987,6 +996,18 @@ template = "air"
         );
         assert!(h.query_by_label("b/office").is_some());
         assert!(h.query_by_label("600").is_some());
+    }
+
+    #[test]
+    fn the_preview_warns_about_a_payload_that_looks_like_json_but_is_not() {
+        let h = user_harness_with(&src_replacing(
+            r#"payload = "{{ co2 }}""#,
+            r#"payload = '{"co2": {{ co2 }},}'"#,
+        ));
+        assert!(
+            h.query_by_label_contains("looks like JSON but is not valid JSON")
+                .is_some()
+        );
     }
 
     #[test]

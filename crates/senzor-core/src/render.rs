@@ -232,17 +232,36 @@ impl InstanceTemplates {
             .map(|(i, message)| self.render_message(i, message, ctx))
     }
 
+    /// Renders the topic of every message, without its payload. A failure affects only that topic.
+    pub fn render_topics(&self, ctx: &Context) -> Vec<Result<String, String>> {
+        self.messages
+            .iter()
+            .enumerate()
+            .map(|(i, message)| self.render_topic(i, message, ctx).map_err(|e| e.message))
+            .collect()
+    }
+
+    fn render_topic(
+        &self,
+        i: usize,
+        message: &CompiledMessage,
+        ctx: &Context,
+    ) -> Result<String, TemplateError> {
+        let topic = render_named(&self.env, &message.topic, ctx)
+            .map_err(|e| TemplateError::new(&message.topic, e))?;
+        check_topic(&topic).map_err(|e| {
+            TemplateError::new(&message.topic, format!("message {} topic: {e}", i + 1))
+        })?;
+        Ok(topic)
+    }
+
     fn render_message(
         &self,
         i: usize,
         message: &CompiledMessage,
         ctx: &Context,
     ) -> Result<RenderedMessage, TemplateError> {
-        let topic = render_named(&self.env, &message.topic, ctx)
-            .map_err(|e| TemplateError::new(&message.topic, e))?;
-        check_topic(&topic).map_err(|e| {
-            TemplateError::new(&message.topic, format!("message {} topic: {e}", i + 1))
-        })?;
+        let topic = self.render_topic(i, message, ctx)?;
         let payload = render_named(&self.env, &message.payload, ctx)
             .map_err(|e| TemplateError::new(&message.payload, e))?;
         let user_properties = message

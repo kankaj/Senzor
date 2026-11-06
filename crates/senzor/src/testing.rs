@@ -48,6 +48,17 @@ impl FileDialogs for FakeDialogs {
 /// The Senzor window in a headless harness.
 pub type App = Harness<'static, SenzorApp>;
 
+/// How many frames [`Harness::run`] may take to settle. egui_kittest's default of 4 is too few
+/// for the whole window: the engine asks for a repaint from its own thread after each change, and
+/// the once-a-second look at the project file runs on the real clock, so on a busy machine a few
+/// frames in a row can be asked for before the window settles.
+pub const MAX_STEPS: u64 = 32;
+
+/// A harness builder for the whole window, with room for [`MAX_STEPS`].
+pub fn window_builder() -> egui_kittest::HarnessBuilder<SenzorApp> {
+    Harness::builder().with_max_steps(MAX_STEPS)
+}
+
 /// Pause between frames while waiting for the engine.
 pub const FRAME_PAUSE: Duration = Duration::from_millis(20);
 /// How long to wait for the engine before failing.
