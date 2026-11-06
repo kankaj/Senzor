@@ -28,7 +28,7 @@ minijinja = { version = "3.0.0", features = ["json"] }
 rand = { version = "0.10.3", features = ["chacha"] }
 rmcp = { version = "3.8.0", default-features = false }
 rumqttc = "0.25.1"
-rumqttd = "0.20.0"
+rumqttd = { version = "0.20.0", default-features = false }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

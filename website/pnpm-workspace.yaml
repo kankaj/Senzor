@@ -4,3 +4,7 @@ packages:
   - .
 allowBuilds:
   esbuild: false
+# serve pins compression 1.8.1, which leaks memory when a response closes early
+# (GHSA-vc2v-76pw-4v95); drop this once serve depends on 1.8.2 or later.
+overrides:
+  compression: ^1.8.2
