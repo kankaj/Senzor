@@ -43,6 +43,10 @@ impl FileDialogs for FakeDialogs {
     fn save_project(&mut self, _suggested_name: &str) -> Option<PathBuf> {
         self.save.clone()
     }
+
+    fn save_log(&mut self, _suggested_name: &str) -> Option<PathBuf> {
+        self.save.clone()
+    }
 }
 
 /// The Senzor window in a headless harness.

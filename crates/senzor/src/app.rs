@@ -443,6 +443,24 @@ impl SenzorApp {
         });
     }
 
+    /// Asks where to save the messages the log shows, then writes them as CSV.
+    fn export_log(&mut self) {
+        let Some(path) = self.dialogs.save_log("messages.csv") else {
+            return;
+        };
+        let log = self.ui.log_frozen.as_ref().unwrap_or(&self.state.log);
+        let shown: Vec<_> = log
+            .iter()
+            .filter(|e| self.ui.log_filter.matches(e))
+            .collect();
+        if let Err(error) = std::fs::write(&path, crate::log_view::csv(&shown)) {
+            self.ui.modal = Some(Modal::Error(format!(
+                "Could not save {}: {error}",
+                path.display()
+            )));
+        }
+    }
+
     /// Asks to confirm clearing the retained topics of the project's instances, or says there are
     /// none.
     fn ask_clear_retained(&mut self) {
@@ -575,6 +593,7 @@ impl SenzorApp {
                 self.apply(Action::Remove(removal));
                 self.select(None);
             }
+            Action::ExportLog => self.export_log(),
             Action::FindInLog => {
                 self.ui.bottom_tab = ui::BottomTab::Log;
                 self.ui.focus_log_filter = true;

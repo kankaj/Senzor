@@ -118,13 +118,13 @@ fields.co2 = { start = 1100 }
 
 This is how the meeting room sensors in the showcase start at 1100 instead of the template's 650, while keeping the template's `min`, `max` and `step`.
 
-With a `generator` key, the override replaces the whole field instead:
+With a `generator` key, the override replaces the generator and all its parameters instead. The field keeps the template's `unit` and `name` unless the override sets them too:
 
 ```toml
 fields.co2 = { generator = "constant", value = 2500 }
 ```
 
-An override must name a field the template has, and the merged result must be a valid generator.
+An override must name a field the template has, and the merged result must be a valid field.
 
 ## Where to go next
 

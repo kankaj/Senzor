@@ -10,6 +10,9 @@ is a table with a `generator` key and that generator's parameters:
 fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15 }
 ```
 
+The same table can also give the field a `unit` and a `name`; see
+[Fields](/docs/reference/project-file#fields).
+
 | Generator | Produces |
 | --- | --- |
 | [`constant`](#constant) | The same value on every tick. |

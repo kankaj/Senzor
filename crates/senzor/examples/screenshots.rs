@@ -52,8 +52,9 @@ const LOG_PANEL_GROWTH: f32 = 300.0;
 mod label {
     /// The instance the shots select in the device tree (also its ID).
     pub const INSTANCE: &str = "office-0";
-    /// The field whose pin box the `instance-pin` shot fills, in the instance view's table.
-    pub const PINNED_FIELD: &str = "co2";
+    /// The field whose pin box the `instance-pin` shot fills, in the instance view's table: the
+    /// `co2` field, shown by the name the showcase project gives it.
+    pub const PINNED_FIELD: &str = "CO2";
     /// The instance view's button that pins a field; every field row has one.
     pub const PIN: &str = "Pin";
     /// The left panel's tabs.

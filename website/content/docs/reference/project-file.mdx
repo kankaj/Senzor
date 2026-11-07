@@ -192,8 +192,9 @@ status messages and sets no Last Will. See [Availability and Last Will](/docs/co
 
 ### Fields
 
-`fields` maps a field name to a generator table. The field name becomes a template variable that
-holds the field's current value.
+`fields` maps a field name to a field table: a generator with its parameters, and optionally a unit
+and a readable name. The field name becomes a template variable that holds the field's current
+value.
 
 ```toml
 [[templates]]
@@ -202,9 +203,21 @@ messages = [{ topic = "door/{{ device_id }}", payload = '{"state": "{{ state }}"
 fields.state = { generator = "sequence", values = ["open", "closed"] }
 ```
 
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `generator` | string | required | The kind of generator. Its parameters go in the same table. See [Generators](/docs/reference/generators). |
+| `unit` | string | none | The unit of the value, as free text, such as `"ppm"`, `"°C"` or `"%"`. Must not be empty. |
+| `name` | string | none | A readable name for the field, such as `"CO2"` or `"Temperature"`. Must not be empty. |
+
+`unit` and `name` describe the value. They are not template variables, so topics and payloads
+cannot use them. The [built-in templates](/docs/reference/builtin-templates) set both:
+
+```toml
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15, unit = "ppm", name = "CO2" }
+```
+
 - A field name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
-- Every generator table needs a `generator` key and that generator's parameters. See
-  [Generators](/docs/reference/generators).
+- Any other key in a field table is an error, as a misspelt generator parameter is.
 
 ## Devices
 
@@ -261,17 +274,19 @@ client ID.
 the template.
 
 - **Without `generator`**, the keys are merged into the template's field. The generator stays the
-  same and only the listed parameters change:
+  same and only the listed keys change, `unit` and `name` included:
 
   ```toml
   fields.co2 = { start = 1200 }
   ```
 
-- **With `generator`**, the override replaces the field completely. Give every parameter the new
-  generator needs:
+- **With `generator`**, the override replaces the generator and all its parameters. Give every
+  parameter the new generator needs. The field keeps the template's `unit` and `name` unless the
+  override sets them too:
 
   ```toml
   fields.co2 = { generator = "constant", value = 2500 }
   ```
 
-The result must be a valid generator, with the same rules as in a template.
+The result must be a valid field, with the same rules as in a template. An override cannot remove
+the template's `unit` or `name`.

@@ -24,6 +24,8 @@ start = 650
 min = 400
 max = 2000
 step = 25
+unit = "ppm"
+name = "CO2"
 
 [templates.fields.temp]
 generator = "sine"
@@ -31,6 +33,8 @@ center = 22
 amplitude = 1.5
 period = "1h"
 noise = 0.1
+unit = "°C"
+name = "Temperature"
 
 [[templates]]
 id = "door"

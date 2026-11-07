@@ -3,6 +3,7 @@
 pub mod bottom;
 pub mod broker;
 pub mod device;
+pub mod help;
 pub mod instance;
 pub mod left_panel;
 pub mod modals;
@@ -93,6 +94,8 @@ pub enum Action {
     DeleteSelected,
     /// Show the message log and put the cursor in its filter.
     FindInLog,
+    /// Save the messages the log shows as a CSV file.
+    ExportLog,
     /// Open a project from the Recent menu.
     OpenRecent(PathBuf),
     /// Open this file, dropped on the window.
@@ -251,7 +254,9 @@ pub struct UiState {
     pub pending_rename: Option<Rename>,
     /// Pin box text per (instance ID, field name).
     pub pin_inputs: HashMap<(String, String), String>,
-    pub log_filter: String,
+    pub log_filter: crate::log_view::LogFilter,
+    /// The message the log shows in full, by its sequence number.
+    pub log_selected: Option<u64>,
     /// Which devices and instances the device tree shows.
     pub tree_filter: crate::tree::TreeFilter,
     /// The log filter takes the keyboard when it is next drawn.

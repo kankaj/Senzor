@@ -11,6 +11,8 @@ pub trait FileDialogs {
     fn open_project(&mut self) -> Option<PathBuf>;
     /// Where to save the project, or `None` if the user cancelled.
     fn save_project(&mut self, suggested_name: &str) -> Option<PathBuf>;
+    /// Where to save the exported messages, or `None` if the user cancelled.
+    fn save_log(&mut self, suggested_name: &str) -> Option<PathBuf>;
 }
 
 fn project_dialog() -> rfd::FileDialog {
@@ -27,5 +29,12 @@ impl FileDialogs for NativeDialogs {
 
     fn save_project(&mut self, suggested_name: &str) -> Option<PathBuf> {
         project_dialog().set_file_name(suggested_name).save_file()
+    }
+
+    fn save_log(&mut self, suggested_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .set_file_name(suggested_name)
+            .save_file()
     }
 }

@@ -57,9 +57,11 @@ With **MQTT version** set to **3.1.1** in the [broker settings](/docs/gui/broker
 
 ## Fields
 
-Each field has a name box, a generator picker, a **Remove** button and the generator's parameters. **Add field** adds a `random_walk` field named `field` (start 50, min 0, max 100, step 1).
+Each field has a name box, a generator picker, a **Remove** button, **Name** and **Unit**, and the generator's parameters. **Add field** adds a `random_walk` field named `field` (start 50, min 0, max 100, step 1).
 
 Field names work like the template ID: a rename applies when you press Enter or leave the box. Devices that override the field keep their overrides under the new name.
+
+**Name** is a readable name for the field, such as `CO2`, and **Unit** the unit of its values, such as `ppm`, `°C` or `%`. The [instance view](/docs/gui/instance-view#field-values) shows them; they do not change what instances publish. Leave a box empty for none: the instance view then shows the field's key and the value alone. They are saved as `name` and `unit` in the field's table ([project file reference](/docs/reference/project-file#fields)).
 
 The generator picker offers `constant`, `random_walk`, `sine`, `uniform` and `sequence`. Choosing another generator replaces the field's parameters with that generator's defaults. The editor shows these parameters:
 

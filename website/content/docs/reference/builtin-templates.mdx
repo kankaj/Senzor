@@ -18,11 +18,14 @@ count = 2
 All three publish every 10 seconds with QoS 0 and no retain flag, and use the availability topic
 `senzor/{{ device_id }}/status` with the payloads `online` and `offline`.
 
-| Template | Message topic | Payload | Field |
-| --- | --- | --- | --- |
-| `co2` | `senzor/{{ device_id }}/co2` | `co2` rounded to a whole number, and `ts` | `co2`: `random_walk` from 600, between 400 and 2000, step 15 |
-| `temperature` | `senzor/{{ device_id }}/temperature` | `temperature` rounded to 1 decimal, and `ts` | `temperature`: `sine` around 21.5, amplitude 1.5, period 24 h, noise 0.1 |
-| `humidity` | `senzor/{{ device_id }}/humidity` | `humidity` rounded to 1 decimal, and `ts` | `humidity`: `random_walk` from 45, between 30 and 70, step 0.5 |
+| Template | Message topic | Payload | Field | Unit and name |
+| --- | --- | --- | --- | --- |
+| `co2` | `senzor/{{ device_id }}/co2` | `co2` rounded to a whole number, and `ts` | `co2`: `random_walk` from 600, between 400 and 2000, step 15 | `ppm`, `CO2` |
+| `temperature` | `senzor/{{ device_id }}/temperature` | `temperature` rounded to 1 decimal, and `ts` | `temperature`: `sine` around 21.5, amplitude 1.5, period 24 h, noise 0.1 | `°C`, `Temperature` |
+| `humidity` | `senzor/{{ device_id }}/humidity` | `humidity` rounded to 1 decimal, and `ts` | `humidity`: `random_walk` from 45, between 30 and 70, step 0.5 | `%`, `Humidity` |
+
+The [unit and name](/docs/reference/project-file#fields) of a field describe its value; the
+payloads do not contain them.
 
 `ts` is the time of the tick in milliseconds since the Unix epoch (`now_ms`). The device above
 publishes, among others:

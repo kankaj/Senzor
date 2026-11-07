@@ -25,4 +25,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 senzor-testkit.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

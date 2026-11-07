@@ -60,6 +60,23 @@ mod tests {
     }
 
     #[test]
+    fn built_in_fields_have_a_unit_and_a_name() {
+        let labels: Vec<(&str, Option<&str>, Option<&str>)> = builtin_templates()
+            .iter()
+            .flat_map(|t| &t.fields)
+            .map(|(key, field)| (key.as_str(), field.unit.as_deref(), field.name.as_deref()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("co2", Some("ppm"), Some("CO2")),
+                ("temperature", Some("°C"), Some("Temperature")),
+                ("humidity", Some("%"), Some("Humidity")),
+            ]
+        );
+    }
+
+    #[test]
     fn every_built_in_template_compiles() {
         assert_eq!(builtin_compiled().len(), builtin_templates().len());
     }

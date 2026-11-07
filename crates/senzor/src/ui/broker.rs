@@ -5,7 +5,7 @@ use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec};
 
 use super::{
     Action, BoxOrRow, ClearRetained, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked,
-    duration_edit, errors_at, mqtt5_control, optional_text, replace_if_unchanged,
+    duration_edit, errors_at, help, mqtt5_control, optional_text, replace_if_unchanged,
     retained_topics_text,
 };
 use crate::buffers::Buffers;
@@ -110,21 +110,21 @@ pub fn show(
             egui::Grid::new("broker-form")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    let label = ui.label("Host");
+                    let label = help::label(ui, "Host", help::HOST);
                     checked(ui, doc, at, "host", |ui| {
                         ui.text_edit_singleline(&mut broker.host)
                             .labelled_by(label.id)
                     });
                     ui.end_row();
 
-                    let label = ui.label("Port");
+                    let label = help::label(ui, "Port", help::PORT);
                     checked(ui, doc, at, "port", |ui| {
                         ui.add(DragValue::new(&mut broker.port))
                             .labelled_by(label.id)
                     });
                     ui.end_row();
 
-                    let label = ui.label("MQTT version");
+                    let label = help::label(ui, "MQTT version", help::MQTT_VERSION);
                     egui::ComboBox::from_id_salt("broker-mqtt-version")
                         .selected_text(broker.mqtt_version.label())
                         .show_ui(ui, |ui| {
@@ -140,11 +140,11 @@ pub fn show(
                         .labelled_by(label.id);
                     ui.end_row();
 
-                    ui.label("Client ID prefix");
+                    help::label(ui, "Client ID prefix", help::CLIENT_ID_PREFIX);
                     ui.text_edit_singleline(&mut broker.client_id_prefix);
                     ui.end_row();
 
-                    let label = ui.label("Keep alive");
+                    let label = help::label(ui, "Keep alive", help::KEEP_ALIVE);
                     checked(ui, doc, at, "keep_alive", |ui| {
                         duration_edit(
                             ui,
@@ -156,7 +156,7 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    let label = ui.label("Session expiry");
+                    let label = help::label(ui, "Session expiry", help::SESSION_EXPIRY);
                     let mqtt5 = broker.mqtt_version == MqttVersion::V5;
                     let has_value = !broker.session_expiry.is_zero();
                     checked(ui, doc, at, "session_expiry", |ui| {
@@ -172,13 +172,13 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    ui.label("Username");
+                    help::label(ui, "Username", help::USERNAME);
                     checked(ui, doc, at, "username", |ui| {
                         optional_text(ui, &mut broker.username, "none")
                     });
                     ui.end_row();
 
-                    ui.label("Password");
+                    help::label(ui, "Password", help::PASSWORD);
                     checked(ui, doc, at, "password_env", |ui| {
                         ui.horizontal(|ui| {
                             let mut source = PasswordSource::of(&broker);
@@ -202,7 +202,7 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    ui.label("TLS");
+                    help::label(ui, "TLS", help::TLS);
                     let mut tls = broker.tls.is_some();
                     if ui.checkbox(&mut tls, "use TLS").changed() {
                         broker.tls = tls.then(TlsSpec::default);
@@ -233,7 +233,7 @@ pub fn show(
             egui::Grid::new("simulation-form")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    let label = ui.label("Seed");
+                    let label = help::label(ui, "Seed", help::SEED);
                     seed_edit(ui, &mut ui_state.buffers, &mut simulation.seed)
                         .labelled_by(label.id);
                     ui.end_row();

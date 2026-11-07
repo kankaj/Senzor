@@ -212,7 +212,7 @@ impl<'a> Ticker<'a> {
             sources: config
                 .fields
                 .iter()
-                .map(|(name, spec)| (name.clone(), spec.build()))
+                .map(|(name, field)| (name.clone(), field.generator.build()))
                 .collect(),
             pins: BTreeMap::new(),
             rng: instance_rng(config.seed, &config.id),

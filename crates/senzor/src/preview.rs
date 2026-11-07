@@ -44,7 +44,7 @@ pub fn preview(template: &TemplateSpec, project: &Project, now: SystemTime) -> P
         .iter()
         .map(|(name, spec)| {
             let spec = instance.and_then(|i| i.fields.get(name)).unwrap_or(spec);
-            (name.clone(), spec.initial_value())
+            (name.clone(), spec.generator.initial_value())
         })
         .collect();
     let ctx = tick_context(&base, &values, now, 0);

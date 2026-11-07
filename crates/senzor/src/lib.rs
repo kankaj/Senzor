@@ -7,6 +7,7 @@ mod edits;
 mod examples;
 mod format;
 pub mod icon;
+mod log_view;
 mod preview;
 mod rate;
 mod selection;

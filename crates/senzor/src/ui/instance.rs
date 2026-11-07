@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use eframe::egui::{self, Button, TextEdit};
 use senzor_core::engine::{Command, EngineState, InstanceState, Target};
+use senzor_core::project::FieldSpec;
 use senzor_core::value::Value;
 
 use super::{Action, ERROR, UiState, WARNING, kill_button, status_dot, stop_button};
@@ -130,28 +131,40 @@ fn show_fields(
             ui.strong("Pin to");
             ui.label("");
             ui.end_row();
+            let config = doc.validated().project.instance(id);
             for field in field_names(id, doc, instance) {
-                show_field(ui, id, &field, instance, ui_state, actions);
+                let spec = config.and_then(|c| c.fields.get(&field));
+                show_field(ui, id, &field, spec, instance, ui_state, actions);
                 ui.end_row();
             }
         });
 }
 
+/// One field's row. `spec` gives its name and unit; an orphan's fields have none.
 fn show_field(
     ui: &mut egui::Ui,
     id: &str,
     field: &str,
+    spec: Option<&FieldSpec>,
     instance: &InstanceState,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
     let running = instance.status.is_running();
-    let name = ui.label(field);
+    let display = spec.map_or(field, |s| s.display_name(field));
+    let name = ui.label(display);
+    if display != field {
+        name.clone().on_hover_text(format!("Field {field}"));
+    }
     let pinned = instance.pinned.contains(field);
-    let value = instance
-        .values
-        .get(field)
-        .map_or_else(|| "–".to_string(), format::value);
+    let unit = spec.and_then(|s| s.unit.as_deref());
+    let value = instance.values.get(field).map_or_else(
+        || "–".to_string(),
+        |v| match unit {
+            Some(unit) => format!("{} {unit}", format::value(v)),
+            None => format::value(v),
+        },
+    );
     ui.label(if pinned {
         format!("{value} (pinned)")
     } else {
@@ -272,6 +285,19 @@ template = "air"
         let mut h = harness(SRC, "office", running("office"));
         assert!(hover_shows(&mut h, "Stop", crate::ui::STOP_HINT));
         assert!(hover_shows(&mut h, "Kill", crate::ui::KILL_HINT));
+    }
+
+    #[test]
+    fn a_field_shows_its_name_and_its_value_with_the_unit() {
+        let src = SRC.replace(
+            r#"fields.co2 = { generator = "constant", value = 600 }"#,
+            r#"fields.co2 = { generator = "constant", value = 600, unit = "ppm", name = "CO2" }"#,
+        );
+        let mut on = running("office");
+        on.values.insert("co2".into(), Value::Number(600.0));
+        let h = harness(&src, "office", on);
+        assert!(h.query_by_label("CO2").is_some());
+        assert!(h.query_by_label("600 ppm").is_some());
     }
 
     #[test]

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::error::ProjectError;
+use super::field::FieldSpec;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
-use crate::generator::GeneratorSpec;
 use crate::render::{InstanceTemplates, TemplateError};
 use crate::value::Value;
 
@@ -65,8 +65,9 @@ pub struct InstanceConfig {
     pub qos: u8,
     pub retain: bool,
     pub interval: Duration,
-    /// Template fields with the device's overrides applied.
-    pub fields: BTreeMap<String, GeneratorSpec>,
+    /// Template fields with the device's overrides applied: each field's generator, unit and
+    /// readable name.
+    pub fields: BTreeMap<String, FieldSpec>,
     pub params: BTreeMap<String, Value>,
     pub seed: Option<u64>,
 }

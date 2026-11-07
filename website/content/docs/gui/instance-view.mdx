@@ -52,7 +52,7 @@ A stopped or failed instance has **Start** instead.
 
 ## Field values
 
-The table lists the template's fields. **Value** is the value of the instance's last tick, or `–` before the first one. Whole numbers show as they are and other numbers with two decimals; this rounding is only for display and does not change what the instance publishes.
+The table lists the template's fields, each under its name when the template gives it one (`CO2` for the built-in `co2` template; hover over it for the field's key). **Value** is the value of the instance's last tick, or `–` before the first one, followed by the field's unit when it has one, such as `634.40 ppm`. Whole numbers show as they are and other numbers with two decimals; this rounding is only for display and does not change what the instance publishes.
 
 ## Pinning a value
 
@@ -61,7 +61,7 @@ A pin replaces a field's generated value with a value you choose, so you can mak
 1. Type the value into the field's **Pin to** box, for example `1800`.
 2. Click **Pin**.
 
-The value column now shows `1800 (pinned)`, and from the next tick the instance publishes 1800 for that field instead of a generated value. Click **Unpin** to hand the field back to its generator.
+The value column now shows `1800 (pinned)`, with the field's unit after the number when it has one, such as `1800 ppm (pinned)`, and from the next tick the instance publishes 1800 for that field instead of a generated value. Click **Unpin** to hand the field back to its generator.
 
 Senzor reads what you type as a number if it can (`1800`, `22.5`), then as `true` or `false`, and otherwise as text, as typed (`open`). So `007` is pinned as the number 7.
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::error::{Location, ProjectError, line_column};
-use crate::generator::GeneratorSpec;
+use super::field::FieldSpec;
 use crate::value::Value;
 
 /// The project file as written on disk. The GUI edits this; `validate` turns it into a `Project`.
@@ -131,7 +131,7 @@ pub struct TemplateSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub availability: Option<AvailabilitySpec>,
     pub messages: Vec<MessageSpec>,
-    pub fields: BTreeMap<String, GeneratorSpec>,
+    pub fields: BTreeMap<String, FieldSpec>,
 }
 
 /// The publish interval of a template that sets none.
@@ -221,7 +221,8 @@ pub struct DeviceSpec {
         with = "humantime_serde"
     )]
     pub interval: Option<Duration>,
-    /// Partial generator tables merged onto the template's fields (see `validate`).
+    /// Partial field tables (generator keys, `unit`, `name`) merged onto the template's fields
+    /// (see `validate`).
     #[cfg_attr(
         feature = "schema",
         schemars(with = "BTreeMap<String, crate::schema::TomlTable>")
@@ -289,6 +290,7 @@ impl ProjectFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generator::GeneratorSpec;
 
     const EXAMPLE: &str = include_str!("../../tests/fixtures/example.toml");
 
@@ -303,7 +305,7 @@ mod tests {
         assert_eq!(template.interval, Duration::from_secs(10));
         assert_eq!(template.messages.len(), 1);
         assert!(matches!(
-            template.fields["co2"],
+            template.fields["co2"].generator,
             GeneratorSpec::RandomWalk { start: 600.0, .. }
         ));
         let device = &file.devices[0];
@@ -366,6 +368,67 @@ template = "t"
         let file = ProjectFile::parse(EXAMPLE).unwrap();
         let written = file.to_toml_string();
         assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+    }
+
+    #[test]
+    fn field_unit_and_name_round_trip_and_are_omitted_when_unset() {
+        let src = r#"
+[[templates]]
+id = "t"
+messages = [{ topic = "a", payload = "b" }]
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15, unit = "ppm", name = "CO2" }
+fields.v = { generator = "constant", value = 1 }
+"#;
+        let file = ProjectFile::parse(src).unwrap();
+        let co2 = &file.templates[0].fields["co2"];
+        assert_eq!(co2.unit.as_deref(), Some("ppm"));
+        assert_eq!(co2.name.as_deref(), Some("CO2"));
+        let written = file.to_toml_string();
+        assert!(
+            written.contains("step = 15.0\nunit = \"ppm\"\nname = \"CO2\"\n"),
+            "{written}"
+        );
+        assert_eq!(written.matches("unit").count(), 1, "{written}");
+        assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+    }
+
+    /// A field's problems point where they did before fields took a unit and a name.
+    #[test]
+    fn field_problems_point_at_the_field_or_its_value() {
+        let error = |field: &str| {
+            let src = format!("[[templates]]\nid = \"t\"\nmessages = []\nfields.co2 = {field}\n");
+            let errors = ProjectFile::parse(&src).unwrap_err();
+            assert_eq!(errors.len(), 1);
+            (errors[0].location.clone(), errors[0].message.clone())
+        };
+        let at = |column| Location::Toml { line: 4, column };
+        assert_eq!(
+            error("{ generator = \"uniform\", min = 1, max = 2, stepp = 1 }"),
+            (
+                at(14),
+                "unknown field `stepp`, expected one of `min`, `max`, `noise`".into()
+            )
+        );
+        assert_eq!(
+            error("{ min = 1, unit = \"ppm\" }"),
+            (at(14), "missing field `generator`".into())
+        );
+        assert_eq!(
+            error("{ generator = \"foo\" }"),
+            (
+                at(28),
+                "unknown variant `foo`, expected one of `constant`, `random_walk`, `sine`, \
+                 `uniform`, `sequence`"
+                    .into()
+            )
+        );
+        assert_eq!(
+            error("{ generator = \"uniform\", min = 1, max = 2, unit = 5 }"),
+            (
+                at(64),
+                "invalid type: integer `5`, expected a string".into()
+            )
+        );
     }
 
     #[test]

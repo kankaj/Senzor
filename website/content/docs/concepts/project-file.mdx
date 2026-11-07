@@ -25,7 +25,7 @@ The built-in templates `co2`, `temperature` and `humidity` need no entry: a devi
 
 Durations such as `interval`, `period` and `keep_alive` are strings with a unit: `"500ms"`, `"10s"`, `"1h"`.
 
-The showcase writes messages and fields as tables (`[[templates.messages]]`, `[templates.fields.co2]`). TOML also allows the inline form, such as `fields.co2 = { generator = "random_walk", start = 650, min = 400, max = 2000, step = 25 }`. Both mean the same to Senzor.
+The showcase writes messages and fields as tables (`[[templates.messages]]`, `[templates.fields.co2]`). TOML also allows the inline form, such as `fields.co2 = { generator = "random_walk", start = 650, min = 400, max = 2000, step = 25, unit = "ppm", name = "CO2" }`. Both mean the same to Senzor.
 
 ## Two kinds of errors
 

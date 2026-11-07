@@ -5,11 +5,11 @@ use std::time::SystemTime;
 use super::broker::{EnvLookup, broker_config, needs_mqtt5, resolve_broker, whole_seconds};
 use super::builtin::{builtin_compiled, builtin_templates, is_builtin};
 use super::error::ProjectError;
+use super::field::FieldSpec;
 use super::file::{
     BrokerSpec, DeviceSpec, MqttVersion, ProjectFile, TemplateSpec, default_instance_id_pattern,
 };
 use super::model::{DeviceConfig, InstanceConfig, Project, SharedTemplates, Validated};
-use crate::generator::GeneratorSpec;
 use crate::render::{
     CompiledTemplate, TemplateError, base_context, instance_id_context, is_reserved, tick_context,
 };
@@ -207,12 +207,12 @@ fn check_template(
     if template.interval.is_zero() {
         problems.push(at("interval", "interval must be greater than 0".into()));
     }
-    for (name, generator) in &template.fields {
+    for (name, spec) in &template.fields {
         let field = format!("fields.{name}");
         if is_reserved(name) {
             problems.push(at(&field, format!("field `{name}` uses a reserved name")));
         }
-        if let Err(e) = generator.validate() {
+        for e in spec.problems() {
             problems.push(at(&field, format!("field `{name}`: {e}")));
         }
     }
@@ -381,12 +381,13 @@ fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<Project
     problems
 }
 
-/// Applies the device's field overrides to `template`'s fields: with `generator` the override
-/// replaces the field, otherwise keys merge.
+/// Applies the device's field overrides to `template`'s fields. Keys merge, except that an
+/// override with `generator` replaces the generator and all its keys; the field's `unit` and
+/// `name` stay unless the override sets them too.
 fn merge_fields(
     spec: &DeviceSpec,
     template: &TemplateSpec,
-) -> Result<BTreeMap<String, GeneratorSpec>, Vec<ProjectError>> {
+) -> Result<BTreeMap<String, FieldSpec>, Vec<ProjectError>> {
     let at = |name: &str, message: String| {
         ProjectError::device(&spec.id, message).at(format!("fields.{name}"))
     };
@@ -397,23 +398,25 @@ fn merge_fields(
             problems.push(at(name, format!("override of unknown field `{name}`")));
             continue;
         };
-        let merged = if table.contains_key("generator") {
-            table.clone()
-        } else {
-            let mut merged =
-                toml::Table::try_from(base).expect("generator spec serializes to a table");
-            merged.extend(table.clone());
-            merged
-        };
-        let parsed = toml::Value::Table(merged)
-            .try_into::<GeneratorSpec>()
-            .map_err(|e| e.message().to_string())
-            .and_then(|spec| spec.validate().map(|()| spec));
-        match parsed {
-            Ok(spec) => {
-                fields.insert(name.clone(), spec);
+        let mut merged = toml::Table::try_from(base).expect("a field serializes to a table");
+        if table.contains_key("generator") {
+            merged.retain(|key, _| FieldSpec::LABEL_KEYS.contains(&key));
+        }
+        merged.extend(table.clone());
+        match toml::Value::Table(merged).try_into::<FieldSpec>() {
+            Ok(field) => {
+                let field_problems = field.problems();
+                if field_problems.is_empty() {
+                    fields.insert(name.clone(), field);
+                }
+                for e in field_problems {
+                    problems.push(at(name, format!("field `{name}` override: {e}")));
+                }
             }
-            Err(e) => problems.push(at(name, format!("field `{name}` override: {e}"))),
+            Err(e) => problems.push(at(
+                name,
+                format!("field `{name}` override: {}", e.message()),
+            )),
         }
     }
     if problems.is_empty() {
@@ -436,7 +439,7 @@ fn sample_render(instance: &InstanceConfig) -> Result<(), TemplateError> {
     let values: BTreeMap<String, Value> = instance
         .fields
         .iter()
-        .map(|(name, g)| (name.clone(), g.initial_value()))
+        .map(|(name, field)| (name.clone(), field.generator.initial_value()))
         .collect();
     let ctx = tick_context(&base, &values, SystemTime::now(), 0);
     for rendered in templates.render_messages_located(&ctx) {
@@ -448,6 +451,7 @@ fn sample_render(instance: &InstanceConfig) -> Result<(), TemplateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generator::GeneratorSpec;
     use crate::project::error::Location;
     use std::time::Duration;
 
@@ -585,7 +589,7 @@ params = {{ room = \"a\" }}
         let validated = validate_device("fields.co2 = { start = 1200 }\n");
         let field = &validated.project.instance("d").unwrap().fields["co2"];
         assert_eq!(
-            *field,
+            field.generator,
             GeneratorSpec::RandomWalk {
                 start: 1200.0,
                 min: 400.0,
@@ -602,11 +606,91 @@ params = {{ room = \"a\" }}
             validate_device("fields.co2 = { generator = \"constant\", value = 2500 }\n");
         let field = &validated.project.instance("d").unwrap().fields["co2"];
         assert_eq!(
-            *field,
+            field.generator,
             GeneratorSpec::Constant {
                 value: Value::Number(2500.0),
                 noise: None
             }
+        );
+    }
+
+    /// Like [`validate_device`], with the template's `co2` field labelled `ppm` and `CO2`.
+    fn validate_labelled_device(lines: &str) -> Validated {
+        let template =
+            TEMPLATE.replace("step = 15 }", "step = 15, unit = \"ppm\", name = \"CO2\" }");
+        assert_ne!(template, TEMPLATE);
+        validate(&format!(
+            "{template}\n[[devices]]\nid = \"d\"\ntemplate = \"air\"\nparams = {{ room = \"a\" }}\n{lines}"
+        ))
+    }
+
+    /// The unit and name of instance `d`'s field `co2`.
+    fn labels(validated: &Validated) -> (Option<&str>, Option<&str>) {
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(validated)
+        );
+        let field = &validated.project.instance("d").unwrap().fields["co2"];
+        (field.unit.as_deref(), field.name.as_deref())
+    }
+
+    #[test]
+    fn an_instance_has_its_fields_unit_and_name() {
+        let validated = validate_labelled_device("");
+        assert_eq!(labels(&validated), (Some("ppm"), Some("CO2")));
+        assert_eq!(labels(&validate_device("")), (None, None));
+    }
+
+    #[test]
+    fn an_override_can_set_the_unit_and_name() {
+        let validated = validate_labelled_device("fields.co2 = { unit = \"mg/m³\" }\n");
+        assert_eq!(labels(&validated), (Some("mg/m³"), Some("CO2")));
+        let validated = validate_device("fields.co2 = { name = \"Carbon dioxide\" }\n");
+        assert_eq!(labels(&validated), (None, Some("Carbon dioxide")));
+    }
+
+    #[test]
+    fn an_override_with_a_generator_keeps_the_unit_and_name() {
+        let validated =
+            validate_labelled_device("fields.co2 = { generator = \"constant\", value = 2500 }\n");
+        assert_eq!(labels(&validated), (Some("ppm"), Some("CO2")));
+        let validated = validate_labelled_device(
+            "fields.co2 = { generator = \"constant\", value = 2500, name = \"Fixed CO2\" }\n",
+        );
+        assert_eq!(labels(&validated), (Some("ppm"), Some("Fixed CO2")));
+    }
+
+    #[test]
+    fn an_empty_unit_or_name_is_a_problem() {
+        let src = "[[templates]]\nid = \"t\"\nmessages = [{ topic = \"a\", payload = \"b\" }]\n\
+                   fields.v = { generator = \"constant\", value = 1, unit = \"\", name = \"\" }\n";
+        let validated = validate(src);
+        assert_eq!(
+            error_strings(&validated),
+            [
+                "template `t`: field `v`: unit must not be empty",
+                "template `t`: field `v`: name must not be empty",
+            ]
+        );
+        assert_eq!(fields_of(&validated), [Some("fields.v"), Some("fields.v")]);
+
+        let validated = validate_labelled_device("fields.co2 = { unit = \"\" }\n");
+        assert_eq!(
+            error_strings(&validated),
+            ["device `d`: field `co2` override: unit must not be empty"]
+        );
+        assert_eq!(fields_of(&validated), [Some("fields.co2")]);
+    }
+
+    #[test]
+    fn an_override_with_an_unknown_key_names_it() {
+        let validated = validate_labelled_device("fields.co2 = { units = \"x\" }\n");
+        let errors = error_strings(&validated);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].starts_with("device `d`: field `co2` override: unknown field `units`"),
+            "{errors:?}"
         );
     }
 

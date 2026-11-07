@@ -91,6 +91,27 @@ fn clear_retained_messages_empties_the_projects_retained_topics() {
     assert!(after.iter().all(|m| !m.retain), "{after:?}");
 }
 
+#[test]
+fn export_saves_the_logged_messages_as_csv() {
+    let port = start_broker();
+    let path = write_project("export-log", &project(port, true));
+    let csv = test_dir("export-log").join("messages.csv");
+    let mut harness = app(Some(path), FakeDialogs::saving(csv.clone()));
+    wait_until(&mut harness, "a message logged", |h| {
+        !h.state().engine_state().log.is_empty()
+    });
+    click(&mut harness, "Export…");
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next(),
+        Some("time,instance,topic,qos,retained,payload")
+    );
+    let first = lines.next().unwrap();
+    assert!(first.contains(",gui/office-"), "{first}");
+    assert!(first.ends_with(",0,false,600"), "{first}");
+}
+
 /// Asks to close the window, as its close button does.
 fn request_close(harness: &mut App) {
     harness

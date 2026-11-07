@@ -95,6 +95,8 @@ The middle of the window shows what you selected on the left:
 
 With nothing selected it says **Select a device, an instance or a template on the left.**
 
+In the editors and the project settings, a `?` after a setting's name explains the setting when you hover over it; click it to open the part of this documentation that covers it.
+
 A new project that is still blank shows the welcome screen instead. That is how the window starts without a file, and what **New** gives. **Welcome to Senzor** offers **Add your first device**, **Open a project** and **Set the broker**, the [examples](/docs/gui/files#examples), your [recent projects](/docs/gui/files#recent-projects), and links to the **Quick start guide** and this documentation. The welcome screen goes away once the project has a device or a template, a file, or unsaved changes.
 
 ## Bottom panel
@@ -105,17 +107,22 @@ The bottom panel has two tabs: **Message log** and **Problems**.
 
 ![The message log listing the messages the showcase devices published](/screenshots/message-log.png)
 
-The message log lists the messages your instances publish, newest at the bottom. Each row shows:
+The message log lists the messages your instances publish, newest at the bottom, in columns under a header row:
 
-- The time in UTC with milliseconds, for example `14:02:11.123Z`.
-- The instance ID.
-- The topic.
-- The payload. Line breaks and runs of spaces become one space, and a payload longer than 200 characters is cut off with `…`.
+- **Time**: in UTC with milliseconds, for example `14:02:11.123Z`.
+- **Instance**: the instance ID.
+- **Topic**: a topic longer than 40 characters is cut off with `…`.
+- **QoS**: 0, 1 or 2, followed by `R` when the message was retained.
+- **Payload**: line breaks and runs of spaces become one space, and a payload longer than 200 characters is cut off with `…`.
 
 The log keeps the last 1,000 messages of all instances together. It shows the messages your templates define, not the `online` and `offline` availability messages. While you are scrolled to the bottom, the list follows new messages.
 
 - **Filter** shows only the rows whose topic contains the text you type. The match is case-sensitive. Ctrl+F shows the message log and puts the cursor in the box.
+- Click an instance ID in the log to show only that instance's messages. A button with the instance ID and `✕` appears next to **Filter**; click it to show every instance again.
 - **Pause** freezes the list so you can read it while the devices keep publishing. **Resume** shows the live log again.
+- **Export…** saves the messages the log shows, after **Filter** and the instance, as a CSV file with the columns `time`, `instance`, `topic`, `qos`, `retained` and `payload`. The time includes the date, for example `2026-11-07T18:02:51.079Z`, and the payload is saved whole.
+
+Click a message's time, topic or payload to see it in full on the right: **Message** lists its time, instance, topic, QoS, whether it was retained and its MQTT 5 properties, and **Payload** shows the payload whole, with JSON indented. **Copy payload** copies the payload as it was sent. Click the message again, or the `✕` next to **Message**, to close it.
 
 ### Problems
 

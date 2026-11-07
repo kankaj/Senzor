@@ -50,7 +50,7 @@ pub fn add_template(file: &mut ProjectFile) -> usize {
         )],
         fields: BTreeMap::from([(
             "value".to_string(),
-            default_generator(GeneratorKind::RandomWalk),
+            default_generator(GeneratorKind::RandomWalk).into(),
         )]),
     });
     file.templates.len() - 1
@@ -341,7 +341,8 @@ mod tests {
                 min: 0.0,
                 max: 1.0,
                 noise: Some(DEFAULT_NOISE),
-            },
+            }
+            .into(),
         );
         assert_eq!(template.messages[1].topic, template.messages[0].topic);
         let id = template.id.clone();

@@ -35,6 +35,8 @@ Generated numbers usually have many decimals, so payloads format them with Jinja
 
 [Generators](/docs/reference/generators) lists every parameter and the rules Senzor checks.
 
+A field can also have a `unit`, such as `"ppm"`, and a readable `name`, such as `"CO2"`. They describe the value and do not change it; see [Fields](/docs/reference/project-file#fields).
+
 ## Pins
 
 In the GUI you can pin a field of a running instance to a value ([Instance view](/docs/gui/instance-view) shows how); an AI agent can do the same with the MCP `pin` tool. While a field is pinned:

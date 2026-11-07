@@ -257,6 +257,55 @@ async fn set_broker_sets_the_mqtt_version_and_defaults_it_to_5() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn put_template_keeps_field_units_and_names() {
+    let agent = Agent::with_project("field-labels").await;
+    let tools = agent.client.list_all_tools().await.unwrap();
+    let put_template = tools.iter().find(|t| t.name == "put_template").unwrap();
+    let schema = serde_json::to_string(&put_template.input_schema).unwrap();
+    assert!(schema.contains("\"unit\""), "unit missing in: {schema}");
+    let description = put_template.description.as_deref().unwrap_or_default();
+    assert!(description.contains("unit"), "{description}");
+
+    let out = agent
+        .ok(
+            "put_template",
+            json!({
+                "id": "labelled",
+                "messages": [{"topic": "a/{{ device_id }}", "payload": "{{ co2 }}"}],
+                "fields": {"co2": {
+                    "generator": "uniform", "min": 400, "max": 800, "unit": "ppm", "name": "CO2"
+                }}
+            }),
+        )
+        .await;
+    assert_eq!(out["problems"], json!([]));
+    let toml = agent.ok("get_project", json!({})).await["toml"].clone();
+    let file = ProjectFile::parse(toml.as_str().unwrap()).unwrap();
+    let field = &file
+        .templates
+        .iter()
+        .find(|t| t.id == "labelled")
+        .unwrap()
+        .fields["co2"];
+    assert_eq!(field.unit.as_deref(), Some("ppm"));
+    assert_eq!(field.name.as_deref(), Some("CO2"));
+
+    let out = agent
+        .ok(
+            "put_template",
+            json!({
+                "id": "labelled",
+                "messages": [{"topic": "a/{{ device_id }}", "payload": "{{ co2 }}"}],
+                "fields": {"co2": {"generator": "uniform", "min": 400, "max": 800, "unit": ""}}
+            }),
+        )
+        .await;
+    let problems = out["problems"].to_string();
+    assert!(problems.contains("unit must not be empty"), "{problems}");
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn put_template_stores_mqtt5_properties_and_reports_them_on_3_1_1() {
     let agent = Agent::with_project("template-properties").await;
     let template = json!({

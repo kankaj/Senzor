@@ -94,7 +94,7 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `qos must be 0, 1 or 2, got <n>` | Set `qos` to 0, 1 or 2. |
 | `interval must be greater than 0` | `interval` is `"0s"`. |
 | `` field `<name>` uses a reserved name `` | Rename the field; see [reserved names](/docs/reference/template-variables#reserved-names). |
-| `` field `<name>`: <problem> `` | The field's generator breaks a rule; see [Generator problems](#generator-problems). |
+| `` field `<name>`: <problem> `` | The field's generator breaks a rule, or its unit or name is empty; see [Field problems](#field-problems). |
 | `syntax error: <details> (in <template>:<line>)` | A topic, payload or user property is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload`, `messages[<n>].user_properties.<name>` or `availability.topic`, with messages counted from 1. |
 | `messages[<n>].message_expiry must be whole seconds, got <duration>` | Write the expiry in whole seconds, such as `"60s"`. |
 | `messages[<n>].message_expiry must be at least 1s` | Remove `message_expiry` for no expiry, or set `"1s"` or more. |
@@ -108,14 +108,17 @@ A syntax error is reported for the first broken template string only. For exampl
 `{{ v ` without the closing braces gives
 `syntax error: unexpected end of input, expected end of variable block (in messages[1].payload:1)`.
 
-### Generator problems
+### Field problems
 
 Reported as `` field `<name>`: <problem> `` in a template, and as
 `` field `<name>` override: <problem> `` in a device. See [Generators](/docs/reference/generators)
-for the parameters.
+for the parameters and [Fields](/docs/reference/project-file#fields) for `unit` and `name`. A field
+can have one generator problem, and an empty unit or name on top of it.
 
 | Problem | Meaning and fix |
 | --- | --- |
+| `unit must not be empty` | The field has `unit = ""`. Remove `unit`, or give it a value such as `"ppm"`. |
+| `name must not be empty` | The field has `name = ""`. Remove `name`, or give it a value such as `"CO2"`. |
 | `numbers must be finite` | A parameter or value is `nan`, `inf` or `-inf`. |
 | `noise must be greater than 0` | Remove `noise` or make it positive. |
 | `noise requires numeric values` | `noise` on a `constant` or `sequence` whose values are not all numbers. |
@@ -156,7 +159,7 @@ It reports the first failure.
 | Message | Meaning and fix |
 | --- | --- |
 | `` override of unknown field `<name>` `` | The device overrides a field its template does not have. Check the field name. |
-| `` field `<name>` override: <problem> `` | The field after the override is not a valid generator. `<problem>` is one of the [generator problems](#generator-problems) or a schema error such as `` missing field `max` `` (an override with `generator` replaces the whole field, so it needs every parameter) or `` unknown field `stepp`, expected one of `start`, `min`, `max`, `step`, `noise` ``. |
+| `` field `<name>` override: <problem> `` | The field after the override is not valid. `<problem>` is one of the [field problems](#field-problems) or a schema error such as `` missing field `max` `` (an override with `generator` replaces the whole generator, so it needs every parameter) or `` unknown field `stepp`, expected one of `start`, `min`, `max`, `step`, `noise` ``. |
 
 See [Field overrides](/docs/reference/project-file#field-overrides) for how overrides merge.
 

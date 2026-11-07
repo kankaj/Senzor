@@ -7,7 +7,7 @@ use senzor_core::value::Value;
 
 use super::{
     Action, BoxOrRow, ERROR, FIX_PROBLEMS_FIRST, ParsedEdit, UiState, checked, duration_edit,
-    errors_at, name_edit, replace_if_unchanged, shortcuts, value_edit,
+    errors_at, help, name_edit, replace_if_unchanged, shortcuts, value_edit,
 };
 use crate::document::Document;
 use crate::edits::{
@@ -70,7 +70,7 @@ pub fn show(
     egui::Grid::new("device-form")
         .num_columns(2)
         .show(ui, |ui| {
-            let label = ui.label("ID");
+            let label = help::label(ui, "ID", help::DEVICE_ID);
             checked(ui, doc, at, "id", |ui| {
                 let (response, rename) = name_edit(
                     ui,
@@ -89,7 +89,7 @@ pub fn show(
             });
             ui.end_row();
 
-            ui.label("Template");
+            help::label(ui, "Template", help::TEMPLATE);
             checked(ui, doc, at, "template", |ui| {
                 egui::ComboBox::from_id_salt("device-template")
                     .selected_text(device.template.clone())
@@ -102,7 +102,7 @@ pub fn show(
             });
             ui.end_row();
 
-            let label = ui.label("Count");
+            let label = help::label(ui, "Count", help::COUNT);
             let mut count = device.count;
             checked(ui, doc, at, "count", |ui| {
                 ui.add(DragValue::new(&mut count).range(1..=10_000))
@@ -111,7 +111,7 @@ pub fn show(
             set_count(&mut device, count);
             ui.end_row();
 
-            let label = ui.label("Instance IDs");
+            let label = help::label(ui, "Instance IDs", help::INSTANCE_IDS);
             checked(ui, doc, at, "instance_id", |ui| {
                 ui.horizontal(|ui| {
                     let mut custom = device.instance_id.is_some();
@@ -147,11 +147,11 @@ pub fn show(
             });
             ui.end_row();
 
-            ui.label("Autostart");
+            help::label(ui, "Autostart", help::AUTOSTART);
             ui.checkbox(&mut device.autostart, "start when the project opens");
             ui.end_row();
 
-            let label = ui.label("Interval");
+            let label = help::label(ui, "Interval", help::DEVICE_INTERVAL);
             checked(ui, doc, at, "interval", |ui| {
                 ui.horizontal(|ui| {
                     let mut custom = device.interval.is_some();
@@ -215,7 +215,7 @@ fn params(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    ui.strong("Params");
+    help::heading(ui, "Params", help::PARAMS);
     let file = doc.file();
     let at = &Location::Device {
         id: file.devices[index].id.clone(),
@@ -272,8 +272,8 @@ fn overrides(
     let at = &Location::Device {
         id: doc.file().devices[index].id.clone(),
     };
-    ui.strong("Field overrides");
-    ui.weak("Keys are merged onto the template's field; with `generator` they replace it.");
+    help::heading(ui, "Field overrides", help::FIELD_OVERRIDES);
+    ui.weak("Keys are merged onto the template's field; with `generator` they replace its generator and parameters.");
     let fields: Vec<String> = find_template(doc.file(), &device.template)
         .map(|t| t.fields.keys().cloned().collect())
         .unwrap_or_default();

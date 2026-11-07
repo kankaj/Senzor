@@ -432,7 +432,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "Add a device, or replace the device with the same id. Takes the keys of a [[devices]] table (id, template, count, instance_id, params, autostart, interval, fields)."
+        description = "Add a device, or replace the device with the same id. Takes the keys of a [[devices]] table (id, template, count, instance_id, params, autostart, interval, fields). A field override sets some of the field's keys, unit or name; with generator it replaces the generator and keeps the unit and name it does not set."
     )]
     async fn put_device(
         &self,
@@ -462,7 +462,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "Add a template to the project, or replace the project template with the same id. Takes the keys of a [[templates]] table (id, interval, qos, retain, availability, messages, fields). Built-in ids are refused."
+        description = "Add a template to the project, or replace the project template with the same id. Takes the keys of a [[templates]] table (id, interval, qos, retain, availability, messages, fields). Each field is its generator table and may add a unit and a readable name, e.g. {\"generator\": \"uniform\", \"min\": 400, \"max\": 800, \"unit\": \"ppm\", \"name\": \"CO2\"}. Built-in ids are refused."
     )]
     async fn put_template(
         &self,

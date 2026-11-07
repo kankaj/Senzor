@@ -58,7 +58,7 @@ fn instance_topics(instance: &InstanceConfig) -> Vec<String> {
         let values: BTreeMap<String, Value> = instance
             .fields
             .iter()
-            .map(|(name, generator)| (name.clone(), generator.initial_value()))
+            .map(|(name, field)| (name.clone(), field.generator.initial_value()))
             .collect();
         let ctx = tick_context(&base, &values, SystemTime::now(), 0);
         topics.extend(instance.templates.render_topics(&ctx).into_iter().flatten());

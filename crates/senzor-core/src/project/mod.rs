@@ -3,6 +3,7 @@ pub mod builtin;
 pub mod document;
 pub mod edit;
 pub mod error;
+mod field;
 pub mod file;
 pub mod model;
 mod resolve;
@@ -11,6 +12,7 @@ pub(crate) use broker::mqtt_seconds;
 pub use broker::{EnvLookup, NEEDS_MQTT5};
 pub use document::{Document, OpenError};
 pub use error::{Location, ProjectError};
+pub use field::FieldSpec;
 pub use file::{
     AvailabilitySpec, BrokerSpec, DeviceSpec, MessageSpec, MqttVersion, ProjectFile,
     SimulationSpec, TemplateSpec, TlsSpec,

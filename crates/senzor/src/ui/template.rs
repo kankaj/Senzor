@@ -4,10 +4,10 @@ use std::time::SystemTime;
 use eframe::egui::{self, DragValue, RichText, TextEdit};
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
-use senzor_core::project::{Location, MessageSpec, MqttVersion, TemplateSpec};
+use senzor_core::project::{FieldSpec, Location, MessageSpec, MqttVersion, TemplateSpec};
 
 use super::{
-    Action, BoxOrRow, ERROR, ParsedEdit, UiState, WARNING, checked, duration_edit, errors_at,
+    Action, BoxOrRow, ERROR, ParsedEdit, UiState, WARNING, checked, duration_edit, errors_at, help,
     mqtt5_control, name_edit, optional_duration_edit, optional_text, replace_if_unchanged,
     shortcuts, value_edit,
 };
@@ -196,7 +196,7 @@ fn settings_grid(
     egui::Grid::new("template-form")
         .num_columns(2)
         .show(ui, |ui| {
-            let label = ui.label("ID");
+            let label = help::label(ui, "ID", help::TEMPLATE_ID);
             cell(ui, project, "id", |ui| {
                 let id_box = name_or_label(
                     ui,
@@ -218,7 +218,7 @@ fn settings_grid(
             });
             ui.end_row();
 
-            let label = ui.label("Interval");
+            let label = help::label(ui, "Interval", help::TEMPLATE_INTERVAL);
             cell(ui, project, "interval", |ui| {
                 duration_edit(
                     ui,
@@ -230,7 +230,7 @@ fn settings_grid(
             });
             ui.end_row();
 
-            ui.label("QoS");
+            help::label(ui, "QoS", help::QOS);
             cell(ui, project, "qos", |ui| {
                 egui::ComboBox::from_id_salt(format!("{key}/qos"))
                     .selected_text(template.qos.to_string())
@@ -243,11 +243,11 @@ fn settings_grid(
             });
             ui.end_row();
 
-            ui.label("Retain");
+            help::label(ui, "Retain", help::RETAIN);
             ui.checkbox(&mut template.retain, "retain data messages");
             ui.end_row();
 
-            ui.label("Availability");
+            help::label(ui, "Availability", help::AVAILABILITY);
             let mut enabled = template.availability.is_some();
             if ui
                 .checkbox(&mut enabled, "online/offline topic with Last Will")
@@ -272,7 +272,7 @@ fn settings_grid(
                     });
                     ui.end_row();
                 }
-                let label = ui.label("  Will delay");
+                let label = help::label(ui, "  Will delay", help::WILL_DELAY);
                 let has_value = availability.will_delay.is_some();
                 cell(ui, project, "availability.will_delay", |ui| {
                     mqtt5_control(ui, mqtt5, has_value, |ui| {
@@ -310,7 +310,7 @@ fn messages_editor(
             });
             // Problems name messages from 1.
             let field = |name: &str| format!("messages[{}].{name}", i + 1);
-            let label = ui.label("Topic");
+            let label = help::label(ui, "Topic", help::TOPIC);
             cell(ui, project, &field("topic"), |ui| {
                 ui.add(
                     TextEdit::singleline(&mut message.topic)
@@ -319,7 +319,7 @@ fn messages_editor(
                 )
                 .labelled_by(label.id)
             });
-            let label = ui.label("Payload");
+            let label = help::label(ui, "Payload", help::PAYLOAD);
             cell(ui, project, &field("payload"), |ui| {
                 ui.add(
                     TextEdit::multiline(&mut message.payload)
@@ -371,7 +371,7 @@ fn properties_editor(
     egui::Grid::new(format!("{key}/properties"))
         .num_columns(2)
         .show(ui, |ui| {
-            let label = ui.label("Message expiry");
+            let label = help::label(ui, "Message expiry", help::MESSAGE_EXPIRY);
             cell(ui, project, &field("message_expiry"), |ui| {
                 optional_duration_edit(
                     ui,
@@ -383,14 +383,14 @@ fn properties_editor(
             });
             ui.end_row();
 
-            let label = ui.label("Content type");
+            let label = help::label(ui, "Content type", help::CONTENT_TYPE);
             cell(ui, project, &field("content_type"), |ui| {
                 optional_text(ui, &mut message.content_type, "none").labelled_by(label.id)
             });
             ui.end_row();
         });
     cell(ui, project, &field("user_properties"), |ui| {
-        ui.label("User properties")
+        help::label(ui, "User properties", help::USER_PROPERTIES)
     });
     let names: Vec<String> = message.user_properties.keys().cloned().collect();
     let mut rename = None;
@@ -460,13 +460,19 @@ fn properties_editor(
 
 fn fields_editor(
     ui: &mut egui::Ui,
-    fields: &mut BTreeMap<String, GeneratorSpec>,
+    fields: &mut BTreeMap<String, FieldSpec>,
     key: &str,
     project: Option<ProjectTemplate>,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    cell(ui, project, "fields", |ui| ui.strong("Fields"));
+    cell(ui, project, "fields", |ui| {
+        ui.horizontal(|ui| {
+            ui.strong("Fields");
+            help::mark(ui, "Fields", help::FIELDS);
+        })
+        .response
+    });
     let names: Vec<String> = fields.keys().cloned().collect();
     for name in names {
         ui.group(|ui| {
@@ -485,7 +491,7 @@ fn fields_editor(
                             to,
                         },
                     );
-                    let Some(spec) = fields.get_mut(&name) else {
+                    let Some(spec) = fields.get_mut(&name).map(|f| &mut f.generator) else {
                         return name_box;
                     };
                     let mut kind = GeneratorKind::of(spec);
@@ -504,7 +510,18 @@ fn fields_editor(
                 })
                 .box_or_row()
             });
-            if let Some(spec) = fields.get_mut(&name) {
+            if let Some(field) = fields.get_mut(&name) {
+                ui.horizontal(|ui| {
+                    let key = format!("{key}/field/{name}");
+                    let label = help::label(ui, "Name", help::FIELD_NAME);
+                    describe_edit(ui, &mut field.name, &format!("{key}/name"), &name)
+                        .labelled_by(label.id);
+                    let label = help::label(ui, "Unit", help::FIELD_UNIT);
+                    describe_edit(ui, &mut field.unit, &format!("{key}/unit"), "e.g. ppm")
+                        .labelled_by(label.id);
+                });
+            }
+            if let Some(spec) = fields.get_mut(&name).map(|f| &mut f.generator) {
                 generator_editor(
                     ui,
                     spec,
@@ -516,13 +533,33 @@ fn fields_editor(
     }
     if ui.button("Add field").clicked() {
         let name = unique_name("field", fields.keys());
-        fields.insert(name, default_generator(GeneratorKind::RandomWalk));
+        fields.insert(name, default_generator(GeneratorKind::RandomWalk).into());
     }
 }
 
 fn number(ui: &mut egui::Ui, label: &str, value: &mut f64) {
     ui.label(label);
     ui.add(DragValue::new(value).speed(0.1));
+}
+
+/// A field's name or unit: an empty box means none, so the file gets no empty value.
+fn describe_edit(
+    ui: &mut egui::Ui,
+    value: &mut Option<String>,
+    key: &str,
+    hint: &str,
+) -> egui::Response {
+    let mut text = value.clone().unwrap_or_default();
+    let response = ui.add(
+        TextEdit::singleline(&mut text)
+            .id_salt(key)
+            .hint_text(hint)
+            .desired_width(110.0),
+    );
+    if response.changed() {
+        *value = (!text.is_empty()).then_some(text);
+    }
+    response
 }
 
 fn generator_editor(ui: &mut egui::Ui, spec: &mut GeneratorSpec, key: &str, buffers: &mut Buffers) {
@@ -954,7 +991,7 @@ template = "air"
         h.get_by_label("constant").click();
         h.run();
         assert_eq!(
-            h.state().doc.file().templates[0].fields["co2"],
+            h.state().doc.file().templates[0].fields["co2"].generator,
             default_generator(GeneratorKind::Constant)
         );
     }
@@ -967,7 +1004,7 @@ template = "air"
         ));
         type_into_value(&mut h, "007", "1");
         assert_eq!(
-            h.state().doc.file().templates[0].fields["co2"],
+            h.state().doc.file().templates[0].fields["co2"].generator,
             GeneratorSpec::Constant {
                 value: Value::String("0071".into()),
                 noise: None
@@ -982,7 +1019,10 @@ template = "air"
         h.get_by_label("Add field").click();
         h.run();
         assert_eq!(
-            h.state().doc.file().templates[0].fields.get("field"),
+            h.state().doc.file().templates[0]
+                .fields
+                .get("field")
+                .map(|f| &f.generator),
             Some(&default_generator(GeneratorKind::RandomWalk))
         );
     }
@@ -1008,6 +1048,24 @@ template = "air"
             h.query_by_label_contains("looks like JSON but is not valid JSON")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_fields_name_and_unit_are_edited_and_empty_means_none() {
+        let mut h = user_harness();
+        type_into_label(&mut h, "Unit", "ppm");
+        type_into_label(&mut h, "Name", "CO2");
+        let field = &h.state().doc.file().templates[0].fields["co2"];
+        assert_eq!(field.unit.as_deref(), Some("ppm"));
+        assert_eq!(field.name.as_deref(), Some("CO2"));
+
+        h.get_by_label("Unit").focus();
+        h.run();
+        for _ in 0.."ppm".len() {
+            h.key_press(egui::Key::Backspace);
+        }
+        h.run();
+        assert_eq!(h.state().doc.file().templates[0].fields["co2"].unit, None);
     }
 
     #[test]
@@ -1101,7 +1159,7 @@ template = "air"
         ));
         type_into_value(&mut h, "open, 1", ",");
         type_per_frame(&mut h, &["x", ","]);
-        let spec = &h.state().doc.file().templates[0].fields["co2"];
+        let spec = &h.state().doc.file().templates[0].fields["co2"].generator;
         let GeneratorSpec::Sequence { values, .. } = spec else {
             panic!("{spec:?}")
         };

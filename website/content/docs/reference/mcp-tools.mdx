@@ -217,7 +217,7 @@ Text with a TOML syntax error, an unknown or missing key, or a value of the wron
 
 ### `put_device`
 
-Adds a device, or replaces the device with the same `id`. The arguments are the keys of a `[[devices]]` table: `id`, `template`, `count`, `instance_id`, `params`, `autostart`, `interval` and `fields`, with the same defaults as in the [project file](/docs/reference/project-file).
+Adds a device, or replaces the device with the same `id`. The arguments are the keys of a `[[devices]]` table: `id`, `template`, `count`, `instance_id`, `params`, `autostart`, `interval` and `fields`, with the same defaults as in the [project file](/docs/reference/project-file). A field override in `fields` merges as in a [field override](/docs/reference/project-file#field-overrides) of the project file: it can set generator parameters, `unit` and `name`.
 
 ```json
 { "id": "lab", "template": "temperature", "count": 3, "autostart": false }
@@ -242,14 +242,14 @@ Running instances of the device become orphans: they keep running until stopped.
 
 ### `put_template`
 
-Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`. Messages can set the MQTT 5 keys `message_expiry`, `content_type` and `user_properties`, and `availability` can set `will_delay`, as in the [project file](/docs/reference/project-file#messages).
+Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`. Messages can set the MQTT 5 keys `message_expiry`, `content_type` and `user_properties`, and `availability` can set `will_delay`, as in the [project file](/docs/reference/project-file#messages). Each field is its generator table and can add a `unit` and a `name`, as in the [project file](/docs/reference/project-file#fields).
 
 ```json
 {
   "id": "door",
   "interval": "5s",
   "messages": [{ "topic": "home/{{ device_id }}/contact", "payload": "{{ open }}" }],
-  "fields": { "open": { "generator": "sequence", "values": [true, false] } }
+  "fields": { "open": { "generator": "sequence", "values": [true, false], "name": "Door open" } }
 }
 ```
 
