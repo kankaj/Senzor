@@ -1,29 +1,33 @@
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-use eframe::egui::{self, DragValue, RichText, TextEdit};
+use eframe::egui::{self, RichText, TextEdit};
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
 use senzor_core::project::{FieldSpec, Location, MessageSpec, MqttVersion, TemplateSpec};
 
+use super::template_text::{self, TextKind, Variable};
 use super::{
-    Action, BoxOrRow, ERROR, ParsedEdit, UiState, WARNING, checked, duration_edit, errors_at, help,
-    mqtt5_control, name_edit, optional_duration_edit, optional_text, replace_if_unchanged,
-    shortcuts, value_edit,
+    Action, BoxOrRow, ERROR, UiState, WARNING, checked, duration_edit, errors_at, help,
+    mqtt5_control, name_edit, noise_edit, number_edit, optional_duration_edit, optional_text,
+    replace_if_unchanged, sequence_edit, shortcuts, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{
     DEFAULT_NOISE, GeneratorKind, Removal, Rename, default_generator, new_availability,
-    new_message, parse_sequence, sequence_text, set_generator_kind, unique_name,
+    new_message, set_generator_kind, unique_name,
 };
 use crate::preview::{json_problem, preview};
 
 /// The editor for project template `index`.
+/// Without `preview_beside`, the preview is a section under the editor; with it, the window
+/// shows it in a panel of its own ([`preview_beside`]).
 pub fn show_user(
     ui: &mut egui::Ui,
     index: usize,
     doc: &Document,
+    preview_beside: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
@@ -61,8 +65,9 @@ pub fn show_user(
         ui_state,
         actions,
     );
-    ui.separator();
-    preview_section(ui, &template, doc);
+    if !preview_beside {
+        preview_below(ui, &format!("template/{index}"), &template, doc);
+    }
     actions.extend(replace_if_unchanged(original, template, move |f| {
         f.templates.get_mut(index)
     }));
@@ -73,6 +78,7 @@ pub fn show_builtin(
     ui: &mut egui::Ui,
     id: &str,
     doc: &Document,
+    preview_beside: bool,
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
@@ -98,8 +104,19 @@ pub fn show_builtin(
             &mut ignored,
         );
     });
-    ui.separator();
-    preview_section(ui, &template, doc);
+    if !preview_beside {
+        preview_below(ui, &format!("builtin/{id}"), &template, doc);
+    }
+}
+
+/// The preview as the editor's last section, for a narrow window.
+fn preview_below(ui: &mut egui::Ui, key: &str, template: &TemplateSpec, doc: &Document) {
+    section(
+        ui,
+        &format!("{key}/section/preview"),
+        |ui| title(ui, "Preview"),
+        |ui| preview_section(ui, template, doc),
+    );
 }
 
 /// The project template an editor shows: its index, so its names can be renamed, and where its
@@ -148,18 +165,120 @@ fn editor(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    settings_grid(ui, template, key, project, mqtt5, ui_state, actions);
-    ui.add_space(6.0);
-    messages_editor(
+    section(
         ui,
-        &mut template.messages,
-        key,
-        project,
-        mqtt5,
-        &mut ui_state.buffers,
+        &format!("{key}/section/settings"),
+        |ui| title(ui, "Settings"),
+        |ui| settings_grid(ui, template, key, project, mqtt5, ui_state, actions),
     );
-    ui.add_space(6.0);
-    fields_editor(ui, &mut template.fields, key, project, ui_state, actions);
+    let variables = variables_for(TextKind::Message, template, project);
+    section(
+        ui,
+        &format!("{key}/section/messages"),
+        |ui| cell(ui, project, "messages", |ui| title(ui, "Messages")),
+        |ui| {
+            messages_editor(
+                ui,
+                &mut template.messages,
+                key,
+                project,
+                mqtt5,
+                &variables,
+                &mut ui_state.buffers,
+            );
+        },
+    );
+    section(
+        ui,
+        &format!("{key}/section/fields"),
+        |ui| {
+            cell(ui, project, "fields", |ui| {
+                ui.horizontal(|ui| {
+                    let title = title(ui, "Fields");
+                    help::mark(ui, "Fields", help::FIELDS);
+                    title
+                })
+                .inner
+            })
+        },
+        |ui| fields_editor(ui, &mut template.fields, key, project, ui_state, actions),
+    );
+}
+
+/// A part of the editor that folds away: clicking its title (or the arrow before it) opens and
+/// closes it. Every section starts open; egui remembers what you fold.
+fn section(
+    ui: &mut egui::Ui,
+    id: &str,
+    add_title: impl FnOnce(&mut egui::Ui) -> egui::Response,
+    add_body: impl FnOnce(&mut egui::Ui),
+) {
+    let mut clicked = false;
+    let mut header = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        egui::Id::new(id),
+        true,
+    )
+    .show_header(ui, |ui| clicked = add_title(ui).clicked());
+    if clicked {
+        header.toggle();
+    }
+    header.body_unindented(|ui| add_body(ui));
+    ui.add_space(4.0);
+}
+
+/// A section's title, which opens and closes it when clicked.
+fn title(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(egui::Label::new(RichText::new(text).strong().size(15.0)).sense(egui::Sense::click()))
+}
+
+/// The preview of the selected template, for the panel beside the editor on a wide window.
+pub fn preview_beside(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
+    ui.add(egui::Label::new(
+        RichText::new("Preview").strong().size(15.0),
+    ));
+    preview_section(ui, template, doc);
+}
+
+/// The variables a `kind` of text in `template` can use: the built-in ones, its fields, and the
+/// params of the project's devices that use it.
+fn variables_for(
+    kind: TextKind,
+    template: &TemplateSpec,
+    project: Option<ProjectTemplate>,
+) -> Vec<Variable> {
+    let fields: Vec<String> = template.fields.keys().cloned().collect();
+    let mut params: Vec<String> = project
+        .map(|p| {
+            p.doc
+                .file()
+                .devices
+                .iter()
+                .filter(|d| d.template == template.id)
+                .flat_map(|d| d.params.keys().cloned())
+                .collect()
+        })
+        .unwrap_or_default();
+    params.sort();
+    params.dedup();
+    template_text::variables(kind, &fields, &params)
+}
+
+/// A label for a template text box, with its `?` and the Insert variable menu; returns the label.
+fn text_label(
+    ui: &mut egui::Ui,
+    name: &str,
+    help: help::Help,
+    id: egui::Id,
+    text: &mut String,
+    variables: &[Variable],
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        let label = help::label(ui, name, help);
+        template_text::insert_menu(ui, id, name.trim(), text, variables);
+        label
+    })
+    .inner
 }
 
 /// For a `project` template, a name box that pushes the [`Rename`] `rename` builds from the template's
@@ -193,6 +312,7 @@ fn settings_grid(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
+    let topic_variables = variables_for(TextKind::AvailabilityTopic, template, project);
     egui::Grid::new("template-form")
         .num_columns(2)
         .show(ui, |ui| {
@@ -257,8 +377,22 @@ fn settings_grid(
             }
             ui.end_row();
             if let Some(availability) = &mut template.availability {
+                let id = egui::Id::new(format!("{key}/availability/topic"));
+                let label = text_label(
+                    ui,
+                    "  Topic",
+                    help::TOPIC,
+                    id,
+                    &mut availability.topic,
+                    &topic_variables,
+                );
+                cell(ui, project, "availability.topic", |ui| {
+                    template_text::edit(ui, &mut availability.topic, id, false, &topic_variables)
+                        .labelled_by(label.id)
+                });
+                ui.end_row();
+                // The online and offline payloads are plain text, not templates.
                 for (label, text, salt) in [
-                    ("  Topic", &mut availability.topic, "topic"),
                     ("  Online payload", &mut availability.online, "online"),
                     ("  Offline payload", &mut availability.offline, "offline"),
                 ] {
@@ -296,9 +430,9 @@ fn messages_editor(
     key: &str,
     project: Option<ProjectTemplate>,
     mqtt5: bool,
+    variables: &[Variable],
     buffers: &mut Buffers,
 ) {
-    cell(ui, project, "messages", |ui| ui.strong("Messages"));
     let mut remove = None;
     for (i, message) in messages.iter_mut().enumerate() {
         ui.group(|ui| {
@@ -310,25 +444,24 @@ fn messages_editor(
             });
             // Problems name messages from 1.
             let field = |name: &str| format!("messages[{}].{name}", i + 1);
-            let label = help::label(ui, "Topic", help::TOPIC);
+            let id = egui::Id::new(format!("{key}/message/{i}/topic"));
+            let label = text_label(ui, "Topic", help::TOPIC, id, &mut message.topic, variables);
             cell(ui, project, &field("topic"), |ui| {
-                ui.add(
-                    TextEdit::singleline(&mut message.topic)
-                        .id_salt(format!("{key}/message/{i}/topic"))
-                        .desired_width(f32::INFINITY),
-                )
-                .labelled_by(label.id)
+                template_text::edit(ui, &mut message.topic, id, false, variables)
+                    .labelled_by(label.id)
             });
-            let label = help::label(ui, "Payload", help::PAYLOAD);
+            let id = egui::Id::new(format!("{key}/message/{i}/payload"));
+            let label = text_label(
+                ui,
+                "Payload",
+                help::PAYLOAD,
+                id,
+                &mut message.payload,
+                variables,
+            );
             cell(ui, project, &field("payload"), |ui| {
-                ui.add(
-                    TextEdit::multiline(&mut message.payload)
-                        .id_salt(format!("{key}/message/{i}/payload"))
-                        .code_editor()
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY),
-                )
-                .labelled_by(label.id)
+                template_text::edit(ui, &mut message.payload, id, true, variables)
+                    .labelled_by(label.id)
             });
             let has_properties = message.has_properties();
             egui::CollapsingHeader::new("MQTT 5 properties")
@@ -466,13 +599,6 @@ fn fields_editor(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    cell(ui, project, "fields", |ui| {
-        ui.horizontal(|ui| {
-            ui.strong("Fields");
-            help::mark(ui, "Fields", help::FIELDS);
-        })
-        .response
-    });
     let names: Vec<String> = fields.keys().cloned().collect();
     for name in names {
         ui.group(|ui| {
@@ -539,7 +665,7 @@ fn fields_editor(
 
 fn number(ui: &mut egui::Ui, label: &str, value: &mut f64) {
     ui.label(label);
-    ui.add(DragValue::new(value).speed(0.1));
+    number_edit(ui, value);
 }
 
 /// A field's name or unit: an empty box means none, so the file gets no empty value.
@@ -610,15 +736,7 @@ fn generator_editor(ui: &mut egui::Ui, spec: &mut GeneratorSpec, key: &str, buff
             noise,
         } => {
             ui.label("values");
-            ParsedEdit::new(&format!("{key}/values"), 200.0)
-                .hint("open, closed")
-                .show(
-                    ui,
-                    buffers,
-                    values,
-                    |values| sequence_text(values),
-                    |text| Ok(parse_sequence(text)),
-                );
+            sequence_edit(ui, buffers, &format!("{key}/values"), values);
             ui.checkbox(looping, "loop");
             noise_editor(ui, noise);
         }
@@ -631,12 +749,11 @@ fn noise_editor(ui: &mut egui::Ui, noise: &mut Option<f64>) {
         *noise = enabled.then_some(DEFAULT_NOISE);
     }
     if let Some(noise) = noise {
-        ui.add(DragValue::new(noise).speed(0.01).range(0.0..=f64::MAX));
+        noise_edit(ui, noise);
     }
 }
 
 fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
-    ui.strong("Preview");
     let preview = preview(template, &doc.validated().project, SystemTime::now());
     match &preview.instance {
         Some(instance) => ui.weak(format!(
@@ -722,7 +839,7 @@ template = "air"
     fn user_harness_with(src: &str) -> Harness<'static, Fixture> {
         Fixture::new(src).harness(|ui, fx| {
             if !fx.doc.file().templates.is_empty() {
-                show_user(ui, 0, &fx.doc, &mut fx.ui, &mut fx.actions);
+                show_user(ui, 0, &fx.doc, false, &mut fx.ui, &mut fx.actions);
             }
         })
     }
@@ -1069,6 +1186,52 @@ template = "air"
     }
 
     #[test]
+    fn a_section_folds_and_unfolds_when_its_title_is_clicked() {
+        let mut h = user_harness();
+        assert!(h.query_by_label("Topic").is_some());
+        h.get_by_label("Messages").click();
+        h.run();
+        assert!(h.query_by_label("Topic").is_none(), "Messages folded");
+        assert!(
+            h.query_by_label("Interval").is_some(),
+            "Settings still open"
+        );
+        h.get_by_label("Messages").click();
+        h.run();
+        assert!(h.query_by_label("Topic").is_some());
+    }
+
+    fn payload(h: &Harness<'static, Fixture>) -> String {
+        h.state().doc.file().templates[0].messages[0]
+            .payload
+            .clone()
+    }
+
+    #[test]
+    fn insert_variable_puts_a_block_into_the_payload() {
+        let mut h = user_harness();
+        h.get_by_label("Insert variable: Payload").click();
+        h.run();
+        h.get_by_label("seq").click();
+        h.run();
+        assert_eq!(payload(&h), "{{ co2 }}{{ seq }}");
+    }
+
+    #[test]
+    fn tab_completes_a_variable_while_it_is_typed() {
+        let mut h = user_harness();
+        h.get_by_label("Payload").focus();
+        h.run();
+        h.key_press(egui::Key::End);
+        h.run();
+        type_per_frame(&mut h, &[" ", "{", "{", " ", "c"]);
+        assert!(h.query_by_label("co2").is_some(), "co2 is suggested");
+        h.key_press(egui::Key::Tab);
+        h.run();
+        assert_eq!(payload(&h), "{{ co2 }} {{ co2 }}");
+    }
+
+    #[test]
     fn a_payload_syntax_error_is_shown_in_the_preview() {
         let mut h = user_harness();
         type_into_label(&mut h, "Payload", " {{");
@@ -1082,7 +1245,7 @@ template = "air"
     #[test]
     fn builtin_templates_offer_a_copy_instead_of_editing() {
         let mut h = Fixture::new("").harness(|ui, fx| {
-            show_builtin(ui, "co2", &fx.doc, &mut fx.ui, &mut fx.actions);
+            show_builtin(ui, "co2", &fx.doc, false, &mut fx.ui, &mut fx.actions);
         });
         h.get_by_label("Copy into project…").click();
         h.run();

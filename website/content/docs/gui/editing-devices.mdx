@@ -59,7 +59,13 @@ To change the type, pick it in the selector. Types that the text in the box does
 
 ## Field overrides
 
-**Field overrides** has one row for each field of the device's template. A row takes an inline TOML table that changes that field for this device only. As the editor notes: **Keys are merged onto the template's field; with `generator` they replace its generator and parameters.**
+An override changes one setting of a template's field for this device only, such as where a random walk starts. **Field overrides** has a block for each field of the device's template. Its header names the field by its key, then the name and unit the template gives it, and says what the device overrides: **co2 — CO2, ppm** followed by **start overridden**, or **not overridden**. A block starts closed when the device overrides nothing in it; click the header to open it.
+
+Inside, each setting of the field has a row with a checkbox, its name and a box: **generator**, the generator's parameters, **noise**, **unit** and **name**. As the editor notes: **Tick a setting to change it for this device; the others show the template's value.**
+
+- An unticked setting shows the template's value, greyed out.
+- Ticking a setting copies the value the field uses into the override, so nothing changes until you edit it. A field without noise shows **none**; ticking **noise** starts it at 0.1. Ticking **name** on a field without a name starts it at the field's key, and ticking **unit** on a field without a unit leaves it empty, which is a problem until you type one.
+- Unticking a setting removes it from the override. When nothing in a block is ticked, the device has no override for that field.
 
 For example, the showcase's `meeting` device starts its CO2 higher than the other rooms:
 
@@ -67,10 +73,19 @@ For example, the showcase's `meeting` device starts its CO2 higher than the othe
 fields.co2 = { start = 1100 }
 ```
 
-In the editor, that is `{ start = 1100 }` in the `co2` row.
+In the editor, that is **start** ticked at 1100 in the **co2** block. The boxes work as in the [template editor](/docs/gui/editing-templates#fields): **period** and **phase** take durations, **values** a comma-separated list, and a `constant`'s **value** has a type selector. Text a box cannot read stays in it with a hint, such as **use e.g. 10s, 500ms, 1h**, and the device keeps the previous value.
 
-- An empty row means no override.
-- Text that is not a valid inline table stays in the box with the error under it, and the device keeps its previous override until you fix it.
+### Another generator
+
+Tick **generator** to give the device another kind of generator for the field, then pick it. Picking a generator sets that generator's default parameters, the same ones the template editor starts from, so the field stays valid; for `sine`, center 0, amplitude 1, period 1m and phase 0s. Its required parameters stay ticked while **generator** is: hover over one of their checkboxes to see **Needed while the generator is overridden**. The field keeps the template's unit and name unless you tick those too.
+
+Untick **generator** to go back to the template's generator. The parameters it does not have are dropped from the override, and so are the ones set to the template's own value.
+
+### Problems with overrides
+
+A problem with an override, such as `` field `co2` override: start must be between min and max ``, shows in red under the block's header, which gets a red outline.
+
+A project file can hold overrides the boxes cannot show. A value of the wrong type, such as `start = "high"`, shows **cannot read "high"** next to the box and stays in the file until you edit the setting. A key that is not a setting of the field's generator, such as a misspelled `strat`, shows as **strat is not a setting of random_walk** with a **Remove** button.
 
 If you switch the device to a template that lacks an overridden field, the override shows in red as, for example, **co2 (not in the template)**, with a **Remove override** button.
 

@@ -12,6 +12,7 @@ pub mod shortcuts;
 pub mod status_bar;
 pub mod switch;
 pub mod template;
+pub mod template_text;
 pub mod top_bar;
 pub mod welcome;
 
@@ -19,14 +20,14 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use eframe::egui::{self, Color32, TextEdit};
+use eframe::egui::{self, Color32, DragValue, TextEdit};
 use senzor_core::engine::{Command, InstanceStatus, LogEntry};
 use senzor_core::project::{Location, ProjectFile};
 use senzor_core::value::Value;
 
 use crate::buffers::Buffers;
 use crate::document::Document;
-use crate::edits::{Removal, Rename, ValueKind, parse_value};
+use crate::edits::{Removal, Rename, ValueKind, parse_sequence, parse_value, sequence_text};
 use crate::selection::{ProblemTarget, Selection};
 use crate::settings::Theme;
 
@@ -396,6 +397,32 @@ pub fn optional_duration_edit(
                 .map(Some)
                 .map_err(|_| "use e.g. 10s, 1m, 1h".to_string())
         },
+    )
+}
+
+/// A number of a generator, dragged in steps of 0.1 or typed.
+pub fn number_edit(ui: &mut egui::Ui, value: &mut f64) -> egui::Response {
+    ui.add(DragValue::new(value).speed(0.1))
+}
+
+/// A generator's noise, dragged in steps of 0.01 or typed; never below 0.
+pub fn noise_edit(ui: &mut egui::Ui, noise: &mut f64) -> egui::Response {
+    ui.add(DragValue::new(noise).speed(0.01).range(0.0..=f64::MAX))
+}
+
+/// A `sequence`'s values, typed as `open, closed, 3`.
+pub fn sequence_edit(
+    ui: &mut egui::Ui,
+    buffers: &mut Buffers,
+    key: &str,
+    values: &mut Vec<Value>,
+) -> egui::Response {
+    ParsedEdit::new(key, 200.0).hint("open, closed").show(
+        ui,
+        buffers,
+        values,
+        |values| sequence_text(values),
+        |text| Ok(parse_sequence(text)),
     )
 }
 

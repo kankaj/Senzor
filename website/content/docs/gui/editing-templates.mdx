@@ -7,6 +7,8 @@ Open the **Templates** tab in the left panel and click a template under **Projec
 
 ![The template editor showing office-air with its preview](/screenshots/template-editor.png)
 
+The editor has three sections, **Settings**, **Messages** and **Fields**. Click a section's title, or the arrow before it, to fold it away; click again to open it. When the detail panel is at least 900 points wide, the [preview](#preview) sits in a panel to the right of the form, where it stays in view while you scroll; in a narrower window it is the last section, under **Fields**. Drag the panel's edge to change its width.
+
 Every change goes into the project as you make it, and Senzor validates the project again. A problem with one value shows in red under that value's box, which gets a red outline; other problems with the template appear in red under the heading. Running instances keep their settings until you restart them ([Editing while running](/docs/concepts/editing-while-running)).
 
 **Duplicate template** copies the template, with its messages, fields and all its other settings, right after the original, and selects the copy; **Duplicate** in the template's right-click menu in the **Templates** tab does the same. The copy's ID is `<id>-copy`, or `<id>-copy-2`, `<id>-copy-3` and so on when that is taken. Devices keep using the original.
@@ -44,6 +46,14 @@ A fourth box, **Will delay**, is empty (`none`) by default. With MQTT 5, a durat
 ## Messages
 
 Each message is a group named **Message 1**, **Message 2** and so on, with a **Topic** box, a multi-line **Payload** box and a **Remove** button. **Add message** adds a message on `senzor/{{ device_id }}/value` with the payload `{{ value }}`. Change the payload to use your own fields: a template without a field named `value` cannot render it. Topics and payloads are templates; the [template variables reference](/docs/reference/template-variables) lists what you can use in them.
+
+### Writing topics and payloads
+
+The **Topic** and **Payload** boxes, and the availability **Topic**, colour what you write: `{{ … }}` and `{% … %}` blocks in the accent colour, and JSON strings, numbers and punctuation in colours of their own, so a missing quote or brace stands out.
+
+The `{ }` button after a box's name lists the variables that box can use: `device_id`, `index` and `template_id`; in a message also `seq`, `now_ms`, `now_iso` and the template's fields; and the params of the project's devices that use the template. Hover over one for what it holds, and click it to insert it as `{{ name }}` where the cursor was, or at the end. The availability topic is rendered once, when an instance starts, so its list has no fields and no time.
+
+While you type a name inside `{{`, the box lists the variables that start with what you typed, under the box after **Tab:**. Press Tab to take the first one, or click one; Senzor completes the name and adds ` }}` unless the block is already closed.
 
 ### MQTT 5 properties
 
@@ -91,7 +101,7 @@ To change the type, pick it in the selector. Types that the text in the box does
 
 ## Preview
 
-The **Preview** section at the bottom renders the template's topics and payloads as you edit, before you save. It renders them as the first instance that uses the template would, with that instance's params and field overrides, and says so: **Rendered as office-0 with its params and sample values.** In the showcase project, the state topic of `office-air` renders as `b/office/office-0/state`.
+The **Preview**, beside the form or at the bottom (see above), renders the template's topics and payloads as you edit, before you save. It renders them as the first instance that uses the template would, with that instance's params and field overrides, and says so: **Rendered as office-0 with its params and sample values.** In the showcase project, the state topic of `office-air` renders as `b/office/office-0/state`.
 
 The sample value of each field is its starting value: the `constant` value, the `random_walk` start, the `sine` center, the `uniform` min, or the first `sequence` value.
 

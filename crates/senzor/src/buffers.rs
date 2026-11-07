@@ -1,4 +1,4 @@
-//! Text of inputs whose content may be invalid or not yet committed (durations, names, overrides).
+//! Text of inputs whose content may be invalid or not yet committed (durations, names, values).
 
 use std::collections::HashMap;
 

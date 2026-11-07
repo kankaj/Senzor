@@ -69,6 +69,9 @@ pub struct SenzorApp {
     rate: MessageRate,
 }
 
+/// From this width of the detail panel on, a template's preview sits beside its editor.
+const PREVIEW_BESIDE_MIN_WIDTH: f32 = 900.0;
+
 /// How often the window looks whether another program changed the project's file.
 const DISK_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -783,6 +786,29 @@ impl eframe::App for SenzorApp {
                 ui::left_panel::show(ui, &self.doc, &self.state, &mut self.ui, &mut actions);
             });
         egui::CentralPanel::default().show(ui, |ui| {
+            // A wide window shows a template's preview beside its editor, where it stays in view.
+            let preview_template = match &self.ui.selection {
+                Some(Selection::Template(index)) => self.doc.file().templates.get(*index).cloned(),
+                Some(Selection::Builtin(id)) => {
+                    senzor_core::project::builtin::builtin_template(id).cloned()
+                }
+                _ => None,
+            };
+            let preview_beside =
+                preview_template.is_some() && ui.available_width() >= PREVIEW_BESIDE_MIN_WIDTH;
+            if preview_beside && let Some(template) = &preview_template {
+                egui::Panel::right("template-preview")
+                    .resizable(true)
+                    .default_size(ui.available_width() * 0.4)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("template-preview")
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                ui::template::preview_beside(ui, template, &self.doc)
+                            });
+                    });
+            }
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| match self.ui.selection.clone() {
@@ -797,12 +823,22 @@ impl eframe::App for SenzorApp {
                     Some(Selection::Device(index)) => {
                         ui::device::show(ui, index, &self.doc, &mut self.ui, &mut actions)
                     }
-                    Some(Selection::Template(index)) => {
-                        ui::template::show_user(ui, index, &self.doc, &mut self.ui, &mut actions)
-                    }
-                    Some(Selection::Builtin(id)) => {
-                        ui::template::show_builtin(ui, &id, &self.doc, &mut self.ui, &mut actions)
-                    }
+                    Some(Selection::Template(index)) => ui::template::show_user(
+                        ui,
+                        index,
+                        &self.doc,
+                        preview_beside,
+                        &mut self.ui,
+                        &mut actions,
+                    ),
+                    Some(Selection::Builtin(id)) => ui::template::show_builtin(
+                        ui,
+                        &id,
+                        &self.doc,
+                        preview_beside,
+                        &mut self.ui,
+                        &mut actions,
+                    ),
                     None if ui::welcome::applies(&self.doc) => {
                         ui::welcome::show(ui, &self.settings.recent, &mut actions)
                     }

@@ -112,6 +112,25 @@ fn export_saves_the_logged_messages_as_csv() {
     assert!(first.ends_with(",0,false,600"), "{first}");
 }
 
+#[test]
+fn a_wide_window_shows_the_template_preview_beside_the_form() {
+    let path = write_project("preview-beside", &project(start_broker(), false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Templates");
+    click(&mut harness, "air");
+    harness.run();
+    let preview = harness.get_by_label("Preview").rect();
+    let form = harness.get_by_label("Interval").rect();
+    assert!(
+        preview.left() > form.right() + 300.0,
+        "preview at {preview:?}, form at {form:?}"
+    );
+    assert!(
+        preview.top() < form.bottom() + 200.0,
+        "side by side, not below"
+    );
+}
+
 /// Asks to close the window, as its close button does.
 fn request_close(harness: &mut App) {
     harness

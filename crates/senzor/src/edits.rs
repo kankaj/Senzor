@@ -1,6 +1,6 @@
 //! Edits the GUI applies to the project model. Plain functions, no egui.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use senzor_core::generator::GeneratorSpec;
@@ -11,7 +11,7 @@ pub use senzor_core::project::edit::{
 };
 use senzor_core::project::file::{DEFAULT_INTERVAL, default_instance_id_pattern};
 use senzor_core::project::{
-    AvailabilitySpec, BrokerSpec, DeviceSpec, MessageSpec, ProjectFile, TemplateSpec,
+    AvailabilitySpec, BrokerSpec, DeviceSpec, FieldSpec, MessageSpec, ProjectFile, TemplateSpec,
 };
 use senzor_core::value::Value;
 
@@ -242,23 +242,195 @@ pub fn sequence_text(values: &[Value]) -> String {
         .join(", ")
 }
 
-/// A device's field override as one line of text, e.g. `{ start = 1200 }`.
-pub fn override_to_text(table: &toml::Table) -> String {
-    toml::Value::Table(table.clone()).to_string()
+impl GeneratorKind {
+    /// The kind named `generator = "…"` in the project file.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.label() == label)
+    }
+
+    /// The parameters of a generator of this kind, as the project file names them.
+    pub fn parameters(self) -> &'static [&'static str] {
+        match self {
+            GeneratorKind::Constant => &["value", "noise"],
+            GeneratorKind::RandomWalk => &["start", "min", "max", "step", "noise"],
+            GeneratorKind::Sine => &["center", "amplitude", "period", "phase", "noise"],
+            GeneratorKind::Uniform => &["min", "max", "noise"],
+            GeneratorKind::Sequence => &["values", "loop", "noise"],
+        }
+    }
 }
 
-/// Parses an override line: empty means "no override", otherwise an inline TOML table.
-pub fn override_from_text(text: &str) -> Result<Option<toml::Table>, String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Ok(None);
+/// Parameters a generator can do without (they have a default or are off when missing).
+const OPTIONAL_PARAMETERS: [&str; 3] = ["noise", "phase", "loop"];
+
+/// Whether `key` is a parameter of some generator kind.
+fn is_parameter(key: &str) -> bool {
+    GeneratorKind::ALL
+        .iter()
+        .any(|kind| kind.parameters().contains(&key))
+}
+
+/// A field as one table, the way the project file writes it.
+fn field_table(field: &FieldSpec) -> toml::Table {
+    toml::Table::try_from(field).expect("a field serializes to a table")
+}
+
+/// A device's override of one template field, as the device editor shows it: one setting per
+/// row, each either overridden (its key is in the table) or showing what the field uses without
+/// it. The table is merged onto the template's field as validation merges it; with `generator`,
+/// it replaces the template's generator and parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldOverride {
+    /// The generator kind in effect.
+    pub kind: GeneratorKind,
+    /// The table sets `generator`, so it replaces the template's generator.
+    pub replaces_generator: bool,
+    /// The field with every readable setting of the table applied.
+    pub effective: FieldSpec,
+    /// Settings whose value in the table cannot be read, e.g. `start = "high"`; the effective
+    /// field has what the setting would be without them.
+    pub unreadable: BTreeSet<String>,
+    /// Keys of the table that are not settings of [`Self::kind`].
+    pub unknown: Vec<String>,
+}
+
+impl FieldOverride {
+    pub fn new(template: &FieldSpec, table: &toml::Table) -> Self {
+        let template_kind = GeneratorKind::of(&template.generator);
+        let mut unreadable = BTreeSet::new();
+        let (kind, generator) = match table.get("generator") {
+            None => (template_kind, template.generator.clone()),
+            Some(named) => match named.as_str().and_then(GeneratorKind::from_label) {
+                // What a replaced generator uses for the parameters the table leaves out.
+                Some(kind) => (kind, default_generator(kind)),
+                None => {
+                    unreadable.insert("generator".to_string());
+                    (template_kind, template.generator.clone())
+                }
+            },
+        };
+        let mut merged = field_table(&FieldSpec {
+            generator,
+            ..template.clone()
+        });
+        let mut unknown = Vec::new();
+        for (key, value) in table.iter().filter(|(key, _)| *key != "generator") {
+            let mut candidate = merged.clone();
+            candidate.insert(key.clone(), value.clone());
+            if toml::Value::Table(candidate.clone())
+                .try_into::<FieldSpec>()
+                .is_ok()
+            {
+                merged = candidate;
+            } else if override_settings(kind).contains(&key.as_str()) {
+                unreadable.insert(key.clone());
+            } else {
+                unknown.push(key.clone());
+            }
+        }
+        let effective = toml::Value::Table(merged)
+            .try_into()
+            .expect("only keys that keep the field readable were added");
+        Self {
+            kind,
+            replaces_generator: table.contains_key("generator"),
+            effective,
+            unreadable,
+            unknown,
+        }
     }
-    let parsed: toml::Table =
-        toml::from_str(&format!("v = {text}")).map_err(|e| e.message().to_string())?;
-    match parsed.get("v") {
-        Some(toml::Value::Table(table)) => Ok(Some(table.clone())),
-        _ => Err("expected an inline table, e.g. { start = 1200 }".into()),
+
+    /// Whether the row of `setting` must stay overridden: a replaced generator needs its
+    /// required parameters.
+    pub fn is_required(&self, setting: &str) -> bool {
+        self.replaces_generator
+            && self.kind.parameters().contains(&setting)
+            && !OPTIONAL_PARAMETERS.contains(&setting)
     }
+}
+
+/// The settings a device can override on a field whose generator is `kind`, in the order the
+/// device editor shows them.
+pub fn override_settings(kind: GeneratorKind) -> Vec<&'static str> {
+    std::iter::once("generator")
+        .chain(kind.parameters().iter().copied())
+        .chain(["unit", "name"])
+        .collect()
+}
+
+/// Starts overriding `setting` of field `field` with the value it has now, so the field does not
+/// change until the value is edited. A noise the field does not have starts at
+/// [`DEFAULT_NOISE`], a missing unit empty and a missing name as the field's key. Overriding
+/// the generator also writes its parameters, which the generator then replaces.
+pub fn override_setting(table: &mut toml::Table, view: &FieldOverride, field: &str, setting: &str) {
+    let current = field_table(&view.effective);
+    if setting == "generator" {
+        for (key, value) in current {
+            if key == "generator" || view.kind.parameters().contains(&key.as_str()) {
+                table.entry(key).or_insert(value);
+            }
+        }
+        return;
+    }
+    let value = current
+        .get(setting)
+        .cloned()
+        .unwrap_or_else(|| match setting {
+            "noise" => toml::Value::Float(DEFAULT_NOISE),
+            "name" => toml::Value::String(field.to_string()),
+            _ => toml::Value::String(String::new()),
+        });
+    table.insert(setting.to_string(), value);
+}
+
+/// Stops overriding `setting`. For the generator, that also drops the parameters the template's
+/// generator does not have, and those the table sets to the template's own value.
+pub fn clear_setting(table: &mut toml::Table, template: &FieldSpec, setting: &str) {
+    table.remove(setting);
+    if setting == "generator" {
+        let own = GeneratorKind::of(&template.generator).parameters();
+        let template = field_table(template);
+        table.retain(|key, value| {
+            !is_parameter(key) || (own.contains(&key) && template.get(key) != Some(value))
+        });
+    }
+}
+
+/// Replaces the overridden generator with a valid one of `kind`; unit and name stay.
+pub fn set_override_kind(table: &mut toml::Table, kind: GeneratorKind) {
+    table.retain(|key, _| key != "generator" && !is_parameter(key));
+    let generator = toml::Table::try_from(default_generator(kind)).expect("a generator serializes");
+    table.extend(generator);
+}
+
+/// Writes the settings the editor changed from `before` to `after` into the table.
+pub fn store_override_edits(table: &mut toml::Table, before: &FieldSpec, after: &FieldSpec) {
+    let before = field_table(before);
+    for (key, value) in field_table(after) {
+        if key != "generator" && before.get(&key) != Some(&value) {
+            table.insert(key, value);
+        }
+    }
+}
+
+/// What a field's override changes, e.g. `start, max overridden`.
+pub fn override_summary(table: &toml::Table, kind: GeneratorKind) -> String {
+    if table.is_empty() {
+        return "not overridden".to_string();
+    }
+    let settings = override_settings(kind);
+    let mut keys: Vec<&str> = settings
+        .iter()
+        .copied()
+        .filter(|s| table.contains_key(*s))
+        .collect();
+    keys.extend(
+        table
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !settings.contains(k)),
+    );
+    format!("{} overridden", keys.join(", "))
 }
 
 /// Where the broker password comes from: `password` or `password_env`, at most one of them.
@@ -532,29 +704,186 @@ mod tests {
         assert_eq!(unique_name("room", &existing), "room");
     }
 
+    fn co2_field() -> FieldSpec {
+        builtin_templates()[0].fields["co2"].clone()
+    }
+
+    fn table(src: &str) -> toml::Table {
+        toml::from_str(src).unwrap()
+    }
+
     #[test]
-    fn overrides_round_trip_through_text() {
-        let table = override_from_text("{ start = 1200, step = 0.5 }")
-            .unwrap()
-            .unwrap();
-        assert_eq!(table["start"].as_integer(), Some(1200));
+    fn every_kind_is_found_by_its_label_and_lists_the_parameters_it_writes() {
+        for kind in GeneratorKind::ALL {
+            assert_eq!(GeneratorKind::from_label(kind.label()), Some(kind));
+            // Every kind has noise, which is written only when set.
+            let written = toml::Table::try_from(default_generator(kind)).unwrap();
+            let keys: BTreeSet<&str> = written
+                .keys()
+                .map(String::as_str)
+                .filter(|k| *k != "generator")
+                .chain(["noise"])
+                .collect();
+            let parameters: BTreeSet<&str> = kind.parameters().iter().copied().collect();
+            assert_eq!(keys, parameters, "{kind:?}");
+        }
+        assert_eq!(GeneratorKind::from_label("square"), None);
+    }
+
+    #[test]
+    fn an_override_is_merged_onto_the_template_field() {
+        let view = FieldOverride::new(&co2_field(), &table("start = 1200\nunit = \"ppmv\""));
+        assert_eq!(view.kind, GeneratorKind::RandomWalk);
+        assert!(!view.replaces_generator);
         assert_eq!(
-            override_from_text(&override_to_text(&table)),
-            Ok(Some(table))
+            view.effective.generator,
+            GeneratorSpec::RandomWalk {
+                start: 1200.0,
+                min: 400.0,
+                max: 2000.0,
+                step: 15.0,
+                noise: None
+            }
+        );
+        assert_eq!(view.effective.unit.as_deref(), Some("ppmv"));
+        assert_eq!(view.effective.name.as_deref(), Some("CO2"));
+    }
+
+    #[test]
+    fn a_replaced_generator_starts_from_the_kinds_defaults_and_keeps_the_labels() {
+        let view = FieldOverride::new(&co2_field(), &table("generator = \"uniform\"\nmax = 9"));
+        assert_eq!(view.kind, GeneratorKind::Uniform);
+        assert!(view.replaces_generator);
+        assert_eq!(
+            view.effective.generator,
+            GeneratorSpec::Uniform {
+                min: 0.0,
+                max: 9.0,
+                noise: None
+            }
+        );
+        assert_eq!(view.effective.unit.as_deref(), Some("ppm"));
+        assert!(view.is_required("min"));
+        assert!(!view.is_required("noise"));
+        assert!(!view.is_required("unit"));
+    }
+
+    #[test]
+    fn values_that_cannot_be_read_and_unknown_keys_are_set_apart() {
+        let view = FieldOverride::new(
+            &co2_field(),
+            &table("start = \"high\"\nstrat = 5\ncenter = 1\nmax = 2500"),
+        );
+        assert_eq!(view.unreadable, BTreeSet::from(["start".to_string()]));
+        assert_eq!(view.unknown, ["center", "strat"]);
+        assert_eq!(
+            view.effective.generator,
+            GeneratorSpec::RandomWalk {
+                start: 600.0,
+                min: 400.0,
+                max: 2500.0,
+                step: 15.0,
+                noise: None
+            }
+        );
+        let view = FieldOverride::new(&co2_field(), &table("generator = \"square\""));
+        assert_eq!(view.kind, GeneratorKind::RandomWalk);
+        assert_eq!(view.unreadable, BTreeSet::from(["generator".to_string()]));
+    }
+
+    #[test]
+    fn overriding_a_setting_writes_its_current_value() {
+        let field = co2_field();
+        let mut overrides = table("max = 2500");
+        let view = FieldOverride::new(&field, &overrides);
+        for setting in ["start", "max", "noise", "unit"] {
+            override_setting(&mut overrides, &view, "co2", setting);
+        }
+        assert_eq!(
+            overrides,
+            table("start = 600.0\nmax = 2500.0\nnoise = 0.1\nunit = \"ppm\"")
+        );
+        let unnamed = FieldSpec::new(default_generator(GeneratorKind::Uniform));
+        let mut overrides = toml::Table::new();
+        let view = FieldOverride::new(&unnamed, &overrides);
+        override_setting(&mut overrides, &view, "v", "name");
+        override_setting(&mut overrides, &view, "v", "unit");
+        assert_eq!(overrides, table("name = \"v\"\nunit = \"\""));
+    }
+
+    #[test]
+    fn overriding_the_generator_keeps_the_field_as_it_is() {
+        let field = co2_field();
+        let mut overrides = table("start = 1200\nunit = \"ppmv\"");
+        let view = FieldOverride::new(&field, &overrides);
+        override_setting(&mut overrides, &view, "co2", "generator");
+        assert_eq!(
+            overrides,
+            table(
+                "generator = \"random_walk\"\nstart = 1200\nmin = 400.0\nmax = 2000.0\n\
+                 step = 15.0\nunit = \"ppmv\""
+            )
+        );
+        assert_eq!(
+            FieldOverride::new(&field, &overrides).effective,
+            view.effective
         );
     }
 
     #[test]
-    fn empty_override_text_means_no_override() {
-        assert_eq!(override_from_text("  "), Ok(None));
+    fn clearing_the_generator_drops_parameters_the_template_does_not_need() {
+        let field = co2_field();
+        let mut overrides = table(
+            "generator = \"sine\"\ncenter = 1\nperiod = \"1m\"\nnoise = 0.5\nmin = 400.0\n\
+             step = 2\nunit = \"ppb\"",
+        );
+        clear_setting(&mut overrides, &field, "generator");
+        assert_eq!(overrides, table("noise = 0.5\nstep = 2\nunit = \"ppb\""));
+        clear_setting(&mut overrides, &field, "step");
+        assert_eq!(overrides, table("noise = 0.5\nunit = \"ppb\""));
     }
 
     #[test]
-    fn invalid_override_text_is_an_error() {
-        assert!(override_from_text("{ start = }").is_err());
+    fn choosing_a_kind_writes_a_complete_generator_of_it() {
+        let mut overrides = table("generator = \"random_walk\"\nstart = 1\nunit = \"ppb\"");
+        set_override_kind(&mut overrides, GeneratorKind::Sequence);
         assert_eq!(
-            override_from_text("1200"),
-            Err("expected an inline table, e.g. { start = 1200 }".into())
+            overrides,
+            table(
+                "generator = \"sequence\"\nvalues = [\"on\", \"off\"]\nloop = true\nunit = \"ppb\""
+            )
+        );
+        let view = FieldOverride::new(&co2_field(), &overrides);
+        assert!(view.effective.problems().is_empty());
+        assert!(view.unreadable.is_empty() && view.unknown.is_empty());
+    }
+
+    #[test]
+    fn only_edited_settings_are_stored() {
+        let before = co2_field();
+        let mut after = before.clone();
+        if let GeneratorSpec::RandomWalk { step, .. } = &mut after.generator {
+            *step = 3.0;
+        }
+        after.name = Some("Carbon dioxide".into());
+        let mut overrides = table("start = 1");
+        store_override_edits(&mut overrides, &before, &after);
+        assert_eq!(
+            overrides,
+            table("start = 1\nstep = 3.0\nname = \"Carbon dioxide\"")
+        );
+    }
+
+    #[test]
+    fn the_summary_lists_overridden_settings_in_the_editors_order() {
+        let kind = GeneratorKind::RandomWalk;
+        assert_eq!(
+            override_summary(&toml::Table::new(), kind),
+            "not overridden"
+        );
+        assert_eq!(
+            override_summary(&table("unit = \"x\"\nmax = 1\nstart = 2\nzzz = 1"), kind),
+            "start, max, unit, zzz overridden"
         );
     }
 

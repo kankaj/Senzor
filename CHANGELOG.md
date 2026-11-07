@@ -47,7 +47,9 @@ The first release.
 - A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, and export to CSV.
 - A Problems tab, and a status bar with the broker state, instance counts and messages per second.
 - A `?` next to every setting that explains it and opens its documentation.
+- The template editor folds into sections, shows its preview beside the form on a wide window, colours Jinja and JSON, and inserts and completes variables in topics and payloads.
 - The instance view shows each field's name and unit, such as `CO2` and `611.77 ppm`.
+- Field overrides in the device editor use the same boxes as the template editor, with a checkbox per setting to override it.
 - New, Open, Save, recent projects, example projects, drag and drop to open, and a question when the file changes on disk.
 - Undo and redo, duplicate devices and templates, keyboard shortcuts, and a test of the broker connection with presets for common brokers.
 - Settings for the theme, zoom and MCP, remembered between launches with the window's size and panels.
