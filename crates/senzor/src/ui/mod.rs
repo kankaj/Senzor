@@ -104,6 +104,8 @@ pub enum Action {
     GoTo(ProblemTarget),
     /// Turn the MCP endpoint on or off.
     ToggleMcp,
+    /// Show this version's Highlights from the changelog.
+    ShowWhatsNew,
     /// Use this port the next time MCP is turned on.
     SetMcpPort(u16),
 }
@@ -197,6 +199,8 @@ pub enum Modal {
         topics: Vec<String>,
         broker: String,
     },
+    /// What changed in the versions since the one that ran before, from the changelog.
+    WhatsNew(Vec<crate::whats_new::Release>),
     /// The project's file now holds another project. `name` is the file's name; `unsaved`
     /// whether reloading would drop unsaved changes.
     FileChanged {

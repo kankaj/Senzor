@@ -1,3 +1,7 @@
+// On Windows, an optimised build is a windowed program: no console window opens next to it.
+// Debug builds keep the console, for logs and panics while developing.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 
 use clap::Parser;

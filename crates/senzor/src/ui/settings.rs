@@ -45,7 +45,7 @@ pub fn show(
                     ui.end_row();
                 });
             ui.separator();
-            about(ui);
+            about(ui, actions);
         });
     ui_state.settings_open = open;
 }
@@ -243,8 +243,12 @@ const CREDITS: &[(&str, &str, &str)] = &[
 ];
 
 /// Links to the documentation and the source, and the credits, folded at first.
-fn about(ui: &mut egui::Ui) {
+fn about(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
+        if ui.link("What's new").clicked() {
+            actions.push(Action::ShowWhatsNew);
+        }
+        ui.label("·");
         ui.hyperlink_to("Documentation", super::DOCS_URL);
         ui.label("·");
         ui.hyperlink_to("Source code", super::SOURCE_URL);

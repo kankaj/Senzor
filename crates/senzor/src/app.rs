@@ -141,6 +141,16 @@ impl SenzorApp {
             Some(path) => app.open_path(&path),
             None => app.replace_document(Document::new_empty()),
         }
+        // After an update, what changed since the version that ran before.
+        if let Some(previous) = &app.version_seen_before
+            && previous != env!("CARGO_PKG_VERSION")
+            && app.ui.modal.is_none()
+        {
+            let releases = crate::whats_new::since_version(previous);
+            if !releases.is_empty() {
+                app.ui.modal = Some(Modal::WhatsNew(releases));
+            }
+        }
         // After the document, whose arrival resets the panels.
         app.ui.left_tab = app.settings.tabs.left;
         app.ui.bottom_tab = app.settings.tabs.bottom;
@@ -596,6 +606,9 @@ impl SenzorApp {
             Action::SetTheme(theme) => {
                 self.settings.theme = theme;
                 self.ctx.set_theme(theme.preference());
+            }
+            Action::ShowWhatsNew => {
+                self.ui.modal = Some(Modal::WhatsNew(crate::whats_new::this_version()));
             }
             Action::ToggleMcp => {
                 if self.mcp.is_some() {

@@ -829,6 +829,50 @@ fn the_window_remembers_the_last_version_seen() {
     assert_eq!(first.state().version_seen_before(), None, "a first launch");
 }
 
+const WHATS_NEW: &str = concat!("What's new in Senzor ", env!("CARGO_PKG_VERSION"));
+
+#[test]
+fn the_first_launch_after_an_update_shows_whats_new() {
+    use senzor::settings::AppSettings;
+    let mut harness = app_with_settings(AppSettings {
+        last_version: Some("0.9.0".into()),
+        ..Default::default()
+    });
+    assert!(harness.query_by_label(WHATS_NEW).is_some());
+    assert!(
+        harness
+            .query_by_label_contains("Simulate MQTT sensors from templates")
+            .is_some()
+    );
+    click(&mut harness, "OK");
+    assert!(harness.query_by_label(WHATS_NEW).is_none());
+}
+
+#[test]
+fn a_first_launch_or_the_same_version_shows_no_whats_new() {
+    use senzor::settings::AppSettings;
+    for last_version in [None, Some(env!("CARGO_PKG_VERSION").to_string())] {
+        let harness = app_with_settings(AppSettings {
+            last_version: last_version.clone(),
+            ..Default::default()
+        });
+        assert!(
+            harness.query_by_label(WHATS_NEW).is_none(),
+            "{last_version:?}"
+        );
+    }
+}
+
+#[test]
+fn whats_new_in_the_settings_shows_this_versions_highlights() {
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Settings");
+    harness.run();
+    click(&mut harness, "What's new");
+    harness.run();
+    assert!(harness.query_by_label(WHATS_NEW).is_some());
+}
+
 #[test]
 fn mcp_left_on_starts_with_the_next_window() {
     let port = free_port();

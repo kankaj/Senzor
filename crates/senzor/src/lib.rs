@@ -15,6 +15,7 @@ pub mod settings;
 pub mod testing;
 mod tree;
 mod ui;
+mod whats_new;
 
 pub use app::{McpStatus, SenzorApp};
 pub use dialogs::{FileDialogs, NativeDialogs};

@@ -50,6 +50,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
             Modal::Error(message) => error(ui, message),
             Modal::FileChanged { name, unsaved } => file_changed(ui, name, *unsaved),
             Modal::ClearRetained { topics, broker } => clear_retained(ui, topics, broker),
+            Modal::WhatsNew(releases) => whats_new(ui, releases),
         };
     });
     if outcome.is_none() && response.should_close() {
@@ -184,6 +185,37 @@ fn clear_retained(ui: &mut egui::Ui, topics: &[String], broker: &str) -> Option<
             ("Cancel", Outcome::Dismissed),
         ],
     )
+}
+
+/// The Highlights of each release, the newest first; the version is named when there are several.
+fn whats_new(ui: &mut egui::Ui, releases: &[crate::whats_new::Release]) -> Option<Outcome> {
+    ui.heading(format!(
+        "What's new in Senzor {}",
+        env!("CARGO_PKG_VERSION")
+    ));
+    egui::ScrollArea::vertical()
+        .max_height(360.0)
+        .show(ui, |ui| {
+            for release in releases {
+                if releases.len() > 1 {
+                    ui.add_space(4.0);
+                    ui.strong(&release.version);
+                }
+                for highlight in &release.highlights {
+                    ui.horizontal_top(|ui| {
+                        ui.label("•");
+                        // A row does not wrap its labels unless told to.
+                        ui.add(egui::Label::new(highlight).wrap());
+                    });
+                }
+            }
+        });
+    ui.add_space(4.0);
+    ui.hyperlink_to(
+        "Full changelog",
+        format!("{}/blob/main/CHANGELOG.md", super::SOURCE_URL),
+    );
+    ok(ui)
 }
 
 fn error(ui: &mut egui::Ui, message: &str) -> Option<Outcome> {
