@@ -239,6 +239,9 @@ pub fn show(
                     ui.end_row();
                 });
             ui.weak("With a seed, every run draws the same random values.");
+
+            ui.separator();
+            run_elsewhere(ui, doc, ui_state, actions);
         });
     ui_state.broker_open = open;
     actions.extend(replace_if_unchanged(original, broker, |f| {
@@ -288,6 +291,29 @@ fn connection_test(
         }
         None => {}
     }
+}
+
+/// Copy buttons for running the project with senzor-cli in CI or in a container.
+fn run_elsewhere(ui: &mut egui::Ui, doc: &Document, ui_state: &UiState, actions: &mut Vec<Action>) {
+    use crate::snippets::Snippet;
+    ui.strong("Run elsewhere");
+    let saved = doc.file_name().is_some();
+    ui.horizontal_wrapped(|ui| {
+        for snippet in [Snippet::GitHubActions, Snippet::DockerCompose] {
+            if ui
+                .add_enabled(saved, egui::Button::new(snippet.label()))
+                .on_hover_text("Puts text on the clipboard that runs this project with senzor-cli")
+                .on_disabled_hover_text("Save the project first: the snippet names its file")
+                .clicked()
+            {
+                actions.push(Action::CopySnippet(snippet));
+            }
+        }
+    });
+    if saved && ui_state.snippet_copied.is_some() {
+        ui.colored_label(ONLINE, "Copied.");
+    }
+    ui.weak("See the CI and Docker recipe in the documentation for the rest of the job.");
 }
 
 /// Hover hint of Clear retained messages while the project's devices run.

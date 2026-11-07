@@ -55,7 +55,7 @@ fn plain_text(text: &str) -> String {
 }
 
 /// `major.minor.patch` as numbers; anything after a `-` or `+` is ignored.
-fn version_number(version: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn version_number(version: &str) -> Option<(u64, u64, u64)> {
     let core = version.split(['-', '+']).next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))

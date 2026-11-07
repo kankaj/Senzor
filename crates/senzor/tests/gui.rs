@@ -9,8 +9,8 @@ use rumqttc::ConnectReturnCode;
 use senzor::SenzorApp;
 use senzor::document::Document;
 use senzor::testing::{
-    App, FRAME_PAUSE, FakeDialogs, RecordingNotifier, TIMEOUT, click, status, test_dir,
-    wait_online, wait_until, window_builder, write_project,
+    App, FRAME_PAUSE, FakeDialogs, FakeReleases, RecordingNotifier, TIMEOUT, click, status,
+    test_dir, wait_online, wait_until, window_builder, write_project,
 };
 use senzor_core::engine::InstanceStatus;
 use senzor_core::project::ProjectFile;
@@ -204,6 +204,52 @@ fn escape_closes_the_command_palette() {
     press(&mut harness, CTRL, egui::Key::K);
     press(&mut harness, egui::Modifiers::NONE, egui::Key::Escape);
     assert!(harness.query_by_label("Command palette").is_none());
+}
+
+/// The text the window last put on the clipboard, if any.
+fn copied(harness: &App) -> Option<String> {
+    harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+}
+
+#[test]
+fn project_settings_copy_a_github_actions_step_for_the_project() {
+    let path = write_project("snippet", &project(1883, false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "Broker: 127.0.0.1:1883");
+    harness.run();
+    harness
+        .get_by_label("Copy as a GitHub Actions step")
+        .click();
+    harness.step();
+    let text = copied(&harness).expect("something was copied");
+    assert!(
+        text.contains("senzor-cli run project.toml --duration 10m &"),
+        "{text}"
+    );
+    harness.run();
+    assert!(harness.query_by_label("Copied.").is_some());
+}
+
+#[test]
+fn snippets_wait_until_the_project_has_a_file() {
+    use egui_kittest::kittest::NodeT;
+    let mut harness = app(None, FakeDialogs::default());
+    click(&mut harness, "Set the broker");
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Copy as a docker-compose service")
+            .accesskit_node()
+            .is_disabled()
+    );
 }
 
 /// Asks to close the window, as its close button does.
@@ -942,6 +988,133 @@ fn the_window_remembers_the_last_version_seen() {
 
     let first = app_with_settings(AppSettings::default());
     assert_eq!(first.state().version_seen_before(), None, "a first launch");
+}
+
+/// A window started with `settings` whose update check asks `releases` instead of GitHub.
+fn app_with_releases(settings: senzor::settings::AppSettings, releases: FakeReleases) -> App {
+    let mut harness = window_builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+                .with_release_source(Box::new(releases))
+        });
+    harness.step();
+    harness
+}
+
+/// What the status bar says about release 99.0.0.
+const NEWER: &str = "Senzor 99.0.0 is out";
+
+fn release_99() -> senzor::update::Release {
+    senzor::update::Release {
+        version: "99.0.0".into(),
+        url: "https://github.com/kankaj/Senzor/releases/tag/v99.0.0".into(),
+    }
+}
+
+#[test]
+fn a_newer_release_is_shown_in_the_status_bar_and_the_settings() {
+    let releases = FakeReleases::latest("v99.0.0");
+    let mut harness = app_with_releases(Default::default(), releases.clone());
+    wait_until(&mut harness, "the notice", |h| {
+        h.query_by_label_contains(NEWER).is_some()
+    });
+    assert_eq!(releases.asked(), 1);
+    let settings = harness.state().settings();
+    assert!(settings.update_checked.is_some(), "the check is remembered");
+    assert_eq!(settings.latest_release, Some(release_99()));
+
+    harness.get_by_label_contains(NEWER).click();
+    harness.step();
+    let opened: Vec<String> = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            egui::OutputCommand::OpenUrl(open) => Some(open.url.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened, [release_99().url], "the release page opens");
+
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(harness.query_by_label("99.0.0 is out").is_some());
+}
+
+#[test]
+fn the_same_version_or_no_release_shows_no_notice() {
+    let current = concat!("v", env!("CARGO_PKG_VERSION"));
+    for releases in [FakeReleases::latest(current), FakeReleases::none()] {
+        let mut harness = app_with_releases(Default::default(), releases.clone());
+        wait_until(&mut harness, "the check", |h| {
+            h.state().settings().update_checked.is_some()
+        });
+        harness.run();
+        assert_eq!(releases.asked(), 1);
+        assert!(harness.query_by_label_contains("is out").is_none());
+    }
+}
+
+#[test]
+fn with_update_checks_off_nothing_is_asked_or_shown() {
+    let releases = FakeReleases::latest("v99.0.0");
+    let mut harness = app_with_releases(
+        senzor::settings::AppSettings {
+            check_updates: false,
+            latest_release: Some(release_99()),
+            ..Default::default()
+        },
+        releases.clone(),
+    );
+    harness.run();
+    std::thread::sleep(Duration::from_millis(200));
+    harness.run();
+    assert_eq!(releases.asked(), 0);
+    assert!(
+        harness.query_by_label_contains(NEWER).is_none(),
+        "a release found earlier is not shown either"
+    );
+}
+
+#[test]
+fn a_check_within_the_last_day_is_not_repeated_and_its_release_still_shows() {
+    let releases = FakeReleases::none();
+    let mut harness = app_with_releases(
+        senzor::settings::AppSettings {
+            update_checked: Some(senzor::update::now_secs() - 3600),
+            latest_release: Some(release_99()),
+            ..Default::default()
+        },
+        releases.clone(),
+    );
+    harness.run();
+    std::thread::sleep(Duration::from_millis(200));
+    harness.run();
+    assert_eq!(releases.asked(), 0);
+    assert!(harness.query_by_label_contains(NEWER).is_some());
+}
+
+#[test]
+fn turning_update_checks_off_hides_the_notice_and_is_saved() {
+    let mut harness = app_with_releases(
+        senzor::settings::AppSettings {
+            update_checked: Some(senzor::update::now_secs()),
+            latest_release: Some(release_99()),
+            ..Default::default()
+        },
+        FakeReleases::none(),
+    );
+    assert!(harness.query_by_label_contains(NEWER).is_some());
+    click(&mut harness, "Settings");
+    harness.run();
+    click(&mut harness, "Check for updates");
+    harness.run();
+    assert!(harness.query_by_label_contains(NEWER).is_none());
+    let mut storage = MemoryStorage::default();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    assert!(!senzor::settings::AppSettings::load(Some(&storage)).check_updates);
 }
 
 const WHATS_NEW: &str = concat!("What's new in Senzor ", env!("CARGO_PKG_VERSION"));

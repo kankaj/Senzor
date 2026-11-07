@@ -1,0 +1,538 @@
+{
+  "$defs": {
+    "AvailabilitySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "offline": {
+          "type": "string"
+        },
+        "online": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "will_delay": {
+          "description": "MQTT 5 Last Will delay, in whole seconds; needs a broker `session_expiry` at least as long.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "topic",
+        "online",
+        "offline"
+      ],
+      "type": "object"
+    },
+    "BrokerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "client_id_prefix": {
+          "default": "senzor-",
+          "type": "string"
+        },
+        "host": {
+          "default": "localhost",
+          "type": "string"
+        },
+        "keep_alive": {
+          "default": "30s",
+          "type": "string"
+        },
+        "mqtt_version": {
+          "$ref": "#/$defs/MqttVersion",
+          "default": "5",
+          "description": "The MQTT protocol version every instance of the project connects with."
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password_env": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "default": 1883,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_expiry": {
+          "description": "MQTT 5 session expiry interval. Above zero, instances reconnect without a clean start, so\na reconnect within `availability.will_delay` cancels the Last Will.",
+          "type": "string"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DeviceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "autostart": {
+          "default": true,
+          "type": "boolean"
+        },
+        "count": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldOverride"
+          },
+          "description": "Partial field tables (generator keys, `unit`, `name`) merged onto the template's fields\n(see `validate`).",
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interval": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "object"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "template"
+      ],
+      "type": "object"
+    },
+    "FieldOverride": {
+      "description": "Generator parameters, unit or name that replace the template field's, e.g. {\"start\": 1200}",
+      "type": "object"
+    },
+    "FieldSpec": {
+      "description": "One field: its generator (`generator` plus parameters), and optionally a unit and a readable name.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "generator": {
+              "const": "constant",
+              "type": "string"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "generator",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "generator": {
+              "const": "random_walk",
+              "type": "string"
+            },
+            "max": {
+              "format": "double",
+              "type": "number"
+            },
+            "min": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "start": {
+              "format": "double",
+              "type": "number"
+            },
+            "step": {
+              "format": "double",
+              "type": "number"
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "generator",
+            "start",
+            "min",
+            "max",
+            "step"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "amplitude": {
+              "format": "double",
+              "type": "number"
+            },
+            "center": {
+              "format": "double",
+              "type": "number"
+            },
+            "generator": {
+              "const": "sine",
+              "type": "string"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "period": {
+              "type": "string"
+            },
+            "phase": {
+              "default": "0s",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "generator",
+            "center",
+            "amplitude",
+            "period"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "generator": {
+              "const": "uniform",
+              "type": "string"
+            },
+            "max": {
+              "format": "double",
+              "type": "number"
+            },
+            "min": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "generator",
+            "min",
+            "max"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "generator": {
+              "const": "sequence",
+              "type": "string"
+            },
+            "loop": {
+              "default": true,
+              "type": "boolean"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "$ref": "#/$defs/Value"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "generator",
+            "values"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MessageSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "description": "MQTT 5 content type, sent as written.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message_expiry": {
+          "description": "MQTT 5 message expiry interval, in whole seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "user_properties": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "MQTT 5 user properties. Values are templates with the variables of the topic and payload.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "topic",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "MqttVersion": {
+      "description": "The MQTT protocol version of a project's connections.",
+      "enum": [
+        "5",
+        "3.1.1"
+      ],
+      "type": "string"
+    },
+    "SimulationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "seed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TemplateSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvailabilitySpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldSpec"
+          },
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "interval": {
+          "default": "10s",
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/MessageSpec"
+          },
+          "type": "array"
+        },
+        "qos": {
+          "default": 0,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retain": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "messages",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "TlsSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_cert": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Value": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A field or param value as written in the project file and produced by generators."
+    }
+  },
+  "$id": "https://senzor.kankaj.cz/schema/project.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The project file as written on disk. The GUI edits this; `validate` turns it into a `Project`.",
+  "properties": {
+    "broker": {
+      "$ref": "#/$defs/BrokerSpec",
+      "default": {
+        "client_id_prefix": "senzor-",
+        "host": "localhost",
+        "keep_alive": "30s",
+        "mqtt_version": "5",
+        "port": 1883
+      }
+    },
+    "devices": {
+      "items": {
+        "$ref": "#/$defs/DeviceSpec"
+      },
+      "type": "array"
+    },
+    "simulation": {
+      "$ref": "#/$defs/SimulationSpec"
+    },
+    "templates": {
+      "items": {
+        "$ref": "#/$defs/TemplateSpec"
+      },
+      "type": "array"
+    }
+  },
+  "title": "Senzor project file",
+  "type": "object"
+}

@@ -20,6 +20,7 @@ use crate::selection::{ProblemTarget, Selection, keep_valid};
 use crate::settings::{AppSettings, PanelTabs};
 use crate::ui::modals::{self, Outcome, UnsavedChoice};
 use crate::ui::{self, Action, Modal, Pending, UiState};
+use crate::update::{Release, ReleaseSource};
 
 mod mcp;
 
@@ -72,6 +73,11 @@ pub struct SenzorApp {
     notifier: Box<dyn Notifier>,
     /// Tells when instances fail, for the notifications.
     failures: FailureWatch,
+    /// Where the update check asks for the latest release; taken when it starts, so a window
+    /// asks once at most. Without one, there is no check.
+    release_source: Option<Box<dyn ReleaseSource>>,
+    /// Where the answer of the running update check comes in.
+    release_check: Option<std::sync::mpsc::Receiver<Result<Option<Release>, String>>>,
 }
 
 /// From this width of the detail panel on, a template's preview sits beside its editor.
@@ -146,6 +152,8 @@ impl SenzorApp {
             version_seen_before,
             notifier: Box::new(DesktopNotifier),
             failures: FailureWatch::default(),
+            release_source: None,
+            release_check: None,
         };
         match path {
             Some(path) => app.open_path(&path),
@@ -176,9 +184,26 @@ impl SenzorApp {
         self
     }
 
+    /// Asks `source` whether a newer release is out, instead of nobody. The check runs in the
+    /// background once the window shows, when the settings allow it and the last one is a day
+    /// old.
+    pub fn with_release_source(mut self, source: Box<dyn ReleaseSource>) -> Self {
+        self.release_source = Some(source);
+        self
+    }
+
     /// The app's own settings, saved between launches.
     pub fn settings(&self) -> &AppSettings {
         &self.settings
+    }
+
+    /// A release newer than this version, while update checks are on.
+    pub fn newer_release(&self) -> Option<&Release> {
+        self.settings
+            .latest_release
+            .as_ref()
+            .filter(|_| self.settings.check_updates)
+            .filter(|r| crate::update::is_newer(&r.version, env!("CARGO_PKG_VERSION")))
     }
 
     /// The version of Senzor that ran before this launch, or `None` on the first launch.
@@ -470,6 +495,42 @@ impl SenzorApp {
         });
     }
 
+    /// Takes in the update check's answer, and starts the check when the settings allow it and
+    /// the last one is a day old. It runs on a thread of its own, so a slow network never holds
+    /// the window up; when it fails, the next launch tries again.
+    fn check_for_updates(&mut self) {
+        if let Some(answer) = self.release_check.as_ref().and_then(|r| r.try_recv().ok()) {
+            self.release_check = None;
+            match answer {
+                Ok(latest) => {
+                    self.settings.update_checked = Some(crate::update::now_secs());
+                    self.settings.latest_release = latest;
+                }
+                Err(error) => eprintln!("Could not check for a newer Senzor: {error}"),
+            }
+        }
+        if !self.settings.check_updates
+            || !crate::update::due(self.settings.update_checked, crate::update::now_secs())
+        {
+            return;
+        }
+        let Some(source) = self.release_source.take() else {
+            return;
+        };
+        let (send, answer) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        let started = std::thread::Builder::new()
+            .name("update-check".into())
+            .spawn(move || {
+                let _ = send.send(source.latest());
+                ctx.request_repaint();
+            });
+        match started {
+            Ok(_) => self.release_check = Some(answer),
+            Err(error) => eprintln!("Could not check for a newer Senzor: {error}"),
+        }
+    }
+
     /// Asks where to save the messages the log shows, then writes them as CSV.
     fn export_log(&mut self) {
         let Some(path) = self.dialogs.save_log("messages.csv") else {
@@ -637,6 +698,18 @@ impl SenzorApp {
             }
             Action::ExportLog => self.export_log(),
             Action::OpenPalette => self.ui.palette = Some(Default::default()),
+            Action::CopySnippet(snippet) => match self.doc.file_name() {
+                Some(name) => {
+                    let text = crate::snippets::text(snippet, &name, self.doc.file());
+                    self.ctx.copy_text(text);
+                    self.ui.snippet_copied = Some(snippet);
+                }
+                None => {
+                    self.ui.modal = Some(Modal::Error(
+                        "Save the project first: the snippet names its file.".into(),
+                    ));
+                }
+            },
             Action::FindInLog => {
                 self.ui.bottom_tab = ui::BottomTab::Log;
                 self.ui.focus_log_filter = true;
@@ -681,6 +754,13 @@ impl SenzorApp {
                 self.settings.mcp_on = self.mcp.is_some();
             }
             Action::SetNotifyFailures(on) => self.settings.notify_failures = on,
+            Action::SetCheckUpdates(on) => self.settings.check_updates = on,
+            Action::OpenNewRelease => {
+                if let Some(release) = self.newer_release() {
+                    self.ctx
+                        .open_url(egui::OpenUrl::new_tab(release.url.clone()));
+                }
+            }
             Action::SetMcpPort(port) => {
                 self.settings.mcp_port = port;
                 self.mcp_port = port;
@@ -795,6 +875,7 @@ impl eframe::App for SenzorApp {
         }
         self.update_connection_test();
         self.update_clear_retained();
+        self.check_for_updates();
         self.ui.devices_running = self.state.instances.values().any(|i| i.status.is_running());
         self.check_disk();
         self.handle_close_request(&ctx);
@@ -814,6 +895,7 @@ impl eframe::App for SenzorApp {
             actions.extend(ui::dropped_file(&ctx).map(Action::OpenDropped));
         }
         let starting = self.starting_soon();
+        let newer = self.newer_release().cloned();
         egui::Panel::top("top-bar").show(ui, |ui| {
             let mcp = match self.mcp_status() {
                 McpStatus::Listening(address) => Some(address),
@@ -839,6 +921,7 @@ impl eframe::App for SenzorApp {
                 &self.doc.file().broker,
                 rate,
                 mcp,
+                newer.as_ref(),
                 &mut actions,
             );
         });
@@ -929,11 +1012,18 @@ impl eframe::App for SenzorApp {
         ui::drop_hint(&ctx);
         if self.ui.settings_open {
             let mcp = self.mcp_status();
-            ui::settings::show(&ctx, &mut self.ui, &self.settings, &mcp, &mut actions);
+            ui::settings::show(
+                &ctx,
+                &mut self.ui,
+                &self.settings,
+                &mcp,
+                newer.as_ref(),
+                &mut actions,
+            );
         }
 
         if let Some(palette) = &mut self.ui.palette {
-            let entries = ui::palette::entries(&self.doc, &self.state);
+            let entries = ui::palette::entries(&self.doc, &self.state, newer.as_ref());
             match ui::palette::show(&ctx, palette, &entries) {
                 Some(ui::palette::Outcome::Run(action)) => {
                     self.ui.palette = None;

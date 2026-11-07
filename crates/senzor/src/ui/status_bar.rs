@@ -1,5 +1,5 @@
 //! The status bar along the bottom of the window: the broker, what runs, how fast it publishes
-//! and whether AI agents can control the window.
+//! whether AI agents can control the window, and whether a newer Senzor is out.
 
 use std::net::SocketAddr;
 
@@ -8,6 +8,7 @@ use senzor_core::engine::{EngineState, InstanceStatus};
 use senzor_core::project::BrokerSpec;
 
 use super::{Action, ERROR, ONLINE, STOPPED, WARNING};
+use crate::update::Release;
 
 /// How many instances are in each state.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -48,12 +49,14 @@ impl Counts {
 }
 
 /// `rate`: messages per second. `mcp`: the address AI agents connect to while MCP is on.
+/// `newer`: a release newer than this version.
 pub fn show(
     ui: &mut egui::Ui,
     state: &EngineState,
     broker: &BrokerSpec,
     rate: f64,
     mcp: Option<SocketAddr>,
+    newer: Option<&Release>,
     actions: &mut Vec<Action>,
 ) {
     let counts = Counts::of(state);
@@ -118,6 +121,22 @@ pub fn show(
             if sign.clicked() {
                 right.push(Action::OpenSettings);
             }
+            // The right side is laid out from the right, so this comes before the MCP sign.
+            if let Some(release) = newer {
+                let text = format!(
+                    "{} Senzor {} is out",
+                    egui_phosphor::regular::ARROW_CIRCLE_UP,
+                    release.version
+                );
+                // In the links' colour, like the release link in the settings.
+                let link = ui
+                    .add(egui::Link::new(text))
+                    .on_hover_text("See what's new and download it");
+                if link.clicked() {
+                    right.push(Action::OpenNewRelease);
+                }
+                ui.separator();
+            }
         },
     );
     actions.extend(right);
@@ -143,7 +162,7 @@ mod tests {
     fn harness(state: EngineState, rate: f64, mcp: Option<SocketAddr>) -> Harness<'static> {
         let broker = BrokerSpec::default();
         let mut harness = Harness::new_ui(move |ui| {
-            show(ui, &state, &broker, rate, mcp, &mut Vec::new());
+            show(ui, &state, &broker, rate, mcp, None, &mut Vec::new());
         });
         harness.run();
         harness

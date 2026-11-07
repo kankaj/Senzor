@@ -102,6 +102,8 @@ pub enum Action {
     DeleteSelected,
     /// Show the message log and put the cursor in its filter.
     FindInLog,
+    /// Put a snippet that runs the project elsewhere on the clipboard.
+    CopySnippet(crate::snippets::Snippet),
     /// Open the command palette.
     OpenPalette,
     /// Save the messages the log shows as a CSV file.
@@ -123,6 +125,10 @@ pub enum Action {
     SetMcpPort(u16),
     /// Turn the notifications about failed instances on or off.
     SetNotifyFailures(bool),
+    /// Turn the daily look for a newer release on or off.
+    SetCheckUpdates(bool),
+    /// Open the page of the newer release in the browser.
+    OpenNewRelease,
 }
 
 /// Order in which a frame's actions are applied: edits, then renames, then removals, then the rest.
@@ -267,6 +273,8 @@ pub struct UiState {
     /// The field and value the several-instances view pins.
     pub bulk_pin_field: Option<String>,
     pub bulk_pin_value: String,
+    /// The snippet copied last, which Project settings confirms.
+    pub snippet_copied: Option<crate::snippets::Snippet>,
     /// The command palette, while it is open.
     pub palette: Option<palette::PaletteState>,
     /// The instance clicked last in the tree, where a Shift+click range starts.

@@ -7,6 +7,17 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use crate::generator::GeneratorSpec;
 use crate::project::FieldSpec;
 
+/// Where the documentation site publishes the project file's JSON Schema.
+pub const PROJECT_SCHEMA_URL: &str = "https://senzor.kankaj.cz/schema/project.json";
+
+/// The JSON Schema of a project file, for editors that check and complete TOML against one.
+pub fn project_schema() -> serde_json::Value {
+    let mut schema = schemars::schema_for!(crate::project::ProjectFile);
+    schema.insert("$id".into(), PROJECT_SCHEMA_URL.into());
+    schema.insert("title".into(), "Senzor project file".into());
+    schema.to_value()
+}
+
 /// A device's field override: a partial field table (`{ start = 1200 }`).
 pub(crate) struct TomlTable;
 
@@ -78,6 +89,16 @@ impl JsonSchema for FieldSpec {
 mod tests {
     use super::*;
     use schemars::schema_for;
+
+    #[test]
+    fn the_project_schema_names_itself_and_covers_the_file() {
+        let schema = project_schema();
+        assert_eq!(schema["$id"], PROJECT_SCHEMA_URL);
+        assert_eq!(schema["title"], "Senzor project file");
+        for key in ["broker", "templates", "devices", "simulation"] {
+            assert!(schema["properties"][key].is_object(), "{key}");
+        }
+    }
 
     #[test]
     fn every_generator_takes_a_unit_and_a_name() {

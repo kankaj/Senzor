@@ -8,7 +8,7 @@ edition.workspace = true
 
 [features]
 # JSON Schemas for the project-file types (used by the MCP server for tool inputs).
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "dep:serde_json"]
 
 [dependencies]
 humantime.workspace = true
@@ -17,6 +17,7 @@ minijinja.workspace = true
 rand.workspace = true
 rumqttc.workspace = true
 schemars = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

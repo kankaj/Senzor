@@ -26,17 +26,24 @@ notify-rust = "4.18.2"
 rfd = "0.17.2"
 humantime = "2.4.0"
 humantime-serde = "1.1.1"
+# The GUI's update check makes one HTTPS request: with hyper's HTTP/1 client (hyper already serves
+# MCP) over rustls (already used for MQTT over TLS), so it brings in no new crates.
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
 jsonschema = { version = "0.58.6", default-features = false }
 minijinja = { version = "3.0.0", features = ["json"] }
 rand = { version = "0.10.3", features = ["chacha"] }
 rmcp = { version = "3.8.0", default-features = false }
 rumqttc = "0.25.1"
 rumqttd = { version = "0.20.0", default-features = false }
+rustls-native-certs = "0.8.4"
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal"] }
+tokio-rustls = "0.26.6"
 toml = "1.1.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

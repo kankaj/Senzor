@@ -3,6 +3,7 @@
 mod instance;
 mod mqtt;
 mod probe;
+mod reload;
 mod retained;
 mod state;
 #[cfg(test)]
@@ -21,6 +22,7 @@ use instance::{InstanceCmd, STOP_TIMEOUT, run_instance};
 use state::Shared;
 
 pub use probe::{CONNECTION_TEST_TIMEOUT, test_connection};
+pub use reload::{Reload, ReloadSummary};
 pub use retained::{CLEAR_RETAINED_TIMEOUT, clear_retained, retained_topics};
 pub use state::{
     EngineState, InstanceState, InstanceStatus, LOG_CAPACITY, LogEntry, LogPage, NOTIFY_INTERVAL,

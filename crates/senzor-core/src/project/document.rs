@@ -46,6 +46,9 @@ pub struct Document {
     disk: Option<DiskStamp>,
     /// Another project found in the file and not yet taken or kept.
     on_disk: Option<ProjectFile>,
+    /// A `#:schema` line the file started with, which editors read to check and complete it.
+    /// Saving keeps it as the first line; other comments are not kept.
+    schema_line: Option<String>,
 }
 
 /// What tells that a file changed without reading it.
@@ -82,7 +85,9 @@ impl Document {
         let text = std::fs::read_to_string(path)
             .map_err(|e| OpenError::Read(format!("cannot read {}: {e}", path.display())))?;
         let file = ProjectFile::parse(&text).map_err(OpenError::Parse)?;
-        Ok(Self::from_file(Some(path.to_path_buf()), file))
+        let mut doc = Self::from_file(Some(path.to_path_buf()), file);
+        doc.schema_line = schema_line(&text);
+        Ok(doc)
     }
 
     fn from_file(path: Option<PathBuf>, file: ProjectFile) -> Self {
@@ -98,6 +103,7 @@ impl Document {
             open_group: None,
             disk,
             on_disk: None,
+            schema_line: None,
         }
     }
 
@@ -259,13 +265,24 @@ impl Document {
     }
 
     fn write(&mut self, path: &Path) -> Result<(), String> {
-        write_replacing(path, &self.file.to_toml_string())
+        let toml = self.file.to_toml_string();
+        let content = match &self.schema_line {
+            Some(line) => format!("{line}\n{toml}"),
+            None => toml,
+        };
+        write_replacing(path, &content)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         self.saved = self.file.clone();
         self.disk = DiskStamp::of(path);
         self.on_disk = None;
         Ok(())
     }
+}
+
+/// The file's first line when it is a `#:schema` directive.
+fn schema_line(text: &str) -> Option<String> {
+    let first = text.lines().next()?.trim_end();
+    first.starts_with("#:schema").then(|| first.to_string())
 }
 
 /// How many names [`create_temp`] tries before giving up.
@@ -680,6 +697,38 @@ count = 2
         assert_eq!(std::fs::read_to_string(&path).unwrap(), PROJECT);
         assert!(doc.is_dirty());
         assert_eq!(file_names(&dir), ["project.toml"]);
+    }
+
+    #[test]
+    fn a_schema_line_at_the_top_is_kept_when_saving() {
+        let dir = temp_dir("schema-line");
+        let path = dir.join("project.toml");
+        let directive = "#:schema https://senzor.kankaj.cz/schema/project.json";
+        std::fs::write(&path, format!("{directive}\n# a comment\n{PROJECT}")).unwrap();
+        let mut doc = open_edited(&path);
+        doc.save().unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.starts_with(&format!("{directive}\n")), "{saved}");
+        assert!(
+            !saved.contains("# a comment"),
+            "other comments are not kept"
+        );
+
+        let other = dir.join("other.toml");
+        doc.save_as(other.clone()).unwrap();
+        assert!(
+            std::fs::read_to_string(&other)
+                .unwrap()
+                .starts_with(directive)
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_schema_line_gets_none() {
+        let (_dir, path) = project_file("no-schema-line");
+        let mut doc = open_edited(&path);
+        doc.save().unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("#:schema"));
     }
 
     #[test]

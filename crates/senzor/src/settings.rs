@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
+use crate::update::Release;
+
 /// Light or dark colours, or whatever the operating system uses.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
@@ -79,6 +81,12 @@ pub struct AppSettings {
     pub last_version: Option<String>,
     /// Show a desktop notification when an instance fails while the window is in the background.
     pub notify_failures: bool,
+    /// Ask GitHub, at most once a day, whether a newer release is out.
+    pub check_updates: bool,
+    /// When GitHub last answered about the latest release, in seconds since 1970.
+    pub update_checked: Option<u64>,
+    /// The latest release GitHub named then, if there was one.
+    pub latest_release: Option<Release>,
 }
 
 impl Default for AppSettings {
@@ -92,6 +100,9 @@ impl Default for AppSettings {
             tabs: PanelTabs::default(),
             last_version: None,
             notify_failures: true,
+            check_updates: true,
+            update_checked: None,
+            latest_release: None,
         }
     }
 }
@@ -181,6 +192,12 @@ mod tests {
             },
             last_version: Some("1.0.0".into()),
             notify_failures: false,
+            check_updates: false,
+            update_checked: Some(1_800_000_000),
+            latest_release: Some(Release {
+                version: "1.1.0".into(),
+                url: "https://github.com/kankaj/Senzor/releases/tag/v1.1.0".into(),
+            }),
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);
@@ -217,6 +234,8 @@ mod tests {
         assert_eq!(settings.mcp_port, 18830, "MCP's usual port");
         assert!(!settings.mcp_on, "MCP stays off until turned on");
         assert!(settings.notify_failures, "failures are told about");
+        assert!(settings.check_updates, "updates are looked for");
+        assert_eq!(settings.update_checked, None, "never looked yet");
     }
 
     #[test]

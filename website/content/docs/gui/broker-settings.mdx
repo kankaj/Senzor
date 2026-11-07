@@ -100,3 +100,12 @@ Every instance with availability leaves its last status, usually `offline`, as a
 It lists the topics first, in a dialog such as **Clear 3 retained topics?**. **Clear** publishes an empty retained message to each topic, which makes the broker forget the message it keeps there; **Cancel** leaves them. While it runs, the window shows **clearing…**, then **Cleared 3 retained topics**, or in red why it could not, after **Could not clear:**. The client ID is the **Client ID prefix** followed by `clear-retained`.
 
 The button is off while any of the project's instances runs, since they would publish their retained messages again: hover over it to read **Stop the devices first: running instances would publish their retained messages again**. It is also off while the broker settings have problems. When no template has availability or retains its messages, the window says **Nothing to clear: no template has availability or retains its messages.** A topic that uses a field value is cleared only for the field's first value, and devices with problems are left out. From the command line, use [`senzor-cli clear-retained`](/docs/reference/cli#clear-retained).
+
+## Run elsewhere
+
+**Run elsewhere**, at the bottom of **Project settings**, puts text on the clipboard that runs the project with `senzor-cli`, for the setups the [CI and Docker recipe](/docs/recipes/ci-and-docker) describes:
+
+- **Copy as a GitHub Actions step**: a step that validates the project, runs it for up to 10 minutes in the background while `./run-integration-tests.sh` (replace it with your tests) runs, then stops it cleanly.
+- **Copy as a docker-compose service**: a service named `senzor` that mounts the project file into the container and runs it. It names an image `senzor-cli`, which you build yourself, as the recipe's [Senzor in a container](/docs/recipes/ci-and-docker#senzor-in-a-container) explains. When the broker's host is `localhost`, a comment points out that inside a container that is the container itself.
+
+Both use the project's file name, so the buttons are off until the project is saved; they assume the file sits next to the workflow's working directory or the compose file, so adjust the path if it does not. When the broker password comes from an environment variable (`password_env`), the step passes it from a secret of the same name and the service from the environment. **Copied.** confirms the copy. The [command palette](/docs/gui/window#command-palette) offers both too.

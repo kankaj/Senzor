@@ -3,11 +3,13 @@ mod support;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use assert_cmd::Command;
 use rumqttc::ConnectReturnCode;
-use senzor_testkit::{Subscriber, free_port, refusing_broker, start_broker};
+use senzor_testkit::{Received, Subscriber, free_port, refusing_broker, start_broker};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 const BIN: &str = "senzor-cli";
 
@@ -492,4 +494,359 @@ async fn sigterm_shuts_down_gracefully_and_exits_0() {
     };
     let status = status.unwrap();
     assert_eq!(status.code(), Some(0), "exit status: {status:?}");
+}
+
+#[test]
+fn schema_prints_the_project_files_json_schema() {
+    let output = Command::cargo_bin(BIN)
+        .unwrap()
+        .arg("schema")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        schema["$id"],
+        "https://senzor.kankaj.cz/schema/project.json"
+    );
+    assert!(schema["properties"]["devices"].is_object());
+}
+
+/// The docs site publishes the schema editors download; it must match the code.
+#[test]
+fn the_published_schema_is_up_to_date() {
+    let output = Command::cargo_bin(BIN)
+        .unwrap()
+        .arg("schema")
+        .output()
+        .unwrap();
+    let published = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../website/public/schema/project.json");
+    let published = std::fs::read_to_string(&published).unwrap_or_default();
+    assert!(
+        published == String::from_utf8(output.stdout).unwrap(),
+        "website/public/schema/project.json is out of date; regenerate it with\n  \
+         cargo run -q -p senzor-cli -- schema > website/public/schema/project.json"
+    );
+}
+
+/// A project for the `--watch` tests: one device per `(id, value)`, each publishing `value` on
+/// `w/<id>/state`, with `online`/`offline` on `w/<id>/status`.
+fn watch_toml(port: u16, devices: &[(&str, i32)]) -> String {
+    let mut toml = format!(
+        r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+
+[[templates]]
+id = "w"
+interval = "200ms"
+availability = {{ topic = "w/{{{{ device_id }}}}/status", online = "online", offline = "offline" }}
+messages = [{{ topic = "w/{{{{ device_id }}}}/state", payload = "{{{{ v }}}}" }}]
+fields.v = {{ generator = "constant", value = 0 }}
+"#
+    );
+    for (id, value) in devices {
+        toml.push_str(&format!(
+            "\n[[devices]]\nid = \"{id}\"\ntemplate = \"w\"\nfields.v = {{ value = {value} }}\n"
+        ));
+    }
+    toml
+}
+
+/// How long a `--watch` test waits for something it expects.
+const WATCH_WAIT: Duration = Duration::from_secs(10);
+
+/// `senzor-cli run <project> --watch <args>` in the background. Its stderr is collected as it
+/// comes; dropping the value kills the process.
+struct Watching {
+    child: tokio::process::Child,
+    stderr: Arc<Mutex<String>>,
+}
+
+impl Watching {
+    fn start(project: &Path, args: &[&str]) -> Self {
+        let mut child = tokio::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
+            .arg("run")
+            .arg(project)
+            .arg("--watch")
+            .args(args)
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
+        let collected = stderr.clone();
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut text = collected.lock().unwrap();
+                text.push_str(&line);
+                text.push('\n');
+            }
+        });
+        Self { child, stderr }
+    }
+
+    fn stderr(&self) -> String {
+        self.stderr.lock().unwrap().clone()
+    }
+
+    /// Waits until stderr contains `text`, then returns all of it.
+    async fn wait_for_stderr(&self, text: &str) -> String {
+        let deadline = tokio::time::Instant::now() + WATCH_WAIT;
+        loop {
+            let stderr = self.stderr();
+            if stderr.contains(text) {
+                return stderr;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "stderr never had {text:?}:\n{stderr}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Waits for the process to end by itself; returns its exit code and stderr.
+    async fn exit(mut self) -> (Option<i32>, String) {
+        let status = tokio::time::timeout(WATCH_WAIT, self.child.wait())
+            .await
+            .expect("senzor-cli exited in time")
+            .unwrap();
+        // The reader task gets the last lines once the pipe closes.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        (status.code(), self.stderr())
+    }
+}
+
+/// Adds messages to `seen` until `done(seen)` holds; fails after [`WATCH_WAIT`].
+async fn record_until(
+    sub: &mut Subscriber,
+    seen: &mut Vec<Received>,
+    what: &str,
+    done: impl Fn(&[Received]) -> bool,
+) {
+    let deadline = tokio::time::Instant::now() + WATCH_WAIT;
+    while !done(seen) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {what}: {seen:#?}"
+        );
+        seen.extend(sub.collect(Duration::from_millis(50)).await);
+    }
+}
+
+/// How many messages in `seen` have `payload` on `topic`.
+fn count(seen: &[Received], topic: &str, payload: &str) -> usize {
+    seen.iter()
+        .filter(|m| m.topic == topic && m.payload == payload)
+        .count()
+}
+
+fn has(seen: &[Received], topic: &str, payload: &str) -> bool {
+    count(seen, topic, payload) > 0
+}
+
+/// Writes `content` over the project file, as an editor's save does.
+fn save(path: &Path, content: &str) {
+    std::fs::write(path, content).unwrap();
+}
+
+/// Ends with `--duration`, so it also shows that `--watch` keeps to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_restarts_changed_devices_starts_added_ones_and_stops_removed_ones() {
+    let port = start_broker();
+    let mut sub = Subscriber::connect(port, "w/#").await;
+    let path = write_project(
+        "watch",
+        &watch_toml(port, &[("keep", 1), ("change", 1), ("gone", 1)]),
+    );
+    let run = Watching::start(&path, &["--duration", "6s"]);
+    let mut seen = Vec::new();
+    record_until(&mut sub, &mut seen, "all online", |s| {
+        ["keep", "change", "gone"]
+            .iter()
+            .all(|id| has(s, &format!("w/{id}/status"), "online"))
+    })
+    .await;
+
+    save(
+        &path,
+        &watch_toml(port, &[("keep", 1), ("change", 2), ("lab", 1)]),
+    );
+    let mut after = Vec::new();
+    record_until(&mut sub, &mut after, "the reload", |s| {
+        has(s, "w/change/status", "offline")
+            && has(s, "w/change/status", "online")
+            && has(s, "w/change/state", "2")
+            && has(s, "w/lab/status", "online")
+            && has(s, "w/gone/status", "offline")
+    })
+    .await;
+    let stderr = run.wait_for_stderr("reloaded").await;
+    assert!(
+        stderr.contains(&format!(
+            "reloaded {}: restarted change; started lab; stopped gone",
+            path.display()
+        )),
+        "{stderr}"
+    );
+    after.extend(sub.collect(Duration::from_millis(500)).await);
+    assert!(
+        !after.iter().any(|m| m.topic == "w/keep/status"),
+        "keep is left alone: {after:#?}"
+    );
+    let gone_offline = after
+        .iter()
+        .position(|m| m.topic == "w/gone/status")
+        .unwrap();
+    assert!(
+        !after[gone_offline..]
+            .iter()
+            .any(|m| m.topic == "w/gone/state"),
+        "gone stopped publishing: {after:#?}"
+    );
+
+    let (code, stderr) = run.exit().await;
+    assert_eq!(code, Some(0), "{stderr}");
+    let rest = sub.collect(Duration::from_millis(300)).await;
+    assert_eq!(count(&rest, "w/keep/status", "offline"), 1, "{rest:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_keeps_the_last_valid_project_while_a_save_has_problems() {
+    let port = start_broker();
+    let mut sub = Subscriber::connect(port, "w/#").await;
+    let path = write_project("watch-invalid", &watch_toml(port, &[("dev", 1)]));
+    let run = Watching::start(&path, &[]);
+    let mut seen = Vec::new();
+    record_until(&mut sub, &mut seen, "dev online", |s| {
+        has(s, "w/dev/status", "online")
+    })
+    .await;
+
+    let broken = watch_toml(port, &[("dev", 1), ("bad", 1)]).replace(
+        "id = \"bad\"\ntemplate = \"w\"",
+        "id = \"bad\"\ntemplate = \"nope\"",
+    );
+    save(&path, &broken);
+    let problem = format!("{}: device `bad`: unknown template `nope`", path.display());
+    run.wait_for_stderr(&problem).await;
+    let mut after = Vec::new();
+    record_until(&mut sub, &mut after, "dev publishing on", |s| {
+        count(s, "w/dev/state", "1") >= 8
+    })
+    .await;
+    assert!(
+        !after.iter().any(|m| m.topic.ends_with("/status")),
+        "nothing restarted: {after:#?}"
+    );
+    assert_eq!(
+        run.stderr().matches(&problem).count(),
+        1,
+        "{}",
+        run.stderr()
+    );
+
+    save(&path, &watch_toml(port, &[("dev", 1), ("lab", 1)]));
+    let stderr = run.wait_for_stderr("reloaded").await;
+    assert!(
+        stderr.contains(&format!("reloaded {}: started lab", path.display())),
+        "{stderr}"
+    );
+    record_until(&mut sub, &mut after, "lab online", |s| {
+        has(s, "w/lab/status", "online")
+    })
+    .await;
+    assert!(!has(&after, "w/dev/status", "offline"), "{after:#?}");
+    assert_eq!(
+        run.stderr().matches(&problem).count(),
+        1,
+        "{}",
+        run.stderr()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_restarts_every_device_when_the_broker_changes() {
+    let port = start_broker();
+    let mut sub = Subscriber::connect(port, "w/#").await;
+    let path = write_project("watch-broker", &watch_toml(port, &[("a", 1), ("b", 1)]));
+    let run = Watching::start(&path, &[]);
+    let mut seen = Vec::new();
+    record_until(&mut sub, &mut seen, "a and b online", |s| {
+        has(s, "w/a/status", "online") && has(s, "w/b/status", "online")
+    })
+    .await;
+
+    save(
+        &path,
+        &watch_toml(port, &[("a", 1), ("b", 1)])
+            .replace("[broker]\n", "[broker]\nkeep_alive = \"20s\"\n"),
+    );
+    let stderr = run.wait_for_stderr("reloaded").await;
+    assert!(
+        stderr.contains(&format!(
+            "reloaded {}: broker changed; restarted a, b",
+            path.display()
+        )),
+        "{stderr}"
+    );
+    let mut after = Vec::new();
+    record_until(&mut sub, &mut after, "a and b back online", |s| {
+        ["a", "b"].iter().all(|id| {
+            let topic = format!("w/{id}/status");
+            has(s, &topic, "offline") && has(s, &topic, "online")
+        })
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_waits_while_the_file_is_missing_or_empty() {
+    let port = start_broker();
+    let mut sub = Subscriber::connect(port, "w/#").await;
+    let path = write_project("watch-missing", &watch_toml(port, &[("dev", 1)]));
+    let run = Watching::start(&path, &[]);
+    let mut seen = Vec::new();
+    record_until(&mut sub, &mut seen, "dev online", |s| {
+        has(s, "w/dev/status", "online")
+    })
+    .await;
+
+    std::fs::remove_file(&*path).unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    save(&path, "");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    save(&path, &watch_toml(port, &[("dev", 1), ("lab", 1)]));
+    let stderr = run.wait_for_stderr("reloaded").await;
+    assert!(
+        stderr.contains(&format!("reloaded {}: started lab", path.display())),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("cannot read"), "{stderr}");
+    assert!(!stderr.contains("stopped"), "{stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_without_watch_ignores_edits() {
+    let port = start_broker();
+    let mut sub = Subscriber::connect(port, "w/#").await;
+    let path = write_project("no-watch", &watch_toml(port, &[("dev", 1)]));
+    let edit_path = path.to_path_buf();
+    let content = watch_toml(port, &[("dev", 2), ("lab", 1)]);
+    let edit = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        save(&edit_path, &content);
+    });
+    let output = run_cli_async("run", path.to_path_buf(), &["--duration", "3s"]).await;
+    edit.await.unwrap();
+    assert_exit(&output, 0);
+    assert!(!stderr(&output).contains("reloaded"), "{}", stderr(&output));
+    let messages = sub.collect(Duration::from_millis(300)).await;
+    assert!(!messages.iter().any(|m| m.topic.starts_with("w/lab")));
+    assert!(!has(&messages, "w/dev/state", "2"));
+    assert_eq!(count(&messages, "w/dev/status", "online"), 1);
 }

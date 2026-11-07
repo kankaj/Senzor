@@ -5,6 +5,7 @@ use super::switch::switch;
 use super::{Action, ERROR, UiState};
 use crate::app::McpStatus;
 use crate::settings::{AppSettings, Theme};
+use crate::update::Release;
 
 /// The app's settings window, opened from the top bar and kept in the middle of the window. Unlike the broker dialog it edits no
 /// project: what it holds belongs to the app.
@@ -13,6 +14,7 @@ pub fn show(
     ui_state: &mut UiState,
     settings: &AppSettings,
     mcp: &McpStatus,
+    newer: Option<&Release>,
     actions: &mut Vec<Action>,
 ) {
     let mut open = ui_state.settings_open;
@@ -30,8 +32,17 @@ pub fn show(
                     notify_row(ui, settings.notify_failures, actions);
                     mcp_row(ui, mcp, actions);
 
+                    updates_row(ui, settings.check_updates, actions);
+
                     ui.label("Version");
-                    ui.label(env!("CARGO_PKG_VERSION"));
+                    ui.horizontal(|ui| {
+                        ui.label(env!("CARGO_PKG_VERSION"));
+                        if let Some(release) = newer {
+                            ui.label("·");
+                            ui.hyperlink_to(format!("{} is out", release.version), &release.url)
+                                .on_hover_text("See what's new and download it");
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("Licence");
@@ -146,6 +157,24 @@ fn notify_row(ui: &mut egui::Ui, notify: bool, actions: &mut Vec<Action>) {
             actions.push(Action::SetNotifyFailures(on));
         }
         ui.label("when an instance fails in the background");
+    });
+    ui.end_row();
+}
+
+/// The switch for the daily look for a newer release.
+fn updates_row(ui: &mut egui::Ui, check: bool, actions: &mut Vec<Action>) {
+    ui.label(format!("{} Updates", icons::ARROW_CIRCLE_UP));
+    let mut on = check;
+    ui.horizontal(|ui| {
+        let hint = "Asks GitHub once a day whether a newer release exists; nothing about you or \
+                    your projects is sent";
+        if switch(ui, &mut on, "Check for updates")
+            .on_hover_text(hint)
+            .clicked()
+        {
+            actions.push(Action::SetCheckUpdates(on));
+        }
+        ui.label("say when a newer version is out");
     });
     ui.end_row();
 }

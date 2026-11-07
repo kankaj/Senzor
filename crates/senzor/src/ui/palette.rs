@@ -9,6 +9,7 @@ use super::Action;
 use crate::document::Document;
 use crate::examples::EXAMPLES;
 use crate::selection::Selection;
+use crate::update::Release;
 
 /// How many matches the palette lists.
 pub const SHOWN: usize = 12;
@@ -63,13 +64,19 @@ const ACTIONS: &[NamedAction] = &[
     ("Find in the message log", || Action::FindInLog),
     ("Export the message log…", || Action::ExportLog),
     ("Settings", || Action::OpenSettings),
+    ("Copy as a GitHub Actions step", || {
+        Action::CopySnippet(crate::snippets::Snippet::GitHubActions)
+    }),
+    ("Copy as a docker-compose service", || {
+        Action::CopySnippet(crate::snippets::Snippet::DockerCompose)
+    }),
     ("Turn MCP on or off", || Action::ToggleMcp),
     ("What's new", || Action::ShowWhatsNew),
 ];
 
-/// Everything the palette can find: the actions, then the project's devices, instances and
-/// templates, the built-in templates and the examples.
-pub fn entries(doc: &Document, state: &EngineState) -> Vec<Entry> {
+/// Everything the palette can find: the actions (with the newer release, when there is one),
+/// then the project's devices, instances and templates, the built-in templates and the examples.
+pub fn entries(doc: &Document, state: &EngineState, newer: Option<&Release>) -> Vec<Entry> {
     let entry = |label: &str, kind, target| Entry {
         label: label.to_string(),
         kind,
@@ -79,6 +86,14 @@ pub fn entries(doc: &Document, state: &EngineState) -> Vec<Entry> {
         .iter()
         .map(|(label, make)| entry(label, "Action", Target::Run(*make)))
         .collect();
+    if let Some(release) = newer {
+        let label = format!("Update: Senzor {} is out", release.version);
+        entries.push(entry(
+            &label,
+            "Action",
+            Target::Run(|| Action::OpenNewRelease),
+        ));
+    }
     let file = doc.file();
     for (index, device) in file.devices.iter().enumerate() {
         entries.push(entry(
@@ -252,7 +267,7 @@ mod tests {
         state
             .instances
             .insert("old-0".into(), InstanceState::new("old"));
-        let all = entries(&document(), &state);
+        let all = entries(&document(), &state, None);
         let all = labels(&all.iter().collect::<Vec<_>>());
         for wanted in [
             "Action: Stop all",
@@ -270,7 +285,7 @@ mod tests {
 
     #[test]
     fn every_word_must_match_and_starts_rank_first() {
-        let all = entries(&document(), &EngineState::default());
+        let all = entries(&document(), &EngineState::default(), None);
         assert_eq!(labels(&matches(&all, "sto"))[0], "Action: Stop all");
         assert_eq!(
             labels(&matches(&all, "office 1")),
@@ -282,8 +297,22 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_release_can_be_found_as_an_update() {
+        let release = Release {
+            version: "9.9.9".into(),
+            url: "https://github.com/kankaj/Senzor/releases/tag/v9.9.9".into(),
+        };
+        let all = entries(&document(), &EngineState::default(), Some(&release));
+        let found = matches(&all, "update");
+        assert_eq!(labels(&found), ["Action: Update: Senzor 9.9.9 is out"]);
+        assert!(matches!(found[0].action(), Action::OpenNewRelease));
+        let without = entries(&document(), &EngineState::default(), None);
+        assert!(matches(&without, "update").is_empty());
+    }
+
+    #[test]
     fn an_empty_query_lists_the_actions_first_and_no_more_than_shown() {
-        let all = entries(&document(), &EngineState::default());
+        let all = entries(&document(), &EngineState::default(), None);
         let found = matches(&all, "");
         assert_eq!(found.len(), SHOWN);
         assert_eq!(found[0].kind, "Action");

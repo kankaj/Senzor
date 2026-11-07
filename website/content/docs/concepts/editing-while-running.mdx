@@ -5,7 +5,7 @@ description: What happens to running devices when you change the project in the 
 
 In the GUI you can edit a project while its devices run. An edit never changes a running instance by itself: each instance keeps the settings it started with until you restart it. The GUI marks the instances that run with outdated settings and blocks the devices that cannot start.
 
-This page describes the GUI. Edits an AI agent makes over MCP, in the GUI or in `senzor-cli mcp`, affect running devices the same way. `senzor-cli run` reads the project once when it starts; to apply changes, stop it and run it again.
+This page describes the GUI. Edits an AI agent makes over MCP, in the GUI or in `senzor-cli mcp`, affect running devices the same way. `senzor-cli run` reads the project once when it starts; to apply changes, stop it and run it again, or start it with `--watch`, which applies each save and restarts only the instances whose settings changed (see [Apply saves while it runs](/docs/headless#apply-saves-while-it-runs)).
 
 ## Validation on every edit
 

@@ -2219,6 +2219,7 @@ dependencies = [
  "pin-project-lite",
  "smallvec",
  "tokio",
+ "want",
 ]
 
 [[package]]
@@ -4474,12 +4475,16 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "egui_kittest",
+ "http-body-util",
  "humantime",
+ "hyper 1.12.0",
+ "hyper-util",
  "image",
  "notify-rust",
  "rfd",
  "rmcp",
  "rumqttc",
+ "rustls-native-certs",
  "senzor",
  "senzor-core",
  "senzor-mcp",
@@ -4487,6 +4492,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-rustls",
  "toml 1.1.8+spec-1.1.0",
  "winresource",
 ]

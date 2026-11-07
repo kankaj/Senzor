@@ -7,12 +7,15 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use senzor_core::engine::{
-    CLEAR_RETAINED_TIMEOUT, Command, Engine, EngineState, InstanceStatus, Target, clear_retained,
-    retained_topics,
+    CLEAR_RETAINED_TIMEOUT, Command, Engine, EngineHandle, EngineState, InstanceStatus, Reload,
+    ReloadSummary, Target, clear_retained, retained_topics,
 };
 use senzor_core::project::{Project, ProjectError, ProjectFile};
 use senzor_mcp::{Session, serve_stdio};
 use tracing_subscriber::EnvFilter;
+use watch::{FileWatch, Stamp};
+
+mod watch;
 
 /// Exit code for an invalid project or invalid arguments.
 const INVALID: u8 = 2;
@@ -42,6 +45,10 @@ enum Cmd {
         /// Stop after this long, e.g. `30s` or `10m`.
         #[arg(long, value_parser = humantime::parse_duration)]
         duration: Option<Duration>,
+        /// Apply each save of the project file: restart the devices that changed, start added
+        /// ones, stop removed ones.
+        #[arg(long)]
+        watch: bool,
     },
     /// Delete the retained messages the project's instances leave on the broker.
     ClearRetained {
@@ -50,6 +57,8 @@ enum Cmd {
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
     },
+    /// Print the project file's JSON Schema, for editors that check and complete TOML.
+    Schema,
     /// Serve the Model Context Protocol on stdin/stdout, so an AI agent can control Senzor.
     Mcp {
         /// Project file to open; without it, an empty project.
@@ -69,8 +78,10 @@ fn main() -> ExitCode {
             project,
             only,
             duration,
-        } => run(&project, &only, duration),
+            watch,
+        } => run(&project, &only, duration, watch),
         Cmd::ClearRetained { project, only } => clear(&project, &only),
+        Cmd::Schema => schema(),
         Cmd::Mcp {
             project,
             no_autostart,
@@ -107,21 +118,45 @@ fn report(path: &Path, errors: &[ProjectError]) {
 
 /// Reads, parses and validates; prints problems and returns the exit code on failure.
 fn load(path: &Path) -> Result<Project, ExitCode> {
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        eprintln!("error: cannot read {}: {e}", path.display());
-        ExitCode::from(INVALID)
-    })?;
-    let file = ProjectFile::parse(&text).map_err(|errors| {
+    let text = read(path)?;
+    check(path, &text).map_err(|errors| {
         report(path, &errors);
         ExitCode::from(INVALID)
-    })?;
+    })
+}
+
+fn read(path: &Path) -> Result<String, ExitCode> {
+    std::fs::read_to_string(path).map_err(|e| {
+        eprintln!("error: cannot read {}: {e}", path.display());
+        ExitCode::from(INVALID)
+    })
+}
+
+/// Parses and validates `text`, the content of the project file at `path`.
+fn check(path: &Path, text: &str) -> Result<Project, Vec<ProjectError>> {
+    let file = ProjectFile::parse(text)?;
     let base_dir = path.parent().unwrap_or(Path::new("."));
     let validated = file.validate(base_dir);
-    if !validated.errors.is_empty() {
-        report(path, &validated.errors);
-        return Err(ExitCode::from(INVALID));
+    if validated.errors.is_empty() {
+        Ok(validated.project)
+    } else {
+        Err(validated.errors)
     }
-    Ok(validated.project)
+}
+
+/// Prints the schema the docs site also publishes at [`senzor_core::PROJECT_SCHEMA_URL`].
+fn schema() -> ExitCode {
+    let schema = senzor_core::project_schema();
+    match serde_json::to_string_pretty(&schema) {
+        Ok(text) => {
+            println!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn validate(path: &Path) -> ExitCode {
@@ -149,12 +184,7 @@ fn count_noun(count: usize, noun: &str) -> String {
 /// Device IDs to start: `--only` (trimmed) or every device with `autostart = true`; never empty.
 fn select_devices(project: &Project, only: &[String]) -> Result<Vec<String>, String> {
     if only.is_empty() {
-        let autostart: Vec<String> = project
-            .devices
-            .iter()
-            .filter(|d| d.autostart)
-            .map(|d| d.id.clone())
-            .collect();
+        let autostart = autostart_devices(project);
         if autostart.is_empty() {
             return Err("no devices to start (none has autostart = true; use --only)".into());
         }
@@ -163,13 +193,36 @@ fn select_devices(project: &Project, only: &[String]) -> Result<Vec<String>, Str
     requested_devices(project, only)
 }
 
-/// The device IDs in a non-empty `--only`, trimmed; an error when it names none or unknown ones.
-fn requested_devices(project: &Project, only: &[String]) -> Result<Vec<String>, String> {
-    let requested: Vec<String> = only
+fn autostart_devices(project: &Project) -> Vec<String> {
+    project
+        .devices
         .iter()
+        .filter(|d| d.autostart)
+        .map(|d| d.id.clone())
+        .collect()
+}
+
+/// The device IDs in `--only`, trimmed, blanks left out.
+fn trimmed_ids(only: &[String]) -> Vec<String> {
+    only.iter()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
-        .collect();
+        .collect()
+}
+
+/// The devices to run after a save under `--watch`: chosen as at the start, without the errors.
+/// An `--only` ID the saved project lacks starts once a later save adds the device back.
+fn watched_devices(project: &Project, only: &[String]) -> Vec<String> {
+    if only.is_empty() {
+        autostart_devices(project)
+    } else {
+        trimmed_ids(only)
+    }
+}
+
+/// The device IDs in a non-empty `--only`, trimmed; an error when it names none or unknown ones.
+fn requested_devices(project: &Project, only: &[String]) -> Result<Vec<String>, String> {
+    let requested = trimmed_ids(only);
     if requested.is_empty() {
         return Err("--only names no devices".into());
     }
@@ -185,10 +238,19 @@ fn requested_devices(project: &Project, only: &[String]) -> Result<Vec<String>, 
     }
 }
 
-fn run(path: &Path, only: &[String], duration: Option<Duration>) -> ExitCode {
-    let project = match load(path) {
-        Ok(project) => project,
+fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) -> ExitCode {
+    // Before reading, so a save while the file is read is not missed.
+    let stamp = Stamp::of(path);
+    let text = match read(path) {
+        Ok(text) => text,
         Err(code) => return code,
+    };
+    let project = match check(path, &text) {
+        Ok(project) => project,
+        Err(errors) => {
+            report(path, &errors);
+            return ExitCode::from(INVALID);
+        }
     };
     let devices = match select_devices(&project, only) {
         Ok(devices) => devices,
@@ -204,7 +266,14 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let failed = runtime.block_on(run_engine(project, devices, duration));
+    let watch = watch.then(|| Watch {
+        file: FileWatch::new(path, stamp, text),
+        path: path.to_path_buf(),
+        only: only.to_vec(),
+        project: project.clone(),
+        devices: devices.clone(),
+    });
+    let failed = runtime.block_on(run_engine(project, devices, duration, watch));
     if failed.is_empty() {
         return ExitCode::SUCCESS;
     }
@@ -216,12 +285,13 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>) -> ExitCode {
     ExitCode::from(INSTANCE_FAILED)
 }
 
-/// Starts `devices`, waits for Ctrl+C, SIGTERM or `duration`, then shuts the engine down.
-/// Returns the IDs of the instances that ended Failed.
+/// Starts `devices`, applies the saves `watch` finds, waits for Ctrl+C, SIGTERM or `duration`,
+/// then shuts the engine down. Returns the IDs of the instances that ended Failed.
 async fn run_engine(
     project: Project,
     devices: Vec<String>,
     duration: Option<Duration>,
+    watch: Option<Watch>,
 ) -> Vec<String> {
     let shutdown = shutdown_signal();
     tracing::info!(
@@ -232,19 +302,98 @@ async fn run_engine(
     for id in devices {
         engine.send(Command::Start(Target::Device(id)));
     }
-    match duration {
-        Some(duration) => {
-            tokio::select! {
-                _ = shutdown => {}
-                _ = tokio::time::sleep(duration) => {}
+    let end = async {
+        match duration {
+            Some(duration) => {
+                tokio::select! {
+                    _ = shutdown => {}
+                    _ = tokio::time::sleep(duration) => {}
+                }
             }
+            None => shutdown.await,
         }
-        None => shutdown.await,
+    };
+    let reloads = async {
+        match watch {
+            Some(watch) => watch.run(&engine).await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        _ = end => {}
+        _ = reloads => {}
     }
     tracing::info!("shutting down");
     let observer = engine.observer();
     engine.shutdown().await;
     observer.read(failed_instances)
+}
+
+/// `run --watch`: the project that runs and the file it came from.
+struct Watch {
+    file: FileWatch,
+    path: PathBuf,
+    only: Vec<String>,
+    project: Project,
+    /// The devices that run, as chosen for `project`.
+    devices: Vec<String>,
+}
+
+impl Watch {
+    /// Applies every save of the file to `engine`; never returns.
+    async fn run(mut self, engine: &EngineHandle) {
+        loop {
+            let text = self.file.changed().await;
+            match check(&self.path, &text) {
+                Ok(project) => self.apply(project, engine),
+                Err(errors) => {
+                    tracing::warn!(
+                        "{} has problems; the devices keep running as before",
+                        self.path.display()
+                    );
+                    report(&self.path, &errors);
+                }
+            }
+        }
+    }
+
+    fn apply(&mut self, project: Project, engine: &EngineHandle) {
+        let devices = watched_devices(&project, &self.only);
+        let reload = Reload::plan(&self.project, &self.devices, &project, &devices);
+        let summary = reload.summary(&self.project, &project, &devices);
+        tracing::info!(
+            "reloaded {}: {}",
+            self.path.display(),
+            describe(&reload, &summary)
+        );
+        for command in reload.commands(project.clone()) {
+            engine.send(command);
+        }
+        self.project = project;
+        self.devices = devices;
+    }
+}
+
+/// `broker changed; restarted a, b; started c; stopped d`, or that nothing running changed.
+fn describe(reload: &Reload, summary: &ReloadSummary) -> String {
+    let mut parts = Vec::new();
+    if reload.broker_changed {
+        parts.push("broker changed".to_string());
+    }
+    for (verb, ids) in [
+        ("restarted", &summary.restarted),
+        ("started", &summary.started),
+        ("stopped", &summary.stopped),
+    ] {
+        if !ids.is_empty() {
+            parts.push(format!("{verb} {}", ids.join(", ")));
+        }
+    }
+    if parts.is_empty() {
+        "no running device changed".into()
+    } else {
+        parts.join("; ")
+    }
 }
 
 /// IDs of the instances whose status is Failed, in ID order. An instance that is still
@@ -367,6 +516,34 @@ mod tests {
         assert!(!log_colours(true, Some(OsString::from("1"))));
         assert!(!log_colours(false, None));
         assert!(!log_colours(false, Some(OsString::new())));
+    }
+
+    #[test]
+    fn a_reload_is_described_by_what_it_did() {
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let summary = ReloadSummary {
+            restarted: ids(&["office", "kitchen"]),
+            started: ids(&["lab"]),
+            stopped: ids(&["door-1"]),
+        };
+        let mut reload = Reload::default();
+        assert_eq!(
+            describe(&reload, &summary),
+            "restarted office, kitchen; started lab; stopped door-1"
+        );
+        reload.broker_changed = true;
+        let restarted = ReloadSummary {
+            restarted: ids(&["office"]),
+            ..ReloadSummary::default()
+        };
+        assert_eq!(
+            describe(&reload, &restarted),
+            "broker changed; restarted office"
+        );
+        assert_eq!(
+            describe(&Reload::default(), &ReloadSummary::default()),
+            "no running device changed"
+        );
     }
 
     #[test]

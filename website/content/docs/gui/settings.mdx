@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: The app's own settings, its theme, zoom, notifications and the MCP endpoint, and where Senzor keeps them.
+description: The app's own settings, its theme, zoom, notifications, the MCP endpoint and update checks, and where Senzor keeps them.
 ---
 
 The settings belong to the app, not to a project: they are the same whichever project you open, and they are never written to a project file. To open them, click the gear at the right end of the top bar; hovering over it reads **Settings**. The **Settings** window opens in the middle of the window. Close it with the **×** in its title bar.
@@ -36,9 +36,17 @@ If the port is taken, a dialog says why, unless another dialog is already open, 
 
 Senzor remembers the port and whether you left MCP on: a window you close with MCP on starts the next time with MCP on. `--mcp` and `--mcp-port` turn MCP on for one launch without changing what Senzor remembers. See [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui).
 
+## Updates
+
+The **Updates** switch, **say when a newer version is out**, lets Senzor ask GitHub whether a newer release exists. When one does, the [status bar](/docs/gui/window#status-bar) reads **Senzor 1.1.0 is out**, with the new version, and the **Version** row adds **1.1.0 is out**. Click either to open the release's page on GitHub, which lists what is new and has the downloads. Pre-releases do not count.
+
+Senzor asks when it starts, at most once a day, in the background, so the window never waits for the answer. It sends one HTTPS request to GitHub's API at `api.github.com` for the latest release of the [Senzor repository](https://github.com/kankaj/Senzor). The request names only the program and its version, such as `Senzor/1.0.0`; nothing about you or your projects is sent, and GitHub sees your IP address as any website does. Hover over the switch for a summary. Without a network connection, or when GitHub does not answer within 5 seconds, nothing is shown and Senzor asks again the next time it starts.
+
+The switch is on unless you turn it off, and Senzor remembers your choice. While it is off, Senzor asks nothing and hides a newer version it found before. `senzor-cli` never checks for updates.
+
 ## Version and credits
 
-**Version** shows the version of Senzor you are running, **Licence** its licence, the [Apache License 2.0](/docs#licence), and **Author** who wrote it. Under them, **What's new** lists what this version brings, **Documentation** opens this site and **Source code** the [Senzor repository on GitHub](https://github.com/kankaj/Senzor). **Open-source credits** unfolds a list of the projects built into Senzor, each with its licence and a link to its page: among them egui and eframe for the window, Phosphor Icons for the icons, the Ubuntu and Hack fonts, and rumqttc for MQTT.
+**Version** shows the version of Senzor you are running, followed by **1.1.0 is out** when a newer version is out (see [Updates](#updates)), **Licence** its licence, the [Apache License 2.0](/docs#licence), and **Author** who wrote it. Under them, **What's new** lists what this version brings, **Documentation** opens this site and **Source code** the [Senzor repository on GitHub](https://github.com/kankaj/Senzor). **Open-source credits** unfolds a list of the projects built into Senzor, each with its licence and a link to its page: among them egui and eframe for the window, Phosphor Icons for the icons, the Ubuntu and Hack fonts, and rumqttc for MQTT.
 
 ## What's new after an update
 
@@ -46,7 +54,7 @@ The first time Senzor opens after an update, it shows **What's new in Senzor** w
 
 ## Where Senzor keeps them
 
-Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), whether notifications are on, the MCP port and whether MCP was on, the selected tabs of the left and bottom panels, the panels' sizes, the version of Senzor that last ran, the size of the window and, where the desktop allows it, its position:
+Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), whether notifications are on, the MCP port and whether MCP was on, whether update checks are on with when Senzor last asked and the newest version it found, the selected tabs of the left and bottom panels, the panels' sizes, the version of Senzor that last ran, the size of the window and, where the desktop allows it, its position:
 
 | System  | File                                                    |
 | ------- | ------------------------------------------------------- |

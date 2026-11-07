@@ -9,8 +9,9 @@ edition.workspace = true
 [dependencies]
 clap.workspace = true
 humantime.workspace = true
-senzor-core.workspace = true
+senzor-core = { workspace = true, features = ["schema"] }
 senzor-mcp.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

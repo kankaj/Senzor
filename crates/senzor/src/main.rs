@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use eframe::egui;
 use senzor::icon::{APP_ID, app_icon};
+use senzor::update::GitHubReleases;
 use senzor::{NativeDialogs, SenzorApp};
 
 #[derive(Parser)]
@@ -37,7 +38,8 @@ fn main() -> eframe::Result {
         "Senzor",
         options,
         Box::new(move |cc| {
-            let app = SenzorApp::new(cc, args.project, Box::new(NativeDialogs));
+            let app = SenzorApp::new(cc, args.project, Box::new(NativeDialogs))
+                .with_release_source(Box::new(GitHubReleases));
             Ok(Box::new(match (args.mcp_port, args.mcp) {
                 (Some(port), _) => app.with_mcp(port),
                 (None, true) => app.with_mcp_on(),

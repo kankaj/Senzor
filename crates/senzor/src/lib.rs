@@ -13,10 +13,12 @@ mod preview;
 mod rate;
 mod selection;
 pub mod settings;
+mod snippets;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 mod tree;
 mod ui;
+pub mod update;
 mod whats_new;
 
 pub use app::{McpStatus, SenzorApp};

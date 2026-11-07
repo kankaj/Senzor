@@ -2,6 +2,7 @@
 //! and `tests/gui.rs` (which gets them through the `test-support` feature).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -9,6 +10,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use senzor_core::engine::InstanceStatus;
 
+use crate::update::{Release, ReleaseSource};
 use crate::{FileDialogs, Notifier, SenzorApp};
 
 /// File dialogs with fixed answers; by default both are cancelled.
@@ -70,6 +72,44 @@ impl Notifier for RecordingNotifier {
             .lock()
             .unwrap()
             .push((title.to_string(), body.to_string()));
+    }
+}
+
+/// A release source with a fixed answer, in place of GitHub, that counts how often it is asked.
+/// Its clones share the count, so a test keeps one and gives the window another.
+#[derive(Default, Clone)]
+pub struct FakeReleases {
+    latest: Option<Release>,
+    asked: Arc<AtomicUsize>,
+}
+
+impl FakeReleases {
+    /// A source whose latest release has the tag `tag`, for example `v1.1.0`.
+    pub fn latest(tag: &str) -> Self {
+        Self {
+            latest: Some(Release {
+                version: tag.trim_start_matches('v').to_string(),
+                url: format!("https://github.com/kankaj/Senzor/releases/tag/{tag}"),
+            }),
+            asked: Arc::default(),
+        }
+    }
+
+    /// A source with no release yet.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// How often the window asked for the latest release.
+    pub fn asked(&self) -> usize {
+        self.asked.load(Ordering::SeqCst)
+    }
+}
+
+impl ReleaseSource for FakeReleases {
+    fn latest(&self) -> Result<Option<Release>, String> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        Ok(self.latest.clone())
     }
 }
 

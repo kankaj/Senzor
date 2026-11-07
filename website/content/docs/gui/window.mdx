@@ -62,7 +62,7 @@ On macOS, use Cmd instead of Ctrl. Hover over a button in the top bar to see its
 
 ## Command palette
 
-Ctrl+K opens the command palette, a box over the window where you type what you want instead of looking for it. It finds the window's actions, such as **Start all**, **Save as…**, **Project settings** or **Clear retained messages…**, and every device, instance and template of the project, the built-in templates and the [examples](/docs/gui/files#examples). Type part of a name: every word you type must appear in it, in any case, so `office 3` finds `office-3`. The kind of each match, such as **Action** or **Instance**, shows on the right.
+Ctrl+K opens the command palette, a box over the window where you type what you want instead of looking for it. It finds the window's actions, such as **Start all**, **Save as…**, **Project settings** or **Clear retained messages…**, and every device, instance and template of the project, the built-in templates and the [examples](/docs/gui/files#examples). When a newer version of Senzor is out, it also finds **Update: Senzor 1.1.0 is out**, which opens the release's page. Type part of a name: every word you type must appear in it, in any case, so `office 3` finds `office-3`. The kind of each match, such as **Action** or **Instance**, shows on the right.
 
 Press Enter to run the highlighted match, or click one; Up and Down move the highlight. Choosing a device, instance or template selects it, switching the left panel's tab if needed. Escape or a click outside the box closes it.
 
@@ -156,6 +156,7 @@ The status bar along the bottom edge of the window shows, from the left:
 - The broker's host and port, then **connected** in green once an instance is online, **cannot connect** in red while instances are reconnecting or failed and none is online, **connecting…** while they connect, or **not connected** while nothing runs. Click it to open the [broker settings](/docs/gui/broker-settings).
 - How many instances are online, connecting, reconnecting and failed, for example **11 online**. A state with no instances is left out; with nothing running, it reads **nothing running**.
 - How many messages per second the instances publish, counted over the last 5 seconds, for example **4.6 msg/s**.
+- When a newer version of Senzor is out, **Senzor 1.1.0 is out** in the colour of links, with the new version. Click it to open the release's page on GitHub, with what is new and the downloads. Senzor asks GitHub at most once a day; see [Updates](/docs/gui/settings#updates) for what is sent and how to turn it off.
 - At the right end, **MCP off**, or **MCP on :18830** with the port while AI agents can control the window. Click it to open the [settings](/docs/gui/settings).
 
 ## When an agent is connected

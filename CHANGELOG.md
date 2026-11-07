@@ -49,6 +49,7 @@ The first release.
 - A `?` next to every setting that explains it and opens its documentation.
 - Select several instances with Ctrl+click or Shift+click to start, stop, restart, kill or pin a field on all of them.
 - A command palette (Ctrl+K) that runs any action and finds any device, instance or template.
+- Project settings copy the project as a GitHub Actions step or a docker-compose service that runs it with `senzor-cli`.
 - The template editor folds into sections, shows its preview beside the form on a wide window, colours Jinja and JSON, and inserts and completes variables in topics and payloads.
 - The instance view shows each field's name and unit, such as `CO2` and `611.77 ppm`.
 - Field overrides in the device editor use the same boxes as the template editor, with a checkbox per setting to override it.
@@ -56,10 +57,13 @@ The first release.
 - Undo and redo, duplicate devices and templates, keyboard shortcuts, and a test of the broker connection with presets for common brokers.
 - Settings for the theme, zoom and MCP, remembered between launches with the window's size and panels.
 - A desktop notification when instances fail while the window is in the background, for example when the broker refuses the credentials; it can be turned off in the settings.
+- The status bar says when a newer version is out on GitHub, with a link to its release page. Senzor asks at most once a day, and the check can be turned off in the settings.
 
 #### Command line
 
+- `senzor-cli schema` prints the project file's JSON Schema, which the docs site also publishes for editors; a `#:schema` line at the top of a project file is kept when Senzor saves it.
 - `senzor-cli validate` checks a project, `senzor-cli run` runs it (with `--only` and `--duration`), and `senzor-cli clear-retained` clears its retained messages. Exit codes tell CI what happened.
+- `senzor-cli run --watch` applies each save of the project file: it restarts only the devices that changed, starts added ones and stops removed ones.
 
 #### AI agents
 
