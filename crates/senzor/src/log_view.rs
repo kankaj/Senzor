@@ -2,17 +2,33 @@
 
 use senzor_core::engine::LogEntry;
 
-/// Which messages the log shows: those whose topic contains `topic` (case-sensitive) and, when
-/// set, those of one instance.
+/// Which messages the log shows: those published after the last clear whose topic contains
+/// `topic` (case-sensitive) and, when set, those of one instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LogFilter {
     pub topic: String,
     pub instance: Option<String>,
+    /// The `seq` of the newest message when the log was cleared (0 before any clear).
+    cleared_through: u64,
 }
 
 impl LogFilter {
+    /// Hides every message up to `seq`; sequence numbers only grow, so later ones still show.
+    pub fn clear_through(&mut self, seq: u64) {
+        self.cleared_through = self.cleared_through.max(seq);
+    }
+
+    /// No topic or instance filter, but the same clear: messages cleared once stay cleared.
+    pub fn cleared(&self) -> Self {
+        Self {
+            cleared_through: self.cleared_through,
+            ..Self::default()
+        }
+    }
+
     pub fn matches(&self, entry: &LogEntry) -> bool {
-        entry.topic.contains(&self.topic)
+        entry.seq > self.cleared_through
+            && entry.topic.contains(&self.topic)
             && self
                 .instance
                 .as_ref()
@@ -88,14 +104,28 @@ mod tests {
         let by_topic = LogFilter {
             topic: "office".into(),
             instance: None,
+            ..LogFilter::default()
         };
         assert!(by_topic.matches(&office) && !by_topic.matches(&lab));
         let by_instance = LogFilter {
             topic: String::new(),
             instance: Some("lab-0".into()),
+            ..LogFilter::default()
         };
         assert!(by_instance.matches(&lab) && !by_instance.matches(&office));
         assert!(LogFilter::default().matches(&office), "no filter shows all");
+    }
+
+    #[test]
+    fn a_cleared_log_shows_only_messages_after_the_clear() {
+        let mut filter = LogFilter::default();
+        filter.clear_through(5);
+        let at = |seq| LogEntry {
+            seq,
+            ..entry("office-0", "b/office/state", "1")
+        };
+        assert!(!filter.matches(&at(5)), "cleared");
+        assert!(filter.matches(&at(6)), "published after the clear");
     }
 
     #[test]

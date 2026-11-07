@@ -127,7 +127,8 @@ The log keeps the last 1,000 messages of all instances together. It shows the me
 - **Filter** shows only the rows whose topic contains the text you type. The match is case-sensitive. Ctrl+F shows the message log and puts the cursor in the box.
 - Click an instance ID in the log to show only that instance's messages. A button with the instance ID and `✕` appears next to **Filter**; click it to show every instance again.
 - **Pause** freezes the list so you can read it while the devices keep publishing. **Resume** shows the live log again.
-- **Export…** saves the messages the log shows, after **Filter** and the instance, as a CSV file with the columns `time`, `instance`, `topic`, `qos`, `retained` and `payload`. The time includes the date, for example `2026-11-07T18:02:51.079Z`, and the payload is saved whole.
+- **Clear** empties the list. Messages published afterwards show as usual; a paused list stays paused and empty until you resume. Clearing only changes what the window shows: the MCP tool `get_messages` still reads the messages from before.
+- **Export…** saves the messages the log shows, after **Clear**, **Filter** and the instance, as a CSV file with the columns `time`, `instance`, `topic`, `qos`, `retained` and `payload`. The time includes the date, for example `2026-11-07T18:02:51.079Z`, and the payload is saved whole.
 
 Click a message's time, topic or payload to see it in full on the right: **Message** lists its time, instance, topic, QoS, whether it was retained and its MQTT 5 properties, and **Payload** shows the payload whole, with JSON indented. **Copy payload** copies the payload as it was sent. Click the message again, or the `✕` next to **Message**, to close it.
 

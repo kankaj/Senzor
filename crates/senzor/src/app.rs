@@ -697,6 +697,7 @@ impl SenzorApp {
                 self.select(None);
             }
             Action::ExportLog => self.export_log(),
+            Action::ClearLog => self.ui.clear_log(&self.state.log),
             Action::OpenPalette => self.ui.palette = Some(Default::default()),
             Action::CopySnippet(snippet) => match self.doc.file_name() {
                 Some(name) => {

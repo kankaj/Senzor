@@ -68,6 +68,15 @@ fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState, actions: 
                 Some(state.log.clone())
             };
         }
+        let clear = ui
+            .button(format!("{} Clear", icons::TRASH))
+            .on_hover_text("Empty the log; new messages still show");
+        clear.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear the log")
+        });
+        if clear.clicked() {
+            ui_state.clear_log(&state.log);
+        }
         let export = ui
             .button(format!("{} Export…", icons::EXPORT))
             .on_hover_text("Save the messages shown here as a CSV file");
@@ -371,6 +380,22 @@ mod tests {
                 .iter()
                 .any(|a| matches!(a, Action::ExportLog))
         );
+    }
+
+    #[test]
+    fn clear_empties_the_log_and_closes_the_shown_message() {
+        let mut h = log_harness(two_instances());
+        h.get_by_label_contains(r#"{"co2":605}"#).click();
+        h.run();
+        h.get_by_label("Clear the log").click();
+        h.run();
+        assert!(h.query_by_label_contains("b/office/state").is_none());
+        assert!(h.query_by_label_contains("b/lab/state").is_none());
+        assert!(
+            h.query_by_label("Copy payload").is_none(),
+            "no message is shown"
+        );
+        assert_eq!(h.state().ui.log_selected, None);
     }
 
     #[test]

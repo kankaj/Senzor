@@ -108,6 +108,8 @@ pub enum Action {
     OpenPalette,
     /// Save the messages the log shows as a CSV file.
     ExportLog,
+    /// Empty the message log, as its Clear button does.
+    ClearLog,
     /// Open a project from the Recent menu.
     OpenRecent(PathBuf),
     /// Open this file, dropped on the window.
@@ -305,8 +307,19 @@ impl UiState {
     /// Forgets everything tied to the previous document.
     pub fn reset(&mut self) {
         let left_tab = self.left_tab;
+        let log_filter = self.log_filter.cleared();
         *self = UiState::default();
         self.left_tab = left_tab;
+        self.log_filter = log_filter;
+    }
+
+    /// Empties the message log: hides every message in `log` and the one shown in full. The
+    /// engine keeps its log, so the MCP tools still read every message.
+    pub fn clear_log(&mut self, log: &VecDeque<LogEntry>) {
+        if let Some(newest) = log.back() {
+            self.log_filter.clear_through(newest.seq);
+        }
+        self.log_selected = None;
     }
 }
 

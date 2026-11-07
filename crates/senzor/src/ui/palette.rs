@@ -63,6 +63,7 @@ const ACTIONS: &[NamedAction] = &[
     ("Clear retained messages…", || Action::AskClearRetained),
     ("Find in the message log", || Action::FindInLog),
     ("Export the message log…", || Action::ExportLog),
+    ("Clear the message log", || Action::ClearLog),
     ("Settings", || Action::OpenSettings),
     ("Copy as a GitHub Actions step", || {
         Action::CopySnippet(crate::snippets::Snippet::GitHubActions)

@@ -44,7 +44,7 @@ The first release.
 #### Window
 
 - A device tree with search, a status filter and "4/5 online" counts, an editor for devices, templates and the broker, and a live preview of every template.
-- A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, and export to CSV.
+- A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, export to CSV and a Clear button.
 - A Problems tab, and a status bar with the broker state, instance counts and messages per second.
 - A `?` next to every setting that explains it and opens its documentation.
 - Select several instances with Ctrl+click or Shift+click to start, stop, restart, kill or pin a field on all of them.
