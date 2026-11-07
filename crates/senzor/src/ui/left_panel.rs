@@ -6,7 +6,7 @@ use super::{
     Action, FIX_PROBLEMS_FIRST, LeftTab, UiState, WARNING, kill_button, status_dot, stop_button,
 };
 use crate::document::Document;
-use crate::selection::Selection;
+use crate::selection::{InstanceClick, Selection};
 use crate::tree::{
     DeviceNode, InstanceNode, OrphanCause, StatusFilter, TreeFilter, device_tree, filter_tree,
     instance_ids, is_restartable, orphan_cause,
@@ -160,12 +160,25 @@ fn instance_row(
 ) {
     ui.horizontal(|ui| {
         status_dot(ui, &instance.status);
-        let selected = selection == Some(&Selection::Instance(instance.id.clone()));
+        let selected = match selection {
+            Some(Selection::Instance(id)) => id == &instance.id,
+            Some(Selection::Instances(ids)) => ids.contains(&instance.id),
+            _ => false,
+        };
         let response = ui.selectable_label(selected, &instance.id);
         if response.clicked() {
-            actions.push(Action::Select(Some(Selection::Instance(
-                instance.id.clone(),
-            ))));
+            let modifiers = ui.input(|i| i.modifiers);
+            let click = if modifiers.command {
+                InstanceClick::Toggle
+            } else if modifiers.shift {
+                InstanceClick::Range
+            } else {
+                InstanceClick::Plain
+            };
+            actions.push(Action::ClickInstance {
+                id: instance.id.clone(),
+                click,
+            });
         }
         response.context_menu(|ui| instance_menu(ui, instance, actions));
         if instance.needs_restart {

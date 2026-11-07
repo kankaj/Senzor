@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: The app's own settings, its theme, zoom and the MCP endpoint, and where Senzor keeps them.
+description: The app's own settings, its theme, zoom, notifications and the MCP endpoint, and where Senzor keeps them.
 ---
 
 The settings belong to the app, not to a project: they are the same whichever project you open, and they are never written to a project file. To open them, click the gear at the right end of the top bar; hovering over it reads **Settings**. The **Settings** window opens in the middle of the window. Close it with the **×** in its title bar.
@@ -22,6 +22,10 @@ The window changes as soon as you click, and Senzor uses the same theme the next
 
 Senzor starts with the zoom you used last.
 
+## Notifications
+
+The **Notifications** switch, **when an instance fails in the background**, shows a desktop notification when an instance fails while the window does not have the focus or is minimized; see [Status](/docs/gui/instance-view#status). It is on unless you turn it off, and Senzor remembers your choice.
+
 ## MCP
 
 The **MCP** switch, **let AI agents control this window**, turns on the endpoint AI agents such as Claude Code connect to. While it is on, the **Address** row shows where agents connect, `127.0.0.1:18830`, a robot shows next to the gear in the top bar, and the status bar reads **MCP on :18830**; clicking the robot opens the settings. Hover over the switch for the full URL. Turn the switch off to stop the endpoint, which disconnects connected agents.
@@ -42,7 +46,7 @@ The first time Senzor opens after an update, it shows **What's new in Senzor** w
 
 ## Where Senzor keeps them
 
-Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), the MCP port and whether MCP was on, the selected tabs of the left and bottom panels, the panels' sizes, the version of Senzor that last ran, the size of the window and, where the desktop allows it, its position:
+Senzor saves its settings in one file, `app.ron`, when you close the window and every 30 seconds while it runs. The same file holds the [recent projects](/docs/gui/files#recent-projects), whether notifications are on, the MCP port and whether MCP was on, the selected tabs of the left and bottom panels, the panels' sizes, the version of Senzor that last ran, the size of the window and, where the desktop allows it, its position:
 
 | System  | File                                                    |
 | ------- | ------------------------------------------------------- |

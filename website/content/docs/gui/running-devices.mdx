@@ -31,6 +31,17 @@ A device or instance can carry a note:
 
 Devices with more than 50 instances start collapsed, because laying out thousands of rows makes the window slow. Click the arrow next to the device to expand it.
 
+## Several instances at once
+
+To act on instances of different devices together, or on some of a device's instances, select them in the tree. Ctrl+click an instance (Cmd+click on macOS) to add it to the selection, or to take it out again. Shift+click selects every instance from the one you clicked before to this one, in the tree's order (after the tree's filter).
+
+With two or more instances selected, the detail panel names them and counts them by state, for example **2 online, 1 stopped**, and offers:
+
+- **Start** for those that are stopped or failed, **Stop** and **Kill** for those that run, and **Restart** for those of the project that run, as the [device menu](#device-menu) does.
+- **Pin**, a field the instances have in common, **to** a value, and **Pin all**: every selected instance that runs publishes that value from its next tick on, as a [pin](/docs/gui/instance-view#pinning-a-value) does. **Unpin all** hands the field back to its generator on those that have it pinned.
+
+A plain click on an instance selects it alone again.
+
 ## Device menu
 
 Right-click a device to act on all of its instances:

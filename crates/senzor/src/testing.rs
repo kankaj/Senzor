@@ -2,13 +2,14 @@
 //! and `tests/gui.rs` (which gets them through the `test-support` feature).
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use senzor_core::engine::InstanceStatus;
 
-use crate::{FileDialogs, SenzorApp};
+use crate::{FileDialogs, Notifier, SenzorApp};
 
 /// File dialogs with fixed answers; by default both are cancelled.
 #[derive(Default, Clone)]
@@ -46,6 +47,29 @@ impl FileDialogs for FakeDialogs {
 
     fn save_log(&mut self, _suggested_name: &str) -> Option<PathBuf> {
         self.save.clone()
+    }
+}
+
+/// Records the notifications it would show. Its clones share the record, so a test keeps one
+/// and gives the window another.
+#[derive(Default, Clone)]
+pub struct RecordingNotifier {
+    shown: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl RecordingNotifier {
+    /// The title and body of each notification shown so far, the first first.
+    pub fn shown(&self) -> Vec<(String, String)> {
+        self.shown.lock().unwrap().clone()
+    }
+}
+
+impl Notifier for RecordingNotifier {
+    fn notify(&mut self, title: &str, body: &str) {
+        self.shown
+            .lock()
+            .unwrap()
+            .push((title.to_string(), body.to_string()));
     }
 }
 

@@ -2,11 +2,13 @@
 
 pub mod bottom;
 pub mod broker;
+pub mod bulk;
 pub mod device;
 pub mod help;
 pub mod instance;
 pub mod left_panel;
 pub mod modals;
+pub mod palette;
 pub mod settings;
 pub mod shortcuts;
 pub mod status_bar;
@@ -72,6 +74,11 @@ pub enum Action {
     StopAll,
     Engine(Command),
     Select(Option<Selection>),
+    /// An instance clicked in the tree, alone or with Ctrl or Shift.
+    ClickInstance {
+        id: String,
+        click: crate::selection::InstanceClick,
+    },
     /// A form's edit, built by [`replace_if_unchanged`].
     Edit(Box<dyn FnOnce(&mut ProjectFile)>),
     Rename(Rename),
@@ -95,6 +102,8 @@ pub enum Action {
     DeleteSelected,
     /// Show the message log and put the cursor in its filter.
     FindInLog,
+    /// Open the command palette.
+    OpenPalette,
     /// Save the messages the log shows as a CSV file.
     ExportLog,
     /// Open a project from the Recent menu.
@@ -112,6 +121,8 @@ pub enum Action {
     ShowWhatsNew,
     /// Use this port the next time MCP is turned on.
     SetMcpPort(u16),
+    /// Turn the notifications about failed instances on or off.
+    SetNotifyFailures(bool),
 }
 
 /// Order in which a frame's actions are applied: edits, then renames, then removals, then the rest.
@@ -253,6 +264,13 @@ pub struct UiState {
     pub buffers: Buffers,
     /// A valid rename typed into a name box but not committed yet (set again every frame).
     pub pending_rename: Option<Rename>,
+    /// The field and value the several-instances view pins.
+    pub bulk_pin_field: Option<String>,
+    pub bulk_pin_value: String,
+    /// The command palette, while it is open.
+    pub palette: Option<palette::PaletteState>,
+    /// The instance clicked last in the tree, where a Shift+click range starts.
+    pub instance_anchor: Option<String>,
     /// Pin box text per (instance ID, field name).
     pub pin_inputs: HashMap<(String, String), String>,
     pub log_filter: crate::log_view::LogFilter,

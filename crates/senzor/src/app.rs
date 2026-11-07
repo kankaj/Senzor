@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use crate::dialogs::{FileDialogs, project_file_path};
 use crate::document::Document;
 use crate::edits;
+use crate::notify::{DesktopNotifier, FailureWatch, Notifier};
 use crate::rate::MessageRate;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
 use crate::settings::{AppSettings, PanelTabs};
@@ -67,6 +68,10 @@ pub struct SenzorApp {
     version_seen_before: Option<String>,
     /// How fast the engine publishes, for the status bar.
     rate: MessageRate,
+    /// Shows desktop notifications.
+    notifier: Box<dyn Notifier>,
+    /// Tells when instances fail, for the notifications.
+    failures: FailureWatch,
 }
 
 /// From this width of the detail panel on, a template's preview sits beside its editor.
@@ -139,6 +144,8 @@ impl SenzorApp {
             disk_checked: Instant::now(),
             rate: MessageRate::default(),
             version_seen_before,
+            notifier: Box::new(DesktopNotifier),
+            failures: FailureWatch::default(),
         };
         match path {
             Some(path) => app.open_path(&path),
@@ -161,6 +168,12 @@ impl SenzorApp {
             app.start_mcp(app.settings.mcp_port);
         }
         app
+    }
+
+    /// Shows desktop notifications with `notifier` instead of the desktop's.
+    pub fn with_notifier(mut self, notifier: Box<dyn Notifier>) -> Self {
+        self.notifier = notifier;
+        self
     }
 
     /// The app's own settings, saved between launches.
@@ -357,11 +370,22 @@ impl SenzorApp {
         }
     }
 
+    /// The instance IDs the device tree shows, in its order (after its filter).
+    fn tree_order(&self) -> Vec<String> {
+        let tree = crate::tree::device_tree(self.doc.file(), self.doc.validated(), &self.state);
+        crate::tree::filter_tree(tree, &self.ui.tree_filter)
+            .into_iter()
+            .flat_map(|node| node.instances.into_iter().map(|i| i.id))
+            .collect()
+    }
+
     /// Selects `selection` and switches the left panel to the tab that lists it.
     fn reveal(&mut self, selection: Selection) {
         self.ui.left_tab = match selection {
             Selection::Template(_) | Selection::Builtin(_) => ui::LeftTab::Templates,
-            Selection::Device(_) | Selection::Instance(_) => ui::LeftTab::Devices,
+            Selection::Device(_) | Selection::Instance(_) | Selection::Instances(_) => {
+                ui::LeftTab::Devices
+            }
         };
         self.select(Some(selection));
     }
@@ -555,6 +579,21 @@ impl SenzorApp {
             }
             Action::Engine(command) => self.send_when_ready(command),
             Action::Select(selection) => self.select(selection),
+            Action::ClickInstance { id, click } => {
+                let order = self.tree_order();
+                let next = crate::selection::click_instance(
+                    self.ui.selection.as_ref(),
+                    &id,
+                    click,
+                    self.ui.instance_anchor.as_deref(),
+                    &order,
+                );
+                // A range keeps its start, so the next Shift+click moves its other end.
+                if click != crate::selection::InstanceClick::Range {
+                    self.ui.instance_anchor = Some(id);
+                }
+                self.select(next);
+            }
             // Applied to the document above.
             Action::Edit(_) | Action::Rename(_) | Action::Remove(_) => {}
             Action::AddDevice => {
@@ -597,6 +636,7 @@ impl SenzorApp {
                 self.select(None);
             }
             Action::ExportLog => self.export_log(),
+            Action::OpenPalette => self.ui.palette = Some(Default::default()),
             Action::FindInLog => {
                 self.ui.bottom_tab = ui::BottomTab::Log;
                 self.ui.focus_log_filter = true;
@@ -640,6 +680,7 @@ impl SenzorApp {
                 }
                 self.settings.mcp_on = self.mcp.is_some();
             }
+            Action::SetNotifyFailures(on) => self.settings.notify_failures = on,
             Action::SetMcpPort(port) => {
                 self.settings.mcp_port = port;
                 self.mcp_port = port;
@@ -681,6 +722,31 @@ impl SenzorApp {
         }
     }
 
+    /// Shows a desktop notification about instances that failed while the window was in the
+    /// background (unfocused or minimized), when the settings ask for it.
+    fn watch_failures(&mut self, ctx: &egui::Context) {
+        let in_background = ctx.input(|i| {
+            let viewport = i.viewport();
+            viewport.focused == Some(false) || viewport.minimized == Some(true)
+        });
+        let notify = self.settings.notify_failures && in_background;
+        let engine = self
+            .engine
+            .as_ref()
+            .expect("engine runs while the app is open");
+        let generation = self.engine_generation;
+        let failures = &mut self.failures;
+        let look = engine
+            .observer()
+            .read(|state| failures.look(generation, &state.instances, Instant::now(), notify));
+        if let Some((title, body)) = look.notify {
+            self.notifier.notify(&title, &body);
+        }
+        if let Some(after) = look.again_in {
+            ctx.request_repaint_after(after);
+        }
+    }
+
     /// Commits a rename still being typed (closing the window is not a click that would commit
     /// it), then asks about unsaved changes instead of closing.
     fn handle_close_request(&mut self, ctx: &egui::Context) {
@@ -698,6 +764,12 @@ impl SenzorApp {
 }
 
 impl eframe::App for SenzorApp {
+    /// Runs before every frame, and also while the window is hidden (minimized), when `ui` does
+    /// not run: failures are noticed there too.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.watch_failures(ctx);
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.settings.tabs = PanelTabs {
             left: self.ui.left_tab,
@@ -812,6 +884,9 @@ impl eframe::App for SenzorApp {
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| match self.ui.selection.clone() {
+                    Some(Selection::Instances(ids)) => {
+                        ui::bulk::show(ui, &ids, &self.doc, &self.state, &mut self.ui, &mut actions)
+                    }
                     Some(Selection::Instance(id)) => ui::instance::show(
                         ui,
                         &id,
@@ -857,6 +932,17 @@ impl eframe::App for SenzorApp {
             ui::settings::show(&ctx, &mut self.ui, &self.settings, &mcp, &mut actions);
         }
 
+        if let Some(palette) = &mut self.ui.palette {
+            let entries = ui::palette::entries(&self.doc, &self.state);
+            match ui::palette::show(&ctx, palette, &entries) {
+                Some(ui::palette::Outcome::Run(action)) => {
+                    self.ui.palette = None;
+                    actions.push(*action);
+                }
+                Some(ui::palette::Outcome::Close) => self.ui.palette = None,
+                None => {}
+            }
+        }
         // Edits, then renames, then removals, then the rest (see `ui::phase`).
         actions.sort_by_key(ui::phase);
         for action in actions {

@@ -27,6 +27,7 @@ pub fn show(
                 .show(ui, |ui| {
                     theme_row(ui, settings.theme, actions);
                     zoom_row(ui);
+                    notify_row(ui, settings.notify_failures, actions);
                     mcp_row(ui, mcp, actions);
 
                     ui.label("Version");
@@ -131,6 +132,24 @@ fn zoom_row(ui: &mut egui::Ui) {
     ui.end_row();
 }
 
+/// The switch for desktop notifications about failed instances.
+fn notify_row(ui: &mut egui::Ui, notify: bool, actions: &mut Vec<Action>) {
+    ui.label(format!("{} Notifications", icons::BELL));
+    let mut on = notify;
+    ui.horizontal(|ui| {
+        let hint = "A desktop notification when an instance fails while Senzor is in the \
+                    background, for example when the broker refuses its connection";
+        if switch(ui, &mut on, "Notify me when an instance fails")
+            .on_hover_text(hint)
+            .clicked()
+        {
+            actions.push(Action::SetNotifyFailures(on));
+        }
+        ui.label("when an instance fails in the background");
+    });
+    ui.end_row();
+}
+
 /// The MCP toggle, with the address agents connect to while it is on, or why it is off.
 fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, actions: &mut Vec<Action>) {
     let hint = match mcp {
@@ -223,6 +242,11 @@ const CREDITS: &[(&str, &str, &str)] = &[
         "https://github.com/gfx-rs/wgpu",
     ),
     ("rfd", "MIT", "https://github.com/PolyMeilex/rfd"),
+    (
+        "notify-rust",
+        "MIT or Apache-2.0",
+        "https://github.com/hoodie/notify-rust",
+    ),
     (
         "rumqttc",
         "Apache-2.0",

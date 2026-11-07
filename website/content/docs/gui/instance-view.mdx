@@ -21,6 +21,8 @@ The heading names the instance, for example **Instance office-0**. Below it, a c
 
 How Senzor reconnects is described in [Availability and Last Will](/docs/concepts/availability).
 
+When an instance fails while the Senzor window is in the background, for example behind another window or minimized, Senzor shows a desktop notification, such as **Senzor: an instance failed** with `office-0: broker refused the connection: BadUserNamePassword`. Instances that fail within a second of each other share one notification, such as **Senzor: 3 instances failed**, which lists the first three and how many more failed. There is no notification while the window has the focus, because the device tree and the status bar already show the failure, nor for **Reconnecting**, which retries by itself. To turn the notifications off, use the [settings](/docs/gui/settings#notifications).
+
 The next lines show:
 
 - **Device:** the device the instance belongs to.

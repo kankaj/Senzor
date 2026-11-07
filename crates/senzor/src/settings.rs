@@ -77,6 +77,8 @@ pub struct AppSettings {
     pub tabs: PanelTabs,
     /// The version of Senzor that last ran with these settings, for telling what is new.
     pub last_version: Option<String>,
+    /// Show a desktop notification when an instance fails while the window is in the background.
+    pub notify_failures: bool,
 }
 
 impl Default for AppSettings {
@@ -89,6 +91,7 @@ impl Default for AppSettings {
             mcp_on: false,
             tabs: PanelTabs::default(),
             last_version: None,
+            notify_failures: true,
         }
     }
 }
@@ -177,6 +180,7 @@ mod tests {
                 bottom: BottomTab::Problems,
             },
             last_version: Some("1.0.0".into()),
+            notify_failures: false,
         };
         settings.save(&mut storage);
         assert_eq!(AppSettings::load(Some(&storage)), settings);
@@ -212,6 +216,7 @@ mod tests {
         assert_eq!(AppSettings::default().zoom, 1.0);
         assert_eq!(settings.mcp_port, 18830, "MCP's usual port");
         assert!(!settings.mcp_on, "MCP stays off until turned on");
+        assert!(settings.notify_failures, "failures are told about");
     }
 
     #[test]

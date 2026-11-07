@@ -17,10 +17,11 @@ pub const REDO: KeyboardShortcut =
 pub const REDO_Y: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
 pub const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
 pub const DELETE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
+pub const PALETTE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::K);
 
 /// Each shortcut with the action it stands for, the most specific first: egui ignores an extra
 /// Shift when it matches, so Ctrl+S would also take Ctrl+Shift+S.
-const ALL: [(KeyboardShortcut, fn() -> Action); 12] = [
+const ALL: [(KeyboardShortcut, fn() -> Action); 13] = [
     (REDO, || Action::Redo),
     (UNDO, || Action::Undo),
     (REDO_Y, || Action::Redo),
@@ -33,6 +34,7 @@ const ALL: [(KeyboardShortcut, fn() -> Action); 12] = [
     (SETTINGS, || Action::OpenSettings),
     (FIND, || Action::FindInLog),
     (DELETE, || Action::DeleteSelected),
+    (PALETTE, || Action::OpenPalette),
 ];
 
 /// The actions for the shortcuts pressed this frame, which it takes from egui's input. While a

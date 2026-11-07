@@ -5,15 +5,16 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui_kittest::kittest::Queryable;
+use rumqttc::ConnectReturnCode;
 use senzor::SenzorApp;
 use senzor::document::Document;
 use senzor::testing::{
-    App, FRAME_PAUSE, FakeDialogs, TIMEOUT, click, status, test_dir, wait_online, wait_until,
-    window_builder, write_project,
+    App, FRAME_PAUSE, FakeDialogs, RecordingNotifier, TIMEOUT, click, status, test_dir,
+    wait_online, wait_until, window_builder, write_project,
 };
 use senzor_core::engine::InstanceStatus;
 use senzor_core::project::ProjectFile;
-use senzor_testkit::{Subscriber, slow_broker, start_broker};
+use senzor_testkit::{Subscriber, refusing_broker, slow_broker, start_broker};
 
 fn app(path: Option<PathBuf>, dialogs: FakeDialogs) -> App {
     let mut harness = window_builder()
@@ -129,6 +130,80 @@ fn a_wide_window_shows_the_template_preview_beside_the_form() {
         preview.top() < form.bottom() + 200.0,
         "side by side, not below"
     );
+}
+
+#[test]
+fn ctrl_click_selects_several_instances_and_start_runs_them_all() {
+    let port = start_broker();
+    let path = write_project("bulk-start", &project(port, false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "office-0");
+    harness
+        .get_by_label("office-1")
+        .click_modifiers(egui::Modifiers::COMMAND);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("2 instances").is_some());
+    click(&mut harness, "Start");
+    wait_online(&mut harness, "office-0");
+    wait_online(&mut harness, "office-1");
+    assert_eq!(status(&harness, "spare"), InstanceStatus::Stopped);
+}
+
+#[test]
+fn shift_click_selects_a_range_of_instances() {
+    let port = start_broker();
+    let path = write_project("bulk-range", &project(port, false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    click(&mut harness, "office-0");
+    harness
+        .get_by_label("spare")
+        .click_modifiers(egui::Modifiers::SHIFT);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("3 instances").is_some());
+    assert!(
+        harness
+            .query_by_label("office-0, office-1, spare")
+            .is_some()
+    );
+}
+
+/// Opens the command palette with Ctrl+K, types `query` and presses Enter.
+fn run_from_palette(harness: &mut App, query: &str) {
+    press(harness, CTRL, egui::Key::K);
+    assert!(
+        harness.query_by_label("Command palette").is_some(),
+        "the palette opened"
+    );
+    harness.event(egui::Event::Text(query.into()));
+    harness.run();
+    press(harness, egui::Modifiers::NONE, egui::Key::Enter);
+}
+
+#[test]
+fn the_command_palette_runs_an_action() {
+    let mut harness = app(None, FakeDialogs::default());
+    run_from_palette(&mut harness, "project sett");
+    assert!(harness.query_by_label("Project settings").is_some());
+    assert!(
+        harness.query_by_label("Command palette").is_none(),
+        "it closes"
+    );
+}
+
+#[test]
+fn the_command_palette_goes_to_an_instance() {
+    let path = write_project("palette-go", &project(start_broker(), false));
+    let mut harness = app(Some(path), FakeDialogs::default());
+    run_from_palette(&mut harness, "office-1");
+    assert!(harness.query_by_label("Instance office-1").is_some());
+}
+
+#[test]
+fn escape_closes_the_command_palette() {
+    let mut harness = app(None, FakeDialogs::default());
+    press(&mut harness, CTRL, egui::Key::K);
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(harness.query_by_label("Command palette").is_none());
 }
 
 /// Asks to close the window, as its close button does.
@@ -1585,4 +1660,175 @@ fn keeping_my_version_leaves_it_as_unsaved_changes() {
     click(&mut harness, "Keep my version");
     assert_eq!(device_count(&harness), 1);
     assert!(harness.state().document().is_dirty());
+}
+
+/// Device `office` with `count` instances of the built-in `co2` template on the broker at `port`.
+fn office_project(port: u16, count: u32, autostart: bool) -> String {
+    format!(
+        "[broker]\nhost = \"127.0.0.1\"\nport = {port}\n\n[[devices]]\nid = \"office\"\n\
+         template = \"co2\"\ncount = {count}\nautostart = {autostart}\n"
+    )
+}
+
+/// A broker that refuses every connection for a bad username or password. The runtime runs it
+/// and must outlive the test.
+fn refusing() -> (tokio::runtime::Runtime, u16) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let port = runtime.block_on(refusing_broker(ConnectReturnCode::BadUserNamePassword));
+    (runtime, port)
+}
+
+/// A window on `path` with `settings`, whose notifications `notifier` records.
+fn notifying_app(
+    path: PathBuf,
+    settings: senzor::settings::AppSettings,
+    notifier: &RecordingNotifier,
+) -> App {
+    let notifier = notifier.clone();
+    let mut harness = window_builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, Some(path), Box::new(FakeDialogs::default()), settings)
+                .with_notifier(Box::new(notifier))
+        });
+    harness.step();
+    harness
+}
+
+/// Gives the window the keyboard focus or takes it away, as switching to another window does.
+fn set_focused(harness: &mut App, focused: bool) {
+    harness
+        .input_mut()
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .focused = Some(focused);
+}
+
+/// Steps frames for longer than notifications gather failures, so any due is shown.
+fn step_past_gathering(harness: &mut App) {
+    let until = Instant::now() + senzor::notify::GATHER + Duration::from_millis(500);
+    while Instant::now() < until {
+        harness.step();
+        std::thread::sleep(FRAME_PAUSE);
+    }
+}
+
+fn failed(harness: &App, id: &str) -> bool {
+    matches!(status(harness, id), InstanceStatus::Failed { .. })
+}
+
+const REFUSED: &str = "broker refused the connection: BadUserNamePassword";
+
+#[test]
+fn an_instance_failing_while_the_window_is_in_the_background_shows_a_notification() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-one", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    set_focused(&mut harness, false);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "a notification", |_| {
+        !notifier.shown().is_empty()
+    });
+    step_past_gathering(&mut harness);
+    assert_eq!(
+        notifier.shown(),
+        [(
+            "Senzor: an instance failed".to_string(),
+            format!("office: {REFUSED}")
+        )]
+    );
+}
+
+#[test]
+fn an_instance_failing_while_the_window_is_minimized_shows_a_notification() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-minimized", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    harness
+        .input_mut()
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .minimized = Some(true);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "a notification", |_| {
+        !notifier.shown().is_empty()
+    });
+    assert_eq!(notifier.shown()[0].0, "Senzor: an instance failed");
+}
+
+#[test]
+fn instances_failing_together_show_one_notification() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-two", &office_project(port, 2, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    set_focused(&mut harness, false);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "a notification", |_| {
+        !notifier.shown().is_empty()
+    });
+    step_past_gathering(&mut harness);
+    assert_eq!(
+        notifier.shown(),
+        [(
+            "Senzor: 2 instances failed".to_string(),
+            format!("office-0: {REFUSED}\noffice-1: {REFUSED}")
+        )]
+    );
+}
+
+#[test]
+fn an_instance_failing_while_the_window_has_the_focus_shows_no_notification() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-focused", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    set_focused(&mut harness, true);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "office failed", |h| failed(h, "office"));
+    step_past_gathering(&mut harness);
+    assert_eq!(notifier.shown(), []);
+}
+
+#[test]
+fn a_failure_from_while_the_window_had_the_focus_is_not_told_once_it_goes_to_the_background() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-before", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    set_focused(&mut harness, true);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "office failed", |h| failed(h, "office"));
+    // A frame with the focus, which sees the failure: `wait_until` asks the engine directly.
+    harness.step();
+    set_focused(&mut harness, false);
+    step_past_gathering(&mut harness);
+    assert_eq!(notifier.shown(), []);
+}
+
+#[test]
+fn turning_notifications_off_in_settings_keeps_failures_quiet_and_is_saved() {
+    use senzor::settings::AppSettings;
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-off", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    click(&mut harness, "Settings");
+    harness.run();
+    click(&mut harness, "Notify me when an instance fails");
+    harness.run();
+    assert!(!harness.state().settings().notify_failures);
+    let mut storage = MemoryStorage::default();
+    eframe::App::save(harness.state_mut(), &mut storage);
+    assert!(!AppSettings::load(Some(&storage)).notify_failures);
+
+    set_focused(&mut harness, false);
+    click(&mut harness, "Start all");
+    wait_until(&mut harness, "office failed", |h| failed(h, "office"));
+    step_past_gathering(&mut harness);
+    assert_eq!(notifier.shown(), []);
 }

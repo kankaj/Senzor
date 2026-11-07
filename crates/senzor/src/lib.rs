@@ -8,6 +8,7 @@ mod examples;
 mod format;
 pub mod icon;
 mod log_view;
+pub mod notify;
 mod preview;
 mod rate;
 mod selection;
@@ -20,5 +21,6 @@ mod whats_new;
 
 pub use app::{McpStatus, SenzorApp};
 pub use dialogs::{FileDialogs, NativeDialogs};
+pub use notify::{DesktopNotifier, Notifier};
 /// The project being edited; it lives in `senzor-core` so every editor shares it.
 pub use senzor_core::project::document;
