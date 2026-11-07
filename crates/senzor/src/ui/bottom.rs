@@ -36,55 +36,7 @@ pub fn show(
 const TOPIC_COLUMN_MAX: usize = 40;
 
 fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        let label = ui.label("Filter");
-        let filter = ui
-            .add(TextEdit::singleline(&mut ui_state.log_filter.topic).hint_text("topic contains…"))
-            .labelled_by(label.id)
-            .on_hover_text(shortcuts::tip(
-                ui.ctx(),
-                "Show only messages whose topic contains this",
-                &shortcuts::FIND,
-            ));
-        if std::mem::take(&mut ui_state.focus_log_filter) {
-            filter.request_focus();
-        }
-        if let Some(instance) = ui_state.log_filter.instance.clone() {
-            let chip = ui
-                .button(format!("{instance} {}", icons::X))
-                .on_hover_text("Show every instance");
-            chip.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show every instance")
-            });
-            if chip.clicked() {
-                ui_state.log_filter.instance = None;
-            }
-        }
-        let paused = ui_state.log_frozen.is_some();
-        if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
-            ui_state.log_frozen = if paused {
-                None
-            } else {
-                Some(state.log.clone())
-            };
-        }
-        let clear = ui
-            .button(format!("{} Clear", icons::TRASH))
-            .on_hover_text("Empty the log; new messages still show");
-        clear.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear the log")
-        });
-        if clear.clicked() {
-            ui_state.clear_log(&state.log);
-        }
-        let export = ui
-            .button(format!("{} Export…", icons::EXPORT))
-            .on_hover_text("Save the messages shown here as a CSV file");
-        export.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Export…"));
-        if export.clicked() {
-            actions.push(Action::ExportLog);
-        }
-    });
+    ui.horizontal(|ui| log_toolbar(ui, state, ui_state, actions));
 
     let log = ui_state.log_frozen.as_ref().unwrap_or(&state.log);
     let entries: Vec<&LogEntry> = log
@@ -102,30 +54,21 @@ fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState, actions: 
             .show(ui, |ui| details(ui, entry, &mut ui_state.log_selected));
     }
 
-    // Monospace columns, as wide as the longest instance ID and topic shown.
-    let instance_width = entries
-        .iter()
-        .map(|e| e.instance.chars().count())
-        .max()
-        .unwrap_or(0)
-        .max("Instance".len());
-    let topic_width = entries
-        .iter()
-        .map(|e| e.topic.chars().count())
-        .max()
-        .unwrap_or(0)
-        .clamp("Topic".len(), TOPIC_COLUMN_MAX);
+    let columns = Columns::fitting(&entries);
     ui.label(
         RichText::new(format!(
-            "{:<13} {:<instance_width$} {:<topic_width$} QoS  Payload",
-            "Time", "Instance", "Topic"
+            "{:<13} {:<instance$} {:<topic$} QoS  Payload",
+            "Time",
+            "Instance",
+            "Topic",
+            instance = columns.instance,
+            topic = columns.topic,
         ))
         .monospace()
         .weak(),
     );
     let row_height = ui.text_style_height(&TextStyle::Monospace);
-    let mut clicked_instance = None;
-    let mut clicked_row = None;
+    let mut clicks = RowClick::default();
     // Both tabs draw into the same `ui`; their scroll areas need IDs of their own, or showing
     // the problems resets the log's position and its stick to the bottom.
     egui::ScrollArea::vertical()
@@ -135,55 +78,146 @@ fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState, actions: 
         .show_rows(ui, row_height, entries.len(), |ui, rows| {
             for entry in &entries[rows] {
                 let selected = ui_state.log_selected == Some(entry.seq);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    // The selected message's row is highlighted cell by cell.
-                    let highlight = selected.then(|| ui.visuals().selection.bg_fill);
-                    let cell = |text: String| {
-                        let text = RichText::new(text).monospace();
-                        match highlight {
-                            Some(fill) => text.background_color(fill),
-                            None => text,
-                        }
-                    };
-                    let clickable = |ui: &mut egui::Ui, text: RichText| {
-                        ui.add(egui::Label::new(text).sense(egui::Sense::click()))
-                    };
-                    let time = clickable(ui, cell(format!("{:<13} ", format::clock(entry.time))));
-                    let instance =
-                        clickable(ui, cell(format!("{:<instance_width$} ", entry.instance)))
-                            .on_hover_text(format!("Show only {}'s messages", entry.instance));
-                    // Named for what a click does: the tree already has a widget per instance ID.
-                    instance.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Label,
-                            true,
-                            format!("Show only {}'s messages", entry.instance),
-                        )
-                    });
-                    let topic = clickable(
-                        ui,
-                        cell(format!("{:<topic_width$} ", cut(&entry.topic, topic_width))),
-                    );
-                    ui.label(cell(entry.qos.to_string()));
-                    ui.label(cell(if entry.retain { "R" } else { " " }.to_string()))
-                        .on_hover_text("Retained");
-                    ui.label(cell("   ".to_string()));
-                    let payload = clickable(ui, cell(format::log_payload(&entry.payload)));
-                    if instance.clicked() {
-                        clicked_instance = Some(entry.instance.clone());
-                    }
-                    if time.clicked() || topic.clicked() || payload.clicked() {
-                        clicked_row = Some(entry.seq);
-                    }
-                });
+                let click = ui
+                    .horizontal(|ui| log_row(ui, entry, columns, selected))
+                    .inner;
+                clicks.instance = click.instance.or(clicks.instance.take());
+                clicks.row = click.row.or(clicks.row);
             }
         });
-    if let Some(instance) = clicked_instance {
+    if let Some(instance) = clicks.instance {
         ui_state.log_filter.instance = Some(instance);
     }
-    if let Some(seq) = clicked_row {
+    if let Some(seq) = clicks.row {
         ui_state.log_selected = (ui_state.log_selected != Some(seq)).then_some(seq);
+    }
+}
+
+/// Filter, the instance chip, Pause, Clear and Export… above the log.
+fn log_toolbar(
+    ui: &mut egui::Ui,
+    state: &EngineState,
+    ui_state: &mut UiState,
+    actions: &mut Vec<Action>,
+) {
+    let label = ui.label("Filter");
+    let filter = ui
+        .add(TextEdit::singleline(&mut ui_state.log_filter.topic).hint_text("topic contains…"))
+        .labelled_by(label.id)
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            "Show only messages whose topic contains this",
+            &shortcuts::FIND,
+        ));
+    if std::mem::take(&mut ui_state.focus_log_filter) {
+        filter.request_focus();
+    }
+    if let Some(instance) = ui_state.log_filter.instance.clone() {
+        let chip = ui
+            .button(format!("{instance} {}", icons::X))
+            .on_hover_text("Show every instance");
+        chip.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show every instance")
+        });
+        if chip.clicked() {
+            ui_state.log_filter.instance = None;
+        }
+    }
+    let paused = ui_state.log_frozen.is_some();
+    if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+        ui_state.log_frozen = if paused {
+            None
+        } else {
+            Some(state.log.clone())
+        };
+    }
+    let clear = ui
+        .button(format!("{} Clear", icons::TRASH))
+        .on_hover_text("Empty the log; new messages still show");
+    clear
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear the log"));
+    if clear.clicked() {
+        ui_state.clear_log(&state.log);
+    }
+    let export = ui
+        .button(format!("{} Export…", icons::EXPORT))
+        .on_hover_text("Save the messages shown here as a CSV file");
+    export.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Export…"));
+    if export.clicked() {
+        actions.push(Action::ExportLog);
+    }
+}
+
+/// Widths of the log's monospace columns, in characters.
+#[derive(Clone, Copy)]
+struct Columns {
+    instance: usize,
+    topic: usize,
+}
+
+impl Columns {
+    /// As wide as the longest instance ID and topic shown; topics up to [`TOPIC_COLUMN_MAX`].
+    fn fitting(entries: &[&LogEntry]) -> Self {
+        let widest = |text: fn(&LogEntry) -> &str| {
+            entries
+                .iter()
+                .map(|e| text(e).chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        Self {
+            instance: widest(|e| &e.instance).max("Instance".len()),
+            topic: widest(|e| &e.topic).clamp("Topic".len(), TOPIC_COLUMN_MAX),
+        }
+    }
+}
+
+/// What a click in the log's rows asks for.
+#[derive(Default)]
+struct RowClick {
+    /// Show only this instance's messages.
+    instance: Option<String>,
+    /// Show this message in full, or close it when it is shown.
+    row: Option<u64>,
+}
+
+/// One message as a row of cells; the selected message's row is highlighted cell by cell.
+fn log_row(ui: &mut egui::Ui, entry: &LogEntry, columns: Columns, selected: bool) -> RowClick {
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let highlight = selected.then(|| ui.visuals().selection.bg_fill);
+    let cell = |text: String| {
+        let text = RichText::new(text).monospace();
+        match highlight {
+            Some(fill) => text.background_color(fill),
+            None => text,
+        }
+    };
+    let clickable = |ui: &mut egui::Ui, text: RichText| {
+        ui.add(egui::Label::new(text).sense(egui::Sense::click()))
+    };
+    let Columns {
+        instance: instance_width,
+        topic: topic_width,
+    } = columns;
+    let time = clickable(ui, cell(format!("{:<13} ", format::clock(entry.time))));
+    let filter_label = format!("Show only {}'s messages", entry.instance);
+    let instance = clickable(ui, cell(format!("{:<instance_width$} ", entry.instance)))
+        .on_hover_text(&filter_label);
+    // Named for what a click does: the tree already has a widget per instance ID.
+    instance
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &filter_label));
+    let topic = clickable(
+        ui,
+        cell(format!("{:<topic_width$} ", cut(&entry.topic, topic_width))),
+    );
+    ui.label(cell(entry.qos.to_string()));
+    ui.label(cell(if entry.retain { "R" } else { " " }.to_string()))
+        .on_hover_text("Retained");
+    ui.label(cell("   ".to_string()));
+    let payload = clickable(ui, cell(format::log_payload(&entry.payload)));
+    RowClick {
+        instance: instance.clicked().then(|| entry.instance.clone()),
+        row: (time.clicked() || topic.clicked() || payload.clicked()).then_some(entry.seq),
     }
 }
 

@@ -586,7 +586,7 @@ impl SenzorApp {
     /// Takes in the result of clearing once it is there.
     fn update_clear_retained(&mut self) {
         if let Some(run) = &mut self.clear_retained
-            && let Some(Ok(outcome)) = run.result.as_ref().map(|r| r.try_recv())
+            && let Some(Ok(outcome)) = run.result.as_ref().map(std::sync::mpsc::Receiver::try_recv)
         {
             run.state = match outcome {
                 Ok(count) => ui::ClearRetained::Cleared(count),

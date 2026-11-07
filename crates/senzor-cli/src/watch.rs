@@ -19,7 +19,15 @@ pub struct Stamp {
 impl Stamp {
     /// `None` while the file is missing or empty: in the middle of a save, not yet written.
     pub fn of(path: &Path) -> Option<Self> {
-        let metadata = std::fs::metadata(path).ok()?;
+        Self::from_metadata(&std::fs::metadata(path).ok()?)
+    }
+
+    /// [`Stamp::of`] without blocking the async runtime.
+    async fn of_async(path: &Path) -> Option<Self> {
+        Self::from_metadata(&tokio::fs::metadata(path).await.ok()?)
+    }
+
+    fn from_metadata(metadata: &std::fs::Metadata) -> Option<Self> {
         (metadata.len() > 0).then_some(())?;
         Some(Self {
             modified: metadata.modified().ok()?,
@@ -67,20 +75,20 @@ impl FileWatch {
 
     /// The file's content if its stamp changed, once the stamp has held still for `settle`.
     async fn settled(&mut self) -> Option<String> {
-        let mut stamp = Stamp::of(&self.path)?;
+        let mut stamp = Stamp::of_async(&self.path).await?;
         if Some(stamp) == self.seen {
             return None;
         }
         loop {
             tokio::time::sleep(self.settle).await;
-            let again = Stamp::of(&self.path)?;
+            let again = Stamp::of_async(&self.path).await?;
             if again == stamp {
                 break;
             }
             stamp = again;
         }
         // A save that starts after the last look changes the stamp again; the next poll sees it.
-        let text = std::fs::read_to_string(&self.path).ok()?;
+        let text = tokio::fs::read_to_string(&self.path).await.ok()?;
         self.seen = Some(stamp);
         (!text.is_empty()).then_some(text)
     }
