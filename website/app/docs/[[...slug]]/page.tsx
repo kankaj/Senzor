@@ -1,4 +1,4 @@
-import { source } from '@/lib/source';
+import { pageImage, source } from '@/lib/source';
 import {
   DocsBody,
   DocsDescription,
@@ -52,5 +52,7 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   return {
     title: page.data.title,
     description: page.data.description,
+    openGraph: { images: pageImage(page).url },
+    twitter: { card: 'summary_large_image', images: pageImage(page).url },
   };
 }

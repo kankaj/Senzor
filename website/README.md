@@ -40,7 +40,7 @@ pnpm exec serve /tmp/preview   # then open http://localhost:3000/Senzor/
 
 ## Deploying to Cloudflare
 
-The site is published as a Cloudflare Worker that only serves files: [`wrangler.jsonc`](../wrangler.jsonc) at the repository root names the Worker (`senzor-docs`) and points it at `website/out`; unknown paths get `404.html`. Cloudflare's Git integration builds and deploys it: once the repository is connected, every push to `main` deploys, and with preview builds on, other branches get preview URLs.
+The site is published as a Cloudflare Worker that only serves files: [`wrangler.jsonc`](../wrangler.jsonc) at the repository root names the Worker (`senzor-docs`) and points it at `website/out`; unknown paths get `404.html`. [`public/_headers`](public/_headers) gives `/api/search`, the search index, a JSON content type, which its name without an extension does not. Every docs page has a link-preview image, rendered at build time by `app/og/docs/[...slug]/route.tsx` into `out/og/docs/<page>/image.png`; the pages point to it with an absolute URL on `siteUrl` in `lib/shared.ts`, so change that when the domain changes. Cloudflare's Git integration builds and deploys it: once the repository is connected, every push to `main` deploys, and with preview builds on, other branches get preview URLs.
 
 In the Cloudflare dashboard, **Workers & Pages** → **Create application**, connect the GitHub repository, and on **Set up your application** set:
 

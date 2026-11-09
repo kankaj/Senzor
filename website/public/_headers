@@ -1,0 +1,3 @@
+# Cloudflare Workers static assets: headers for files whose names say nothing about their type.
+/api/search
+  Content-Type: application/json; charset=utf-8
