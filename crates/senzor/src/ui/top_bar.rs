@@ -41,65 +41,9 @@ pub fn show(
                     actions.push(Action::OpenBroker);
                 }
                 ui.separator();
-                if icon_button(ui, icons::FILE_PLUS, "New")
-                    .on_hover_text(shortcuts::tip(ui.ctx(), "New project", &shortcuts::NEW))
-                    .clicked()
-                {
-                    actions.push(Action::New);
-                }
-                if icon_button(ui, icons::FOLDER_OPEN, "Open")
-                    .on_hover_text(shortcuts::tip(ui.ctx(), "Open a project", &shortcuts::OPEN))
-                    .clicked()
-                {
-                    actions.push(Action::Open);
-                }
-                recent_menu(ui, recent, actions);
-                examples_menu(ui, actions);
-                if save_button(ui, doc.is_dirty()).clicked() {
-                    actions.push(Action::Save);
-                }
-                if icon_button(ui, icons::FLOPPY_DISK_BACK, "Save as")
-                    .on_hover_text(shortcuts::tip(
-                        ui.ctx(),
-                        "Save under another name",
-                        &shortcuts::SAVE_AS,
-                    ))
-                    .clicked()
-                {
-                    actions.push(Action::SaveAs);
-                }
-                if icon_button(ui, icons::FILE_CODE, "TOML")
-                    .on_hover_text("Edit the project file as text")
-                    .clicked()
-                {
-                    actions.push(Action::Select(Some(crate::selection::Selection::Source)));
-                }
-                undo_redo(ui, doc, actions);
+                file_buttons(ui, doc, recent, actions);
                 ui.separator();
-                if icon_button(ui, icons::PLAY, "Start all")
-                    .on_hover_text(shortcuts::tip(
-                        ui.ctx(),
-                        "Start every device, regardless of autostart",
-                        &shortcuts::START_ALL,
-                    ))
-                    .clicked()
-                {
-                    actions.push(Action::StartAll);
-                }
-                if icon_button(ui, icons::STOP, "Stop all")
-                    .on_hover_text(shortcuts::tip(
-                        ui.ctx(),
-                        "Stop every device",
-                        &shortcuts::STOP_ALL,
-                    ))
-                    .clicked()
-                {
-                    actions.push(Action::StopAll);
-                }
-                if starting {
-                    ui.weak("starting devices…")
-                        .on_hover_text("Waiting for the previous project's devices to go offline");
-                }
+                run_buttons(ui, starting, actions);
             });
         },
         |ui| {
@@ -121,6 +65,72 @@ pub fn show(
         },
     );
     actions.extend(right);
+}
+
+/// New, Open, the recent and example projects, Save, Save as, TOML, Undo and Redo.
+fn file_buttons(ui: &mut egui::Ui, doc: &Document, recent: &[PathBuf], actions: &mut Vec<Action>) {
+    if icon_button(ui, icons::FILE_PLUS, "New")
+        .on_hover_text(shortcuts::tip(ui.ctx(), "New project", &shortcuts::NEW))
+        .clicked()
+    {
+        actions.push(Action::New);
+    }
+    if icon_button(ui, icons::FOLDER_OPEN, "Open")
+        .on_hover_text(shortcuts::tip(ui.ctx(), "Open a project", &shortcuts::OPEN))
+        .clicked()
+    {
+        actions.push(Action::Open);
+    }
+    recent_menu(ui, recent, actions);
+    examples_menu(ui, actions);
+    if save_button(ui, doc.is_dirty()).clicked() {
+        actions.push(Action::Save);
+    }
+    if icon_button(ui, icons::FLOPPY_DISK_BACK, "Save as")
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            "Save under another name",
+            &shortcuts::SAVE_AS,
+        ))
+        .clicked()
+    {
+        actions.push(Action::SaveAs);
+    }
+    if icon_button(ui, icons::FILE_CODE, "TOML")
+        .on_hover_text("Edit the project file as text")
+        .clicked()
+    {
+        actions.push(Action::Select(Some(crate::selection::Selection::Source)));
+    }
+    undo_redo(ui, doc, actions);
+}
+
+/// Start all and Stop all, and the hint while devices wait to start.
+fn run_buttons(ui: &mut egui::Ui, starting: bool, actions: &mut Vec<Action>) {
+    if icon_button(ui, icons::PLAY, "Start all")
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            "Start every device, regardless of autostart",
+            &shortcuts::START_ALL,
+        ))
+        .clicked()
+    {
+        actions.push(Action::StartAll);
+    }
+    if icon_button(ui, icons::STOP, "Stop all")
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            "Stop every device",
+            &shortcuts::STOP_ALL,
+        ))
+        .clicked()
+    {
+        actions.push(Action::StopAll);
+    }
+    if starting {
+        ui.weak("starting devices…")
+            .on_hover_text("Waiting for the previous project's devices to go offline");
+    }
 }
 
 /// Save, filled with the accent colour while the project has unsaved changes.

@@ -218,45 +218,57 @@ fn parse(path: &str) -> Result<Vec<String>, String> {
         return Err(bad("it is empty"));
     }
     loop {
-        let mut key = String::new();
-        if chars.next_if_eq(&'"').is_some() {
-            loop {
-                match chars.next() {
-                    Some('"') => break,
-                    Some('\\') => key.extend(chars.next()),
-                    Some(c) => key.push(c),
-                    None => return Err(bad("a quote is not closed")),
-                }
-            }
-        } else {
-            while let Some(c) = chars.next_if(|c| *c != '.' && *c != '[') {
-                key.push(c);
-            }
-            key = key.trim().to_string();
-            if key.is_empty() {
-                return Err(bad("a key is empty"));
-            }
-        }
-        keys.push(key);
-        while chars.next_if_eq(&'[').is_some() {
-            let mut number = String::new();
-            while let Some(c) = chars.next_if(|c| *c != ']') {
-                number.push(c);
-            }
-            if chars.next().is_none() {
-                return Err(bad("a `[` is not closed"));
-            }
-            if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
-                return Err(bad("`[…]` takes a message number"));
-            }
-            keys.push(number);
-        }
+        keys.push(parse_key(&mut chars).map_err(bad)?);
+        parse_indices(&mut chars, &mut keys).map_err(bad)?;
         match chars.next() {
             None => return Ok(keys),
             Some('.') => {}
             Some(c) => return Err(bad(&format!("`{c}` follows a quoted key"))),
         }
     }
+}
+
+type Chars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+
+/// One key, quoted or bare, up to the next `.` or `[`.
+fn parse_key(chars: &mut Chars<'_>) -> Result<String, &'static str> {
+    let mut key = String::new();
+    if chars.next_if_eq(&'"').is_some() {
+        loop {
+            match chars.next() {
+                Some('"') => return Ok(key),
+                Some('\\') => key.extend(chars.next()),
+                Some(c) => key.push(c),
+                None => return Err("a quote is not closed"),
+            }
+        }
+    }
+    while let Some(c) = chars.next_if(|c| *c != '.' && *c != '[') {
+        key.push(c);
+    }
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("a key is empty");
+    }
+    Ok(key.to_string())
+}
+
+/// The `[n]` message numbers after a key, each added to `keys`.
+fn parse_indices(chars: &mut Chars<'_>, keys: &mut Vec<String>) -> Result<(), &'static str> {
+    while chars.next_if_eq(&'[').is_some() {
+        let mut number = String::new();
+        while let Some(c) = chars.next_if(|c| *c != ']') {
+            number.push(c);
+        }
+        if chars.next().is_none() {
+            return Err("a `[` is not closed");
+        }
+        if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+            return Err("`[…]` takes a message number");
+        }
+        keys.push(number);
+    }
+    Ok(())
 }
 
 /// `keys` as a path, quoting a key that is not a bare TOML key.

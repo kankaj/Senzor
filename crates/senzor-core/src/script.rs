@@ -9,8 +9,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rand::RngExt;
 use rand::rngs::ChaCha8Rng;
-use rand::{RngExt, SeedableRng};
 use rhai::packages::{Package, StandardPackage};
 use rhai::{AST, Dynamic, Engine, EvalAltResult, FLOAT, INT, ImmutableString, Map, Module, Scope};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -145,7 +145,7 @@ pub enum Action {
 
 /// What the functions registered on an instance's engine work with during one run.
 struct Host {
-    /// The instance's RNG while a script runs; a stand-in otherwise.
+    /// The instance's RNG while a script runs; otherwise a stand-in that nothing draws from.
     rng: ChaCha8Rng,
     /// Whether a subscription script is running: only those may publish, pin and unpin.
     in_subscription: bool,
@@ -185,7 +185,7 @@ pub struct Runtime {
 impl Runtime {
     pub fn new(device_id: &str, params: &BTreeMap<String, Value>) -> Self {
         let host = Arc::new(Mutex::new(Host {
-            rng: ChaCha8Rng::seed_from_u64(0),
+            rng: rand::make_rng(),
             in_subscription: false,
             actions: Vec::new(),
         }));
@@ -678,6 +678,23 @@ mod tests {
             let n = value.as_number().unwrap();
             assert!((10.5..21.5).contains(&n), "{n}");
         }
+    }
+
+    #[test]
+    fn a_run_advances_the_instance_rng_by_what_the_script_drew() {
+        let mut rt = runtime();
+        let mut rng = instance_rng(Some(7), "d-0");
+        let mut expected = instance_rng(Some(7), "d-0");
+        let input = FieldInput {
+            value: &Value::Number(0.0),
+            elapsed: Duration::ZERO,
+            seq: 0,
+            now: UNIX_EPOCH,
+            fields: &BTreeMap::new(),
+        };
+        let drawn = rt.field_value(&ast("random()"), input, &mut rng).unwrap();
+        assert_eq!(drawn, Value::Number(expected.random::<f64>()));
+        assert_eq!(rng.random::<u64>(), expected.random::<u64>());
     }
 
     #[test]

@@ -641,21 +641,7 @@ impl SenzorApp {
             }
             Action::Engine(command) => self.send_when_ready(command),
             Action::Select(selection) => self.select(selection),
-            Action::ClickInstance { id, click } => {
-                let order = self.tree_order();
-                let next = crate::selection::click_instance(
-                    self.ui.selection.as_ref(),
-                    &id,
-                    click,
-                    self.ui.instance_anchor.as_deref(),
-                    &order,
-                );
-                // A range keeps its start, so the next Shift+click moves its other end.
-                if click != crate::selection::InstanceClick::Range {
-                    self.ui.instance_anchor = Some(id);
-                }
-                self.select(next);
-            }
+            Action::ClickInstance { id, click } => self.click_instance(id, click),
             // Applied to the document above.
             Action::Edit(_) | Action::Rename(_) | Action::Remove(_) | Action::ApplyText(_) => {}
             Action::AddDevice => {
@@ -688,30 +674,11 @@ impl SenzorApp {
                     self.reveal(Selection::Template(index));
                 }
             }
-            Action::DeleteSelected => {
-                let removal = match self.ui.selection {
-                    Some(Selection::Device(index)) => edits::Removal::Device(index),
-                    Some(Selection::Template(index)) => edits::Removal::Template(index),
-                    _ => return,
-                };
-                self.apply(Action::Remove(removal));
-                self.select(None);
-            }
+            Action::DeleteSelected => self.delete_selected(),
             Action::ExportLog => self.export_log(),
             Action::ClearLog => self.ui.clear_log(&self.state.log),
             Action::OpenPalette => self.ui.palette = Some(Default::default()),
-            Action::CopySnippet(snippet) => match self.doc.file_name() {
-                Some(name) => {
-                    let text = crate::snippets::text(snippet, &name, self.doc.file());
-                    self.ctx.copy_text(text);
-                    self.ui.snippet_copied = Some(snippet);
-                }
-                None => {
-                    self.ui.modal = Some(Modal::Error(
-                        "Save the project first: the snippet names its file.".into(),
-                    ));
-                }
-            },
+            Action::CopySnippet(snippet) => self.copy_snippet(snippet),
             Action::FindInLog => {
                 self.ui.bottom_tab = ui::BottomTab::Log;
                 self.ui.focus_log_filter = true;
@@ -726,17 +693,7 @@ impl SenzorApp {
                     self.after_undo_or_redo();
                 }
             }
-            Action::OpenRecent(path) => {
-                if path.exists() {
-                    self.guard(Pending::OpenPath(path));
-                } else {
-                    self.settings.forget(&path);
-                    self.ui.modal = Some(Modal::Error(format!(
-                        "{} no longer exists, so it was taken off the recent projects.",
-                        path.display()
-                    )));
-                }
-            }
+            Action::OpenRecent(path) => self.open_recent(path),
             Action::OpenExample(index) => self.guard(Pending::OpenExample(index)),
             Action::OpenDropped(path) => self.guard(Pending::OpenPath(path)),
             Action::ClearRecent => self.settings.recent.clear(),
@@ -747,14 +704,7 @@ impl SenzorApp {
             Action::ShowWhatsNew => {
                 self.ui.modal = Some(Modal::WhatsNew(crate::whats_new::this_version()));
             }
-            Action::ToggleMcp => {
-                if self.mcp.is_some() {
-                    self.stop_mcp();
-                } else {
-                    self.start_mcp(self.mcp_port);
-                }
-                self.settings.mcp_on = self.mcp.is_some();
-            }
+            Action::ToggleMcp => self.toggle_mcp(),
             Action::SetNotifyFailures(on) => self.settings.notify_failures = on,
             Action::SetCheckUpdates(on) => self.settings.check_updates = on,
             Action::OpenNewRelease => {
@@ -768,19 +718,8 @@ impl SenzorApp {
                 self.mcp_port = port;
                 self.mcp_error = None;
             }
-            Action::SetMcpRemote(remote) => {
-                self.settings.mcp_remote = remote;
-                if remote && self.settings.mcp_token.is_none() {
-                    self.settings.mcp_token = Some(senzor_mcp::new_token());
-                }
-                self.restart_mcp();
-            }
-            Action::NewMcpToken => {
-                self.settings.mcp_token = Some(senzor_mcp::new_token());
-                if self.settings.mcp_remote {
-                    self.restart_mcp();
-                }
-            }
+            Action::SetMcpRemote(remote) => self.set_mcp_remote(remote),
+            Action::NewMcpToken => self.new_mcp_token(),
             Action::CopyMcpToken => {
                 if let Some(token) = &self.settings.mcp_token {
                     self.ctx.copy_text(token.clone());
@@ -788,6 +727,83 @@ impl SenzorApp {
             }
             Action::GoTo(ProblemTarget::Broker) => self.ui.broker_open = true,
             Action::GoTo(ProblemTarget::Select(selection)) => self.reveal(selection),
+        }
+    }
+
+    fn click_instance(&mut self, id: String, click: crate::selection::InstanceClick) {
+        let order = self.tree_order();
+        let next = crate::selection::click_instance(
+            self.ui.selection.as_ref(),
+            &id,
+            click,
+            self.ui.instance_anchor.as_deref(),
+            &order,
+        );
+        // A range keeps its start, so the next Shift+click moves its other end.
+        if click != crate::selection::InstanceClick::Range {
+            self.ui.instance_anchor = Some(id);
+        }
+        self.select(next);
+    }
+
+    fn delete_selected(&mut self) {
+        let removal = match self.ui.selection {
+            Some(Selection::Device(index)) => edits::Removal::Device(index),
+            Some(Selection::Template(index)) => edits::Removal::Template(index),
+            _ => return,
+        };
+        self.apply(Action::Remove(removal));
+        self.select(None);
+    }
+
+    fn copy_snippet(&mut self, snippet: crate::snippets::Snippet) {
+        match self.doc.file_name() {
+            Some(name) => {
+                let text = crate::snippets::text(snippet, &name, self.doc.file());
+                self.ctx.copy_text(text);
+                self.ui.snippet_copied = Some(snippet);
+            }
+            None => {
+                self.ui.modal = Some(Modal::Error(
+                    "Save the project first: the snippet names its file.".into(),
+                ));
+            }
+        }
+    }
+
+    fn open_recent(&mut self, path: std::path::PathBuf) {
+        if path.exists() {
+            self.guard(Pending::OpenPath(path));
+        } else {
+            self.settings.forget(&path);
+            self.ui.modal = Some(Modal::Error(format!(
+                "{} no longer exists, so it was taken off the recent projects.",
+                path.display()
+            )));
+        }
+    }
+
+    fn toggle_mcp(&mut self) {
+        if self.mcp.is_some() {
+            self.stop_mcp();
+        } else {
+            self.start_mcp(self.mcp_port);
+        }
+        self.settings.mcp_on = self.mcp.is_some();
+    }
+
+    fn set_mcp_remote(&mut self, remote: bool) {
+        self.settings.mcp_remote = remote;
+        if remote && self.settings.mcp_token.is_none() {
+            self.settings.mcp_token = Some(senzor_mcp::new_token());
+        }
+        self.restart_mcp();
+    }
+
+    fn new_mcp_token(&mut self) {
+        self.settings.mcp_token = Some(senzor_mcp::new_token());
+        if self.settings.mcp_remote {
+            self.restart_mcp();
         }
     }
 

@@ -81,6 +81,58 @@ fn presets_menu(ui: &mut egui::Ui, broker: &mut BrokerSpec) {
     .on_hover_text("Fill in a known broker's address; credentials and TLS are cleared");
 }
 
+/// The Password row: where the password comes from, and the password or variable.
+fn password_row(ui: &mut egui::Ui, doc: &Document, at: &Location, broker: &mut BrokerSpec) {
+    help::label(ui, "Password", help::PASSWORD);
+    checked(ui, doc, at, "password_env", |ui| {
+        ui.horizontal(|ui| {
+            let mut source = PasswordSource::of(broker);
+            egui::ComboBox::from_id_salt("broker-password-source")
+                .selected_text(source.label())
+                .show_ui(ui, |ui| {
+                    for option in PasswordSource::ALL {
+                        ui.selectable_value(&mut source, option, option.label());
+                    }
+                });
+            set_password_source(broker, source);
+            if let Some(password) = &mut broker.password {
+                ui.add(egui::TextEdit::singleline(password).password(true));
+            }
+            broker
+                .password_env
+                .as_mut()
+                .map(|variable| ui.text_edit_singleline(variable))
+        })
+        .box_or_row()
+    });
+    ui.end_row();
+}
+
+/// The TLS row, and the certificate rows under it while TLS is on.
+fn tls_rows(ui: &mut egui::Ui, doc: &Document, at: &Location, broker: &mut BrokerSpec) {
+    help::label(ui, "TLS", help::TLS);
+    let mut tls = broker.tls.is_some();
+    if ui.checkbox(&mut tls, "use TLS").changed() {
+        broker.tls = tls.then(TlsSpec::default);
+    }
+    ui.end_row();
+    if let Some(tls) = &mut broker.tls {
+        for (label, field, path) in [
+            ("  CA file", "tls.ca_file", &mut tls.ca_file),
+            (
+                "  Client certificate",
+                "tls.client_cert",
+                &mut tls.client_cert,
+            ),
+            ("  Client key", "tls.client_key", &mut tls.client_key),
+        ] {
+            ui.label(label);
+            checked(ui, doc, at, field, |ui| path_edit(ui, path));
+            ui.end_row();
+        }
+    }
+}
+
 /// Shown under the seed box while its text is not a seed.
 const SEED_HINT: &str = "use a whole number, or leave it empty";
 
@@ -202,51 +254,8 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    help::label(ui, "Password", help::PASSWORD);
-                    checked(ui, doc, at, "password_env", |ui| {
-                        ui.horizontal(|ui| {
-                            let mut source = PasswordSource::of(&broker);
-                            egui::ComboBox::from_id_salt("broker-password-source")
-                                .selected_text(source.label())
-                                .show_ui(ui, |ui| {
-                                    for option in PasswordSource::ALL {
-                                        ui.selectable_value(&mut source, option, option.label());
-                                    }
-                                });
-                            set_password_source(&mut broker, source);
-                            if let Some(password) = &mut broker.password {
-                                ui.add(egui::TextEdit::singleline(password).password(true));
-                            }
-                            broker
-                                .password_env
-                                .as_mut()
-                                .map(|variable| ui.text_edit_singleline(variable))
-                        })
-                        .box_or_row()
-                    });
-                    ui.end_row();
-
-                    help::label(ui, "TLS", help::TLS);
-                    let mut tls = broker.tls.is_some();
-                    if ui.checkbox(&mut tls, "use TLS").changed() {
-                        broker.tls = tls.then(TlsSpec::default);
-                    }
-                    ui.end_row();
-                    if let Some(tls) = &mut broker.tls {
-                        for (label, field, path) in [
-                            ("  CA file", "tls.ca_file", &mut tls.ca_file),
-                            (
-                                "  Client certificate",
-                                "tls.client_cert",
-                                &mut tls.client_cert,
-                            ),
-                            ("  Client key", "tls.client_key", &mut tls.client_key),
-                        ] {
-                            ui.label(label);
-                            checked(ui, doc, at, field, |ui| path_edit(ui, path));
-                            ui.end_row();
-                        }
-                    }
+                    password_row(ui, doc, at, &mut broker);
+                    tls_rows(ui, doc, at, &mut broker);
                 });
             ui.weak("Relative paths are resolved against the project file's folder.");
             connection_test(ui, doc, ui_state.connection_test.as_ref(), actions);
