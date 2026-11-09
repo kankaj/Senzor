@@ -9,7 +9,7 @@ use senzor_testkit::Subscriber;
 use serde_json::json;
 use support::{Agent, WAIT, project, state, temp_dir};
 
-const TOOLS: [&str; 23] = [
+const TOOLS: [&str; 27] = [
     "copy_builtin_template",
     "get_instance",
     "get_messages",
@@ -25,14 +25,18 @@ const TOOLS: [&str; 23] = [
     "remove_device",
     "remove_template",
     "rename_device",
+    "redo",
     "rename_template",
     "restart",
     "save_project",
+    "set",
     "set_broker",
     "set_project",
     "start",
     "stop",
+    "undo",
     "unpin",
+    "unset",
 ];
 
 #[tokio::test(flavor = "multi_thread")]

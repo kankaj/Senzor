@@ -951,6 +951,70 @@ fn the_mcp_port_set_in_settings_is_used_and_saved_with_mcp_on() {
     assert!(!AppSettings::load(Some(&storage)).mcp_on);
 }
 
+/// The status code of a bare MCP initialize sent to `127.0.0.1:<port>` without a token.
+fn status_without_token(port: u16) -> u16 {
+    use std::io::{Read, Write};
+    let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        stream,
+        "POST /mcp HTTP/1.1\r\nHost: senzor.lan:{port}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+#[test]
+fn other_machines_connect_on_every_address_with_a_token() {
+    let port = free_port();
+    let mut harness = app_with_settings(senzor::settings::AppSettings {
+        mcp_port: port,
+        ..Default::default()
+    });
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(
+        harness.query_by_label("Copy token").is_none(),
+        "off by default"
+    );
+    click(&mut harness, "MCP from other machines");
+    harness.run();
+    let token = harness
+        .state()
+        .settings()
+        .mcp_token
+        .clone()
+        .expect("a token");
+    assert!(harness.state().settings().mcp_remote);
+
+    click(&mut harness, "MCP");
+    harness.run();
+    let senzor::McpStatus::Listening(address) = harness.state().mcp_status() else {
+        panic!("MCP is on");
+    };
+    assert!(address.ip().is_unspecified(), "{address}");
+    assert_eq!(status_without_token(port), 401);
+
+    harness.get_by_label("Copy token").click();
+    harness.step();
+    assert_eq!(copied(&harness).as_deref(), Some(token.as_str()));
+    click(&mut harness, "New token");
+    harness.run();
+    assert_ne!(harness.state().settings().mcp_token.as_ref(), Some(&token));
+    assert_eq!(
+        status_without_token(port),
+        401,
+        "still on, with the new token"
+    );
+}
+
 #[test]
 fn the_mcp_flag_uses_the_port_in_the_settings() {
     let port = free_port();

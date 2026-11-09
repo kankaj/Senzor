@@ -3,12 +3,12 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use rmcp::model::{CallToolRequestParams, CallToolResult};
-use rmcp::service::RunningService;
-use rmcp::{RoleClient, ServiceExt};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ResourceUpdatedNotificationParam};
+use rmcp::service::{ClientLifecycleMode, ClientServiceExt, NotificationContext, RunningService};
+use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use senzor_mcp::{SenzorServer, Session};
 use serde_json::{Value, json};
 use tokio::runtime::Handle;
@@ -55,8 +55,48 @@ pub fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// A client that records every `notifications/resources/updated` it receives.
+#[derive(Clone, Default)]
+pub struct Recorder(Arc<Mutex<Vec<(Instant, String)>>>);
+
+impl Recorder {
+    /// When each update for `uri` arrived, oldest first.
+    pub fn updates(&self, uri: &str) -> Vec<Instant> {
+        let updates = self.0.lock().unwrap();
+        updates
+            .iter()
+            .filter(|(_, u)| u == uri)
+            .map(|(at, _)| *at)
+            .collect()
+    }
+
+    /// Waits up to [`WAIT`] until `uri` has had `count` updates; returns how many it had.
+    pub async fn wait_for(&self, uri: &str, count: usize) -> usize {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let seen = self.updates(uri).len();
+            if seen >= count || Instant::now() >= deadline {
+                return seen;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+impl ClientHandler for Recorder {
+    async fn on_resource_updated(
+        &self,
+        params: ResourceUpdatedNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        self.0.lock().unwrap().push((Instant::now(), params.uri));
+    }
+}
+
 pub struct Agent {
-    pub client: RunningService<RoleClient, ()>,
+    pub client: RunningService<RoleClient, Recorder>,
+    /// The resource updates the client received.
+    pub updates: Recorder,
     owner: JoinHandle<Session>,
     pub port: u16,
     pub dir: PathBuf,
@@ -74,6 +114,29 @@ impl Agent {
 
     /// A session that opens `path` (or starts empty).
     pub async fn open(path: Option<&Path>, autostart: bool, port: u16, dir: PathBuf) -> Agent {
+        Self::open_with(path, autostart, port, dir, ClientLifecycleMode::Initialize).await
+    }
+
+    /// As [`Agent::with_project`], with a client that starts the session the 2026-07-28 way
+    /// (`server/discover`, no `initialize`).
+    pub async fn with_project_discovered(name: &str) -> Agent {
+        let port = senzor_testkit::start_broker();
+        let dir = temp_dir(name);
+        let path = dir.join("project.toml");
+        std::fs::write(&path, project(port)).unwrap();
+        let lifecycle = ClientLifecycleMode::Discover {
+            preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+        };
+        Self::open_with(Some(&path), true, port, dir, lifecycle).await
+    }
+
+    async fn open_with(
+        path: Option<&Path>,
+        autostart: bool,
+        port: u16,
+        dir: PathBuf,
+        lifecycle: ClientLifecycleMode,
+    ) -> Agent {
         let session = Session::new(&Handle::current(), path, autostart);
         let view = session.view();
         let (tx, rx) = mpsc::unbounded_channel();
@@ -85,9 +148,15 @@ impl Agent {
                 let _ = running.waiting().await;
             }
         });
-        let client = ().serve(client_end).await.unwrap();
+        let updates = Recorder::default();
+        let client = updates
+            .clone()
+            .serve_with_lifecycle(client_end, lifecycle)
+            .await
+            .unwrap();
         Agent {
             client,
+            updates,
             owner,
             port,
             dir,

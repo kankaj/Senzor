@@ -6,11 +6,12 @@ use std::time::Duration;
 
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
-    Implementation, ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-    ServerConfig,
+    GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
+    ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    SubscribeRequestParams, SubscriptionFilter, UnsubscribeRequestParams,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use senzor_core::engine::EngineState;
 use senzor_core::project::{BrokerSpec, DeviceSpec, TemplateSpec};
@@ -18,18 +19,20 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::host::{Envelope, Reply, Request, RunAction, settled};
+use crate::live::{Live, project};
 use crate::output::{
     EditOut, InstanceDetail, InstanceStatusOut, InstanceSummary, Message, MessagesOut, OpenOut,
-    PinOut, ProjectOut, RunOut, SaveOut, StatusOut, TemplatesOut, problems, templates,
+    PinOut, ProjectOut, RunOut, SaveOut, StatusOut, StepOut, TemplatesOut, problems, templates,
 };
 use crate::params::{
     CopyBuiltinParams, DEFAULT_MESSAGE_LIMIT, DEFAULT_RUN_WAIT_SECONDS, IdParams, InstanceParams,
     MAX_MESSAGE_LIMIT, MAX_MESSAGE_WAIT_SECONDS, MAX_RUN_WAIT_SECONDS, MessagesParams,
     NewProjectParams, OpenProjectParams, PinParams, RenameParams, RunParams, SaveProjectParams,
-    SetProjectParams, UnpinParams, wait,
+    SetParams, SetProjectParams, UnpinParams, UnsetParams, wait,
 };
-use crate::redact::redacted;
+use crate::prompts;
 use crate::resources::{REFERENCES, find};
+use crate::subscriptions::{Subscriptions, Watched, watch};
 use crate::view::{Snapshot, View};
 
 /// How long a tool waits for the host to apply a change.
@@ -49,7 +52,9 @@ an edit at once, without reconnecting, unless the edit changes its connection (t
 or its template's availability); edit results list those instances, which need a restart. \
 save_project writes the file. Broker passwords are shown as \
 <redacted>; sending <redacted> back keeps the password.
-The project-file reference is available as resources (senzor://reference/...).";
+The project-file reference is available as resources (senzor://reference/...). Subscribe to \
+senzor://project, senzor://instances or senzor://messages to be told when they change instead of \
+polling.";
 
 /// Called after a request is queued, so a host that only looks at requests now and then (the
 /// GUI, between frames) looks now.
@@ -64,6 +69,8 @@ pub struct SenzorServer {
     /// How errors name the host when it does not answer, e.g. "the Senzor window".
     host_name: &'static str,
     timeout: Duration,
+    /// This connection's `resources/subscribe` subscriptions; a clone starts with none.
+    subscriptions: Subscriptions,
 }
 
 impl SenzorServer {
@@ -79,6 +86,7 @@ impl SenzorServer {
             wake,
             host_name,
             timeout: REQUEST_TIMEOUT,
+            subscriptions: Subscriptions::default(),
         }
     }
 
@@ -166,6 +174,11 @@ impl SenzorServer {
         let Reply::Edited { changed, sync } = self.call(request).await? else {
             return Err(unexpected());
         };
+        self.edit_out(changed, sync).await.map(Json)
+    }
+
+    /// What an edit left: the project's problems and the instances it affects.
+    async fn edit_out(&self, changed: bool, sync: u64) -> Result<EditOut, String> {
         self.sync(sync).await;
         let snapshot = self.view.get()?;
         let (needs_restart, orphaned) = snapshot.observer.read(|s| {
@@ -178,13 +191,13 @@ impl SenzorServer {
             };
             (ids(|i| i.needs_restart), ids(|i| i.orphaned))
         });
-        Ok(Json(EditOut {
+        Ok(EditOut {
             changed,
             problems: problems(&snapshot.validated),
             blocked: blocked(&snapshot),
             needs_restart,
             orphaned,
-        }))
+        })
     }
 
     async fn pin_change(
@@ -396,14 +409,7 @@ impl SenzorServer {
         annotations(read_only_hint = true)
     )]
     async fn get_project(&self) -> Result<Json<ProjectOut>, String> {
-        let snapshot = self.view.get()?;
-        Ok(Json(ProjectOut {
-            toml: redacted(&snapshot.file).to_toml_string(),
-            path: path_text(snapshot.path.as_deref()),
-            dirty: snapshot.dirty,
-            problems: problems(&snapshot.validated),
-            blocked: blocked(&snapshot),
-        }))
+        Ok(Json(project(&self.view.get()?)))
     }
 
     #[tool(
@@ -518,6 +524,44 @@ impl SenzorServer {
     }
 
     #[tool(
+        description = "Change one value of the project (not saved to the file). The path is the project file's keys joined by dots, with devices and templates named by id and messages numbered from 1, e.g. devices.office.count, devices.office.params.room, templates.office-air.interval, templates.office-air.fields.co2.max, templates.office-air.messages.1.payload (or messages[1]), broker.port, simulation.seed; quote a key with a dot in it (params.\"a.b\"). The value is JSON of the type the key takes: a string (durations as text, e.g. \"30s\"), number or boolean, or an object or array for a key that holds a table or list. Missing tables on the way are created, and the number after a list's last entry adds an entry (e.g. a message). A value of the wrong type, an unknown key or a path that names nothing returns an error and changes nothing. Ids change with rename_device and rename_template; built-in templates cannot be changed. One call is one undo step."
+    )]
+    async fn set(
+        &self,
+        Parameters(params): Parameters<SetParams>,
+    ) -> Result<Json<EditOut>, String> {
+        self.edit(Request::Set {
+            path: params.path,
+            value: params.value,
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Remove one key of the project, so its default applies (e.g. devices.office.count goes back to 1, templates.office-air.interval to 10s), or remove a list entry such as a message (templates.office-air.messages.2). The path is written as for set. A key the project file requires, or one that is not set, returns an error and changes nothing. One call is one undo step."
+    )]
+    async fn unset(
+        &self,
+        Parameters(params): Parameters<UnsetParams>,
+    ) -> Result<Json<EditOut>, String> {
+        self.edit(Request::Unset { path: params.path }).await
+    }
+
+    #[tool(
+        description = "Take back the latest change to the project (not to the file). In the Senzor window this is the window's own undo history (Ctrl+Z), so it also takes back the user's edits; each edit tool call is one step, and opening or creating a project starts a new history. Running instances take the change as they take an edit. Returns what the step changed (broker, simulation, device and template ids), whether undo and redo are possible now, and the project's problems as the edit tools do; an error when there is nothing to undo."
+    )]
+    async fn undo(&self) -> Result<Json<StepOut>, String> {
+        self.step(Request::Undo).await
+    }
+
+    #[tool(
+        description = "Apply again the change the latest undo took back; possible until the next edit. Returns what it changed, like undo; an error when there is nothing to redo."
+    )]
+    async fn redo(&self) -> Result<Json<StepOut>, String> {
+        self.step(Request::Redo).await
+    }
+
+    #[tool(
         description = "Built-in and project templates: interval, topics, fields with their generators, and the devices that use each.",
         annotations(read_only_hint = true)
     )]
@@ -574,6 +618,24 @@ impl SenzorServer {
 }
 
 impl SenzorServer {
+    async fn step(&self, request: Request) -> Result<Json<StepOut>, String> {
+        let Reply::Stepped {
+            changes,
+            can_undo,
+            can_redo,
+            sync,
+        } = self.call(request).await?
+        else {
+            return Err(unexpected());
+        };
+        Ok(Json(StepOut {
+            changes,
+            can_undo,
+            can_redo,
+            edit: self.edit_out(true, sync).await?,
+        }))
+    }
+
     async fn open(&self, request: Request) -> Result<Json<OpenOut>, String> {
         let Reply::Opened { sync } = self.call(request).await? else {
             return Err(unexpected());
@@ -599,8 +661,10 @@ impl ServerHandler for SenzorServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(
             ServerCapabilities::builder()
-                .enable_tools()
+                .enable_prompts()
                 .enable_resources()
+                .enable_resources_subscribe()
+                .enable_tools()
                 .build(),
         )
         .with_server_info(Implementation::new("senzor", env!("CARGO_PKG_VERSION")))
@@ -612,15 +676,19 @@ impl ServerHandler for SenzorServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let resources = REFERENCES
-            .iter()
-            .map(|r| {
-                Resource::new(r.uri, r.name)
-                    .with_description(r.description)
-                    .with_mime_type(r.mime_type)
-            })
-            .collect();
-        Ok(ListResourcesResult::with_all_items(resources))
+        let live = Live::ALL.into_iter().map(|live| {
+            Resource::new(live.uri(), live.name())
+                .with_description(live.description())
+                .with_mime_type("application/json")
+        });
+        let references = REFERENCES.iter().map(|r| {
+            Resource::new(r.uri, r.name)
+                .with_description(r.description)
+                .with_mime_type(r.mime_type)
+        });
+        Ok(ListResourcesResult::with_all_items(
+            live.chain(references).collect(),
+        ))
     }
 
     async fn read_resource(
@@ -628,11 +696,109 @@ impl ServerHandler for SenzorServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        let reference = find(&request.uri).ok_or_else(|| {
-            ErrorData::resource_not_found(format!("no resource `{}`", request.uri), None)
-        })?;
-        let contents = ResourceContents::text(reference.text(), reference.uri)
-            .with_mime_type(reference.mime_type);
+        let contents = if let Some(live) = Live::find(&request.uri) {
+            let text = live
+                .read(&self.view)
+                .map_err(|e| ErrorData::internal_error(e, None))?;
+            ResourceContents::text(text, live.uri()).with_mime_type("application/json")
+        } else {
+            let reference = find(&request.uri).ok_or_else(|| no_resource(&request.uri))?;
+            ResourceContents::text(reference.text(), reference.uri)
+                .with_mime_type(reference.mime_type)
+        };
         Ok(ReadResourceResult::new(vec![contents]).into())
     }
+
+    // Clients of protocol versions before 2026-07-28 subscribe with `resources/subscribe`.
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        match Live::find(&request.uri) {
+            Some(live) => self
+                .subscriptions
+                .subscribe(live, &self.view, &context.peer),
+            // A reference page never changes.
+            None if find(&request.uri).is_some() => {}
+            None => return Err(no_resource(&request.uri)),
+        }
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        if let Some(live) = Live::find(&request.uri) {
+            self.subscriptions.unsubscribe(live);
+        }
+        Ok(())
+    }
+
+    // Clients of protocol 2026-07-28 and later subscribe with `subscriptions/listen`.
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        let known = requested
+            .resource_subscriptions
+            .iter()
+            .flatten()
+            .filter(|uri| Live::find(uri).is_some() || find(uri).is_some());
+        Some(
+            SubscriptionFilter::builder()
+                .resource_subscriptions(known)
+                .build(),
+        )
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        let watched: Watched = context
+            .accepted()
+            .resource_subscriptions
+            .iter()
+            .flatten()
+            .filter_map(|uri| Live::find(uri))
+            .map(|live| (live, live.version(&self.view)))
+            .collect();
+        // Kept until the subscription ends: dropping it would end `updates`.
+        let (_watched, receiver) = tokio::sync::watch::channel(watched);
+        let sink = context.sink().clone();
+        let view = self.view.clone();
+        let updates = watch(
+            receiver,
+            move |live| live.version(&view),
+            move |uri| {
+                let sink = sink.clone();
+                async move { sink.notify_resource_updated(uri).await.is_ok() }
+            },
+        );
+        tokio::select! {
+            () = context.cancelled() => {}
+            () = updates => {}
+        }
+        Ok(())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(prompts::list()))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        prompts::get(&request.name, request.arguments.as_ref()).map(Into::into)
+    }
+}
+
+fn no_resource(uri: &str) -> ErrorData {
+    ErrorData::resource_not_found(format!("no resource `{uri}`"), None)
 }

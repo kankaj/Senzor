@@ -119,6 +119,23 @@ pub struct CopyBuiltinParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetParams {
+    /// Where: the project file's keys joined by dots, devices and templates by id, messages
+    /// numbered from 1, e.g. `devices.office.count`, `templates.office-air.fields.co2.max`,
+    /// `templates.office-air.messages.1.payload`, `broker.port`.
+    pub path: String,
+    /// The new value as the key holds it: a string (durations as text, e.g. "30s"), number or
+    /// boolean, or an object or array for a key that holds a table or list.
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UnsetParams {
+    /// The key to remove, written as for `set`, e.g. `devices.office.interval`.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct NewProjectParams {
     /// Throw away unsaved changes.
     pub discard_unsaved: Option<bool>,

@@ -34,6 +34,8 @@ If the port is taken, a dialog says why, unless another dialog is already open, 
 
 **MCP port** is the port MCP listens on, 18830 unless you change it. Change it while MCP is off; while it is on, the box is disabled with the hint **Turn MCP off to change its port**.
 
+The switch **let agents on other machines connect, with a token** makes MCP listen on every address of this computer instead of `127.0.0.1`, and asks every agent for a token. Senzor makes the token the first time you turn the switch on and keeps it in its settings. Below the switch, **Copy token** puts it on the clipboard; agents send it as the HTTP header `Authorization: Bearer <token>`. **New token** replaces it, and agents that use the old one can no longer connect. While MCP is on, the **Address** row then reads **this machine's name or address, port 18830**: agents use `http://<this computer's name or IP address>:18830/mcp`. Turning the switch on or off, or a new token, restarts MCP, which disconnects connected agents.
+
 Senzor remembers the port and whether you left MCP on: a window you close with MCP on starts the next time with MCP on. `--mcp` and `--mcp-port` turn MCP on for one launch without changing what Senzor remembers. See [Set up Claude Code with the GUI](/docs/mcp#set-up-claude-code-with-the-gui).
 
 ## Updates

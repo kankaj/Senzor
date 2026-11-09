@@ -66,6 +66,17 @@ impl Session {
         self.open_error.as_deref()
     }
 
+    /// Starts device `id`, as `senzor-cli run --only` picks devices.
+    pub fn start_device(&self, id: &str) {
+        self.engine
+            .send(Command::Start(Target::Device(id.to_string())));
+    }
+
+    /// The current engine's state, for reading it after the session ends.
+    pub fn observer(&self) -> EngineObserver {
+        self.engine.observer()
+    }
+
     /// Waits for a replaced engine to stop, then starts the autostart devices that are waiting.
     pub async fn settle(&mut self) {
         if let Some(retiring) = self.retiring.take() {
@@ -119,6 +130,18 @@ pub fn open_error_text(path: &Path, error: &OpenError) -> String {
     }
 }
 
+impl Session {
+    /// Hands the project to the engine when `changed`; returns `changed`.
+    fn changed(&mut self, changed: bool) -> bool {
+        if changed {
+            self.engine.send(Command::ReplaceProject(
+                self.doc.validated().project.clone(),
+            ));
+        }
+        changed
+    }
+}
+
 fn spawn_engine(runtime: &Handle, doc: &Document) -> EngineHandle {
     Engine::spawn(doc.validated().project.clone(), runtime, Arc::new(|| {}))
 }
@@ -130,12 +153,17 @@ impl Host for Session {
 
     fn edit(&mut self, f: &mut dyn FnMut(&mut ProjectFile)) -> bool {
         let changed = self.doc.edit(f);
-        if changed {
-            self.engine.send(Command::ReplaceProject(
-                self.doc.validated().project.clone(),
-            ));
-        }
-        changed
+        self.changed(changed)
+    }
+
+    fn undo(&mut self) -> bool {
+        let changed = self.doc.undo();
+        self.changed(changed)
+    }
+
+    fn redo(&mut self) -> bool {
+        let changed = self.doc.redo();
+        self.changed(changed)
     }
 
     fn send(&mut self, command: Command) {

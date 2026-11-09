@@ -867,3 +867,102 @@ async fn run_without_watch_ignores_edits() {
     assert!(!has(&messages, "w/dev/state", "2"));
     assert_eq!(count(&messages, "w/dev/status", "online"), 1);
 }
+
+/// A port nothing listens on right now.
+fn free_tcp_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// The status code of an MCP initialize sent to `127.0.0.1:<port>` with `headers` (each ending
+/// in CRLF), retried until something listens or 10 s pass; 0 when nothing answered.
+fn mcp_initialize_status(port: u16, headers: &str) -> u16 {
+    use std::io::{Read, Write};
+    let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        write!(
+            stream,
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{headers}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        return response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .unwrap_or(0);
+    }
+    0
+}
+
+#[test]
+fn run_serves_mcp_over_http_while_the_devices_run() {
+    let broker = start_broker();
+    let project = write_project("run-mcp", &project_toml(broker, true));
+    let port = free_tcp_port();
+    let child = std::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
+        .args(["run", &project.to_string_lossy(), "--duration", "4s"])
+        .args(["--mcp-port", &port.to_string()])
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    assert_eq!(mcp_initialize_status(port, ""), 200);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let log = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        log.contains(&format!("MCP at http://127.0.0.1:{port}/mcp")),
+        "{log}"
+    );
+}
+
+#[test]
+fn run_lets_other_machines_use_mcp_only_with_a_token() {
+    let broker = start_broker();
+    let project = write_project("run-mcp-remote", &project_toml(broker, false));
+    let port = free_tcp_port();
+    let output = run_cli(
+        "run",
+        &project,
+        &["--mcp-port", &port.to_string(), "--mcp-bind", "0.0.0.0"],
+    );
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("SENZOR_MCP_TOKEN"),
+        "{output:?}"
+    );
+
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin(BIN))
+        .args(["run", &project.to_string_lossy(), "--duration", "4s"])
+        .args(["--mcp-port", &port.to_string(), "--mcp-bind", "0.0.0.0"])
+        .env("SENZOR_MCP_TOKEN", "s3cret")
+        .spawn()
+        .unwrap();
+    assert_eq!(mcp_initialize_status(port, ""), 401);
+    assert_eq!(
+        mcp_initialize_status(port, "Authorization: Bearer s3cret\r\n"),
+        200
+    );
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn run_takes_either_watch_or_an_mcp_port() {
+    let project = write_project("run-mcp-watch", &project_toml(1883, false));
+    let output = run_cli("run", &project, &["--watch", "--mcp-port", "18999"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("cannot be used with"),
+        "{output:?}"
+    );
+}

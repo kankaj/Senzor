@@ -8,6 +8,7 @@ edition.workspace = true
 
 [dependencies]
 axum.workspace = true
+rand.workspace = true
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
 humantime.workspace = true
 tracing.workspace = true
@@ -16,9 +17,10 @@ senzor-core = { workspace = true, features = ["schema"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
 rmcp = { workspace = true, features = ["client"] }
 senzor-testkit.workspace = true
-toml.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

@@ -75,6 +75,12 @@ pub struct AppSettings {
     pub mcp_port: u16,
     /// MCP was on when the window closed, so the next window turns it on again.
     pub mcp_on: bool,
+    /// MCP listens on every address of this machine, so agents on other machines can connect,
+    /// and asks for [`AppSettings::mcp_token`].
+    pub mcp_remote: bool,
+    /// The token agents on other machines send as `Authorization: Bearer <token>`; made the
+    /// first time MCP is opened to other machines.
+    pub mcp_token: Option<String>,
     /// The tabs selected when the window closed.
     pub tabs: PanelTabs,
     /// The version of Senzor that last ran with these settings, for telling what is new.
@@ -97,6 +103,8 @@ impl Default for AppSettings {
             recent: Vec::new(),
             mcp_port: senzor_mcp::DEFAULT_HTTP_PORT,
             mcp_on: false,
+            mcp_remote: false,
+            mcp_token: None,
             tabs: PanelTabs::default(),
             last_version: None,
             notify_failures: true,
@@ -186,6 +194,8 @@ mod tests {
             recent: vec![PathBuf::from("/projects/a.toml")],
             mcp_port: 18900,
             mcp_on: true,
+            mcp_remote: true,
+            mcp_token: Some("s3cret".into()),
             tabs: PanelTabs {
                 left: LeftTab::Templates,
                 bottom: BottomTab::Problems,

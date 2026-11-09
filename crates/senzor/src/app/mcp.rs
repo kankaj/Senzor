@@ -82,21 +82,32 @@ impl SenzorApp {
         self
     }
 
-    /// Serves MCP at `http://127.0.0.1:<port>/mcp` until [`SenzorApp::stop_mcp`]. If the port
-    /// cannot be used, MCP stays off and a dialog says why. Does nothing while MCP is on.
+    /// Serves MCP at `http://127.0.0.1:<port>/mcp` until [`SenzorApp::stop_mcp`], or on every
+    /// address of this machine with the settings' token when other machines may connect. If the
+    /// port cannot be used, MCP stays off and a dialog says why. Does nothing while MCP is on.
     pub fn start_mcp(&mut self, port: u16) {
         if self.mcp.is_some() {
             return;
         }
         self.mcp_port = port;
+        let (ip, token) = if self.settings.mcp_remote {
+            let token = self
+                .settings
+                .mcp_token
+                .get_or_insert_with(senzor_mcp::new_token)
+                .clone();
+            (Ipv4Addr::UNSPECIFIED, Some(token))
+        } else {
+            (Ipv4Addr::LOCALHOST, None)
+        };
         let bound = self
             .runtime
-            .block_on(TcpListener::bind((Ipv4Addr::LOCALHOST, port)))
+            .block_on(TcpListener::bind((ip, port)))
             .and_then(|listener| Ok((listener.local_addr()?, listener)));
         let (address, listener) = match bound {
             Ok(bound) => bound,
             Err(e) => {
-                let reason = format!("cannot listen on 127.0.0.1:{port}: {e}");
+                let reason = format!("cannot listen on {ip}:{port}: {e}");
                 if self.ui.modal.is_none() {
                     self.ui.modal =
                         Some(Modal::Error(format!("AI agents cannot connect: {reason}")));
@@ -114,7 +125,9 @@ impl SenzorApp {
             Arc::new(move || ctx.request_repaint()),
             "the Senzor window",
         );
-        let task = self.runtime.spawn(serve_http(listener, server.clone()));
+        let task = self
+            .runtime
+            .spawn(serve_http(listener, server.clone(), token));
         self.mcp_error = None;
         self.mcp = Some(Mcp {
             requests: received,
@@ -127,10 +140,20 @@ impl SenzorApp {
         self.publish_view();
     }
 
+    /// Starts MCP again with the current settings when it is on.
+    pub(super) fn restart_mcp(&mut self) {
+        if self.mcp.is_some() {
+            self.stop_mcp();
+            self.start_mcp(self.mcp_port);
+        }
+    }
+
     /// Closes the endpoint. Requests still waiting fail; connected agents lose their session.
     pub fn stop_mcp(&mut self) {
         if let Some(mcp) = self.mcp.take() {
             mcp.task.abort();
+            // Until the task has ended, its listener holds the port a restart binds again.
+            let _ = self.runtime.block_on(mcp.task);
         }
     }
 
@@ -282,6 +305,22 @@ impl Host for SenzorApp {
             self.document_changed();
         }
         changed
+    }
+
+    fn undo(&mut self) -> bool {
+        let done = self.doc.undo();
+        if done {
+            self.after_undo_or_redo();
+        }
+        done
+    }
+
+    fn redo(&mut self) -> bool {
+        let done = self.doc.redo();
+        if done {
+            self.after_undo_or_redo();
+        }
+        done
     }
 
     fn send(&mut self, command: Command) {
@@ -472,6 +511,52 @@ mod tests {
     }
 
     #[test]
+    fn the_agent_and_the_window_share_one_undo_history() {
+        let mut h = window("mcp-undo", &three_devices(1));
+        let agent = connect(&h);
+        let ok = |result: CallToolResult| {
+            assert_ne!(result.is_error, Some(true), "{}", text(&result));
+            result.structured_content.unwrap()
+        };
+        ok(agent.call(
+            &mut h,
+            "set",
+            json!({"path": "devices.a.count", "value": 3}),
+        ));
+        h.run_steps(2);
+        assert!(h.query_by_label("a ×3").is_some());
+
+        h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::Z);
+        h.run_steps(2);
+        assert_eq!(h.state().document().file().devices[0].count, 1);
+        assert!(h.query_by_label("a ×1").is_some(), "the window's undo");
+
+        h.get_by_label("b ×1").click();
+        h.run_steps(2);
+        h.key_press(eframe::egui::Key::Delete);
+        h.run_steps(2);
+        assert!(h.query_by_label("b ×1").is_none());
+        let out = ok(agent.call(&mut h, "undo", json!({})));
+        assert_eq!(out["devices"], json!(["b"]), "{out}");
+        assert_eq!(
+            out["can_undo"], false,
+            "the window's undo took the set back"
+        );
+        h.run_steps(2);
+        assert!(h.query_by_label("b ×1").is_some(), "the agent's undo");
+
+        h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::Y);
+        h.run_steps(2);
+        assert!(h.query_by_label("b ×1").is_none(), "the window redoes it");
+        let result = agent.call(&mut h, "redo", json!({}));
+        assert!(
+            text(&result).contains("nothing to redo"),
+            "{}",
+            text(&result)
+        );
+    }
+
+    #[test]
     fn the_selection_follows_its_device_and_text_being_typed_is_dropped() {
         let mut h = window("mcp-select", &three_devices(1));
         h.state_mut().ui.selection = Some(Selection::Device(2));
@@ -530,6 +615,56 @@ mod tests {
             let result = agent.call_without_frames(tool, json!({}));
             assert_ne!(result.is_error, Some(true), "{tool}: {}", text(&result));
         }
+    }
+
+    /// A client that counts the `notifications/resources/updated` it receives.
+    #[derive(Clone, Default)]
+    struct Updates(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl rmcp::ClientHandler for Updates {
+        async fn on_resource_updated(
+            &self,
+            _params: rmcp::model::ResourceUpdatedNotificationParam,
+            _context: rmcp::service::NotificationContext<RoleClient>,
+        ) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)] // `resources/subscribe` is how clients before 2026-07-28 subscribe.
+    fn an_edit_in_the_window_updates_a_subscribed_agent() {
+        let mut h = window("mcp-subscribe", &three_devices(1));
+        let server = h.state().mcp_server().unwrap();
+        let updates = Updates::default();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _client = runtime.block_on(async {
+            let (server_end, client_end) = tokio::io::duplex(1 << 20);
+            tokio::spawn(async move {
+                if let Ok(running) = server.serve(server_end).await {
+                    let _ = running.waiting().await;
+                }
+            });
+            let client = updates.clone().serve(client_end).await.unwrap();
+            client
+                .subscribe(rmcp::model::SubscribeRequestParams::new("senzor://project"))
+                .await
+                .unwrap();
+            client
+        });
+        let count = || updates.0.load(std::sync::atomic::Ordering::SeqCst);
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(count(), 0, "nothing changed yet");
+
+        crate::testing::click(&mut h, "Add device");
+        let deadline = Instant::now() + TIMEOUT;
+        while count() == 0 {
+            assert!(Instant::now() < deadline, "no update after the edit");
+            h.step();
+            std::thread::sleep(FRAME_PAUSE);
+        }
+        assert_eq!(count(), 1);
     }
 
     #[test]

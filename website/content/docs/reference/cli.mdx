@@ -10,7 +10,8 @@ description: The senzor-cli commands, options, exit codes, messages and logging.
 
 ```text
 senzor-cli [OPTIONS] validate <PROJECT>
-senzor-cli [OPTIONS] run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>] [--watch]
+senzor-cli [OPTIONS] run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+                         [--watch | --mcp-port <PORT> [--mcp-bind <ADDRESS>]]
 senzor-cli [OPTIONS] clear-retained <PROJECT> [--only <ID>[,<ID>…]]
 senzor-cli [OPTIONS] mcp [PROJECT] [--no-autostart]
 senzor-cli [OPTIONS] schema
@@ -49,14 +50,17 @@ folder of the project file. It does not connect to the broker.
 ## run
 
 ```text
-senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>] [--watch]
+senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>]
+               [--watch | --mcp-port <PORT> [--mcp-bind <ADDRESS>]]
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--only <ID>[,<ID>…]` | Device IDs to start instead of those with `autostart = true`. Separate IDs with commas or repeat the option. Spaces around an ID are ignored. A device ID is the `id` of a `[[devices]]` entry, not an instance ID. |
 | `--duration <DURATION>` | Stop after this long, e.g. `500ms`, `30s`, `10m`, `1h 30m`. The unit is required. Without this option, `run` runs until Ctrl+C or SIGTERM. |
-| `--watch` | Apply each save of the project file while `run` runs. See [--watch](#--watch). |
+| `--watch` | Apply each save of the project file while `run` runs. See [--watch](#--watch). Not together with `--mcp-port`. |
+| `--mcp-port <PORT>` | Also serve MCP over HTTP on this port, so an AI agent can control the run. See [--mcp-port](#--mcp-port). |
+| `--mcp-bind <ADDRESS>` | The address MCP listens on, `127.0.0.1` unless set. Any other address, such as `0.0.0.0`, needs a token in `SENZOR_MCP_TOKEN`. Needs `--mcp-port`. |
 
 `run` does the following:
 
@@ -73,6 +77,29 @@ senzor-cli run <PROJECT> [--only <ID>[,<ID>…]] [--duration <DURATION>] [--watc
    connections that are still open are dropped.
 6. Exits with 0 if no instance ended **Failed**. If any did, it prints
    `error: <n> instances failed: <ids>` to stderr and exits with 3.
+
+### --mcp-port
+
+With `--mcp-port`, `run` also serves the [MCP tools](/docs/reference/mcp-tools) over HTTP at
+`http://<address>:<PORT>/mcp`, and logs `MCP at http://127.0.0.1:<PORT>/mcp` (with the
+`--mcp-bind` address) when it listens. An agent can then edit the project, start, stop and kill
+devices, pin values and read the published messages while the run goes on, as with
+[`mcp`](#mcp). The project, with the agent's edits, is not saved unless the agent saves it.
+
+- Without `--only`, nothing to start is not an error: the agent can start the devices.
+- On `127.0.0.1`, only requests addressed to `127.0.0.1`, `localhost` or `::1` are answered. With
+  `SENZOR_MCP_TOKEN` set, they must also send `Authorization: Bearer <token>`.
+- On any other address, such as `--mcp-bind 0.0.0.0` in a container, other machines can connect,
+  so `SENZOR_MCP_TOKEN` is required: without it, `run` prints
+  `error: --mcp-bind 0.0.0.0 lets other machines connect; set SENZOR_MCP_TOKEN to the token they must send`
+  and exits with 2. Requests without the token get `401 Unauthorized`.
+- If the port cannot be used, `run` prints `error: cannot listen on <address>: <reason>` and exits
+  with 1.
+- When the run ends, by Ctrl+C, SIGTERM or `--duration`, connected agents lose the connection.
+
+```bash
+SENZOR_MCP_TOKEN=change-me senzor-cli run project.toml --mcp-port 18830 --mcp-bind 0.0.0.0
+```
 
 ### --watch
 
@@ -223,8 +250,8 @@ an editor without network access, for example
 | Code | Meaning |
 | --- | --- |
 | `0` | `validate`: the project is valid. `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and no instance ended **Failed**. `clear-retained`: the broker acknowledged every topic, or there was none. `mcp`: the agent disconnected or never completed the MCP handshake, or Ctrl+C or SIGTERM. Also `--help` and `--version`. |
-| `1` | The async runtime could not start, or `clear-retained` could not clear: the broker could not be reached, refused the connection, did not acknowledge every topic in time, or refused to clear a topic. |
-| `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, or there are no devices to start. |
+| `1` | The async runtime could not start, `run --mcp-port` could not listen on its port, or `clear-retained` could not clear: the broker could not be reached, refused the connection, did not acknowledge every topic in time, or refused to clear a topic. |
+| `2` | Invalid project or invalid arguments: the file cannot be read, the project has problems, an option is invalid, there are no devices to start (without `--mcp-port`), or `--mcp-bind` names an address other machines can reach without `SENZOR_MCP_TOKEN`. |
 | `3` | `run`: it stopped after Ctrl+C, SIGTERM or `--duration`, and at least one instance had ended **Failed**: the broker refused its connection, for example because of a wrong password or because the broker does not support MQTT 5, or the instance hit an internal error. |
 
 An instance that cannot reach the broker keeps retrying until `run` stops, and then stops normally,
@@ -309,3 +336,4 @@ supports only MQTT 3.1.1, the reason is `the broker does not support MQTT 5; set
 | `RUST_LOG` | Replaces the log filter, e.g. `RUST_LOG=warn` to log only problems. A value that cannot be parsed is ignored; an empty value logs only errors. |
 | `NO_COLOR` | Any non-empty value turns off colours in the log, also when stderr is a terminal. |
 | The name in `password_env` | The broker password. Needed by `validate`, `run`, `clear-retained` and `mcp`. |
+| `SENZOR_MCP_TOKEN` | The token agents send as `Authorization: Bearer <token>` to `run --mcp-port`. Required with an `--mcp-bind` address other than a loopback address. |

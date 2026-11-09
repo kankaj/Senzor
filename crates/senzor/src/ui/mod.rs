@@ -128,6 +128,12 @@ pub enum Action {
     ShowWhatsNew,
     /// Use this port the next time MCP is turned on.
     SetMcpPort(u16),
+    /// Let agents on other machines connect (with a token), or only this machine's.
+    SetMcpRemote(bool),
+    /// Replace the token agents on other machines need.
+    NewMcpToken,
+    /// Put the token on the clipboard.
+    CopyMcpToken,
     /// Turn the notifications about failed instances on or off.
     SetNotifyFailures(bool),
     /// Turn the daily look for a newer release on or off.

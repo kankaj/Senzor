@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: Every tool and resource of the Senzor MCP server, with arguments, results and errors.
+description: Every tool, resource and prompt of the Senzor MCP server, with arguments, results and errors.
 ---
 
 `senzor-cli mcp` and the GUI with MCP on serve the same tools. For setup, see [Controlling Senzor from an AI agent](/docs/mcp).
@@ -11,7 +11,7 @@ description: Every tool and resource of the Senzor MCP server, with arguments, r
 - **Errors** come back as a tool result marked as an error, with a one-line message, and nothing changes. Arguments that do not match a tool's input schema fail the same way, with `failed to deserialize parameters: <reason>`. Examples are a missing required argument, a key the project file does not know, or `null` as a pin value. Other arguments a tool does not know are ignored, so check the spelling: `get_messages` with `instance_id` instead of `instance` returns every instance's messages.
 - **Times** are RFC 3339 in UTC with milliseconds, for example `2026-11-04T14:02:11.123Z`.
 - **Durations** in project-file keys are strings with a unit, for example `"10s"` or `"500ms"`, as in the [project file](/docs/reference/project-file).
-- **Passwords**: every result shows the broker password as `<redacted>`. When `set_project` or `set_broker` receives `<redacted>` as the password, the stored password is kept.
+- **Passwords**: every result shows the broker password as `<redacted>`. When `set_project`, `set_broker` or `set` (at `broker.password`) receives `<redacted>` as the password, the stored password is kept.
 - **Waiting for the host.** A tool that changes something waits up to 10 seconds for Senzor to apply it. In the GUI, the window applies changes while it draws frames. When the time runs out, the tool fails with `the Senzor window did not respond within 10s; the request was cancelled and will not be applied` (from `senzor-cli mcp`: `Senzor did not respond within 10s; …`). While Senzor shuts down, tools fail with `Senzor is shutting down`, and right after start with `Senzor is still starting; try again`.
 
 ### Status values
@@ -54,7 +54,7 @@ The tools that change the project return:
 | `needs_restart` | Running instances that now need a restart to use the project's broker settings or availability. |
 | `orphaned` | Running instances that are no longer in the project. |
 
-Edits never start, stop or restart an instance, and they do not write the file: use `save_project`. A running instance takes an edit at once and stays connected, unless the edit changes its broker settings or availability; then it is listed in `needs_restart`. See [Editing while running](/docs/concepts/editing-while-running).
+Each edit that changes the project is one step that [`undo`](#undo) takes back. Edits never start, stop or restart an instance, and they do not write the file: use `save_project`. A running instance takes an edit at once and stays connected, unless the edit changes its broker settings or availability; then it is listed in `needs_restart`. See [Editing while running](/docs/concepts/editing-while-running).
 
 ## Observing
 
@@ -215,6 +215,59 @@ Replaces the whole project with TOML text.
 
 Text with a TOML syntax error, an unknown or missing key, or a value of the wrong type is refused, and the project stays as it was. The error names the problem and its position, for example ``line 2, column 1: unknown field `hots`, expected one of …``. Text that parses but has validation problems is applied; the problems come back in the result.
 
+### `set`
+
+Changes one value anywhere in the project, without passing the whole device, template or broker.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | Where the value goes, as a [key path](#key-paths). Required. |
+| `value` | any JSON except `null` | The new value, of the type the key takes: a string, number or boolean, or an object or list for a key that holds a table or list. Durations are strings, e.g. `"30s"`. Required. |
+
+```json
+{ "path": "templates.office-air.fields.co2.max", "value": 900 }
+```
+
+Tables missing on the way are created: `devices.lab.params.room` works on a device without `params`. The number after the last message adds a message: with two messages, set `templates.office-air.messages.3` to an object with `topic` and `payload`. A value that is already there changes nothing (`changed` is `false`).
+
+A path to a device or template sets all of it, as `put_device` or `put_template` would, and keeps its `id`. To change an id, use `rename_device` or `rename_template`.
+
+Errors, after which nothing has changed:
+
+- A value of the wrong type, or an unknown key, with the path and what the key takes: ``cannot set `devices.office.count`: invalid type: string "many", expected u32``, ``cannot set `devices.office.colour`: unknown field `colour`, expected one of …``.
+- A path that names nothing: `` the project has no device `<id>` (put_device adds one) ``, `` the project has no template `<id>` (put_template adds one) ``, the built-in template error of `rename_template`, `` `<path>` is a list: number its entries from 1 to <n>, or <n+1> to add one ``, `` `<path>` holds an integer, which has no key `<key>` ``.
+- An id: `` `devices.<id>.id` is the device's id; change it with rename_device ``, and the same for templates.
+- `null`: `null is not a value in the project file; unset removes a key`.
+- A path that cannot be read: `` `<path>` is not a path: <why>; a path is … ``, followed by examples.
+
+### `unset`
+
+Removes one key, so its default applies, or removes one message.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The key to remove, as a [key path](#key-paths). Required. |
+
+For example, `devices.office.count` goes back to `1`, `templates.office-air.interval` to `10s` and `broker.port` to `1883`, and `devices.office.params.room` leaves the device without that parameter. `templates.office-air.messages.2` removes the second message.
+
+Errors, after which nothing has changed:
+
+- A key the project file requires: `` cannot unset `devices.office.template`: missing field `template` ``.
+- A key that is not set: `` `<path>` is not set, so there is nothing to unset (get_project shows the project) ``.
+- A whole device or template: `` unset removes a key; remove_device removes the device `<id>` ``, and the same for templates.
+- The path errors of `set`.
+
+### Key paths
+
+`set` and `unset` address a value by the keys of the [project file](/docs/reference/project-file) joined by dots:
+
+- Devices and templates by their `id`: `devices.office.count`, `templates.office-air.interval`.
+- Messages by number, starting at 1, as [validation problems](/docs/reference/validation-errors) count them: `templates.office-air.messages.1.payload`. `messages[1]`, as the problems write it, works too.
+- Everything else by key: `broker.port`, `broker.tls.ca_file`, `simulation.seed`, `devices.office.params.room`, `devices.office.fields.co2.max` (a [field override](/docs/reference/project-file#field-overrides)), `templates.office-air.fields.co2.max`, `templates.office-air.messages.1.user_properties.room`.
+- A key with a dot or a space goes in double quotes: `devices.office.params."floor.level"`.
+
+Built-in templates cannot be changed; copy one with `copy_builtin_template` first.
+
 ### `put_device`
 
 Adds a device, or replaces the device with the same `id`. The arguments are the keys of a `[[devices]]` table: `id`, `template`, `count`, `instance_id`, `params`, `autostart`, `interval` and `fields`, with the same defaults as in the [project file](/docs/reference/project-file). A field override in `fields` merges as in a [field override](/docs/reference/project-file#field-overrides) of the project file: it can set generator parameters, `unit` and `name`.
@@ -289,6 +342,35 @@ Errors: `` unknown built-in template `<id>` ``, `` a template `<id>` already exi
 
 Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the project file: an omitted `mqtt_version` is `"5"`, and an omitted `username`, `password`, `password_env` or `tls` is removed. To change one setting, pass every key `get_project` shows under `[broker]`; pass `password = "<redacted>"` to keep the stored password. Every running instance needs a restart to use the new settings.
 
+## Undo and redo
+
+`undo` and `redo` step through the project's history in whichever program serves the tools. In the GUI it is the window's own history, the one **Undo** and Ctrl+Z use: an agent's `undo` can take back an edit the user made in the window, and the user's Ctrl+Z an agent's edit. Each tool call that changes the project is one step. Opening a project or starting a new one starts a new history, which keeps the last 100 steps.
+
+Running instances take an undo or redo as they take an edit; see the [edit result](#edit-result).
+
+### `undo`
+
+Takes back the latest change to the project. No arguments.
+
+Returns the [edit result](#edit-result), with `changed` always `true`, and:
+
+| Key | Meaning |
+| --- | --- |
+| `broker` | The step changed the broker settings. |
+| `simulation` | The step changed the `[simulation]` settings. |
+| `devices` | Devices the step added, removed or changed. A rename lists both IDs. |
+| `templates` | Project templates the step added, removed or changed. |
+| `can_undo` | Another `undo` is possible. |
+| `can_redo` | A `redo` is possible. |
+
+Errors: `there is nothing to undo: the history starts when the project is opened or created`.
+
+### `redo`
+
+Applies again the change the latest `undo` took back. This is possible until the next edit. No arguments. Returns as `undo`.
+
+Errors: `there is nothing to redo: redo applies again what undo took back, until the next edit`.
+
 ## Files
 
 ### `new_project`
@@ -335,9 +417,17 @@ Errors:
 - `cannot write <path>: <reason>`
 - In the GUI, while a dialog is open: `the Senzor window is waiting for the user to answer a dialog; try again once it is closed`
 
-## Resources
+## Resources and subscriptions
 
-The server offers these read-only references, so an agent can write templates without guessing:
+Three resources show what changes while Senzor runs, as JSON:
+
+| URI | Content | Changes when |
+| --- | --- | --- |
+| `senzor://project` | What `get_project` returns: `toml`, `path`, `dirty`, `problems` and `blocked`. | The project is edited (by the agent or in the window), saved, opened or replaced. |
+| `senzor://instances` | `instances`: each with `id`, `device`, `status`, `pinned`, `needs_restart` and `orphaned`. The counters and values are in `get_status` and `get_instance`. | An instance starts, connects, drops off, stops or fails, a pin changes, or an edit adds or removes instances. |
+| `senzor://messages` | The newest 100 messages and `last_seq`, as `get_messages` without arguments returns them. | An instance publishes. |
+
+These read-only references never change, so an agent can write templates without guessing:
 
 | URI | Content |
 | --- | --- |
@@ -345,3 +435,22 @@ The server offers these read-only references, so an agent can write templates wi
 | `senzor://reference/generators` | The [generators reference](/docs/reference/generators). |
 | `senzor://reference/template-variables` | The [template variables reference](/docs/reference/template-variables). |
 | `senzor://reference/builtin-templates` | The built-in templates `co2`, `temperature` and `humidity` as TOML. |
+
+An agent can subscribe to a resource instead of polling. Clients of MCP versions before 2026-07-28 send `resources/subscribe` and `resources/unsubscribe`. Newer clients list the URIs in a `subscriptions/listen` request and cancel it to stop. Senzor then sends `notifications/resources/updated` with the URI after each change, and the agent reads the resource or calls a tool to see what changed:
+
+- An update comes at most every 250 ms per resource. Changes inside that time are sent together in one update when it ends, so the last change of a burst is never missed. With 500 instances publishing, `senzor://messages` sends four updates a second.
+- An update says only that the resource changed. Call `get_messages` with `after_seq` to get every new message, not only the newest 100.
+- Subscribing to an unknown URI fails with `` no resource `<uri>` ``. A `subscriptions/listen` request accepts only the URIs it knows, and its acknowledgment lists them. Subscribing to a reference page works, but it never sends an update.
+- Subscriptions end with the connection.
+
+## Prompts
+
+Prompts are ready-made first messages that set the agent to work. A client shows them as commands; Claude Code names them `/mcp__<server>__<prompt>`, for example `/mcp__senzor__simulate-device` when the server is registered as `senzor`.
+
+| Prompt | Argument (required) | What the agent is asked to do |
+| --- | --- | --- |
+| `simulate-device` | `device`: the real device to imitate, with what it measures, how often it reports, and its topics and payload format if you know them. | Read the references, create a template with `put_template` (or start from a built-in one), add a device with `put_device`, start it and check its messages. It says which details it guessed and does not save. |
+| `test-consumer` | `expectation`: what the program that consumes the messages should do in reaction to the values. | Start the instances, force values with `pin`, confirm with `get_messages` that they went out, take devices away with `kill` or `stop`, check how the consumer reacted, then `unpin` and report each case. |
+| `explain-problems` | None. | Read the problems with `get_project`, explain each one, fix them with the editing tools and check that none are left. It does not save. |
+
+A missing or empty required argument fails with `` prompt `<name>` needs the argument `<argument>` ``, and an unknown name with `` there is no prompt `<name>` ``.

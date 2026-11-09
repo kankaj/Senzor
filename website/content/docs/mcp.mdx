@@ -7,7 +7,7 @@ Senzor speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP
 
 - **Observe**: read the status of every instance, its current values and the messages it published.
 - **Run**: start, stop, kill and restart instances, and pin a field to a value.
-- **Edit**: change the broker settings, devices and templates, or replace the whole project.
+- **Edit**: change one value, the broker settings, devices and templates, or replace the whole project, and undo or redo those changes.
 - **Files**: start a new project, open one, and save it.
 
 This makes end-to-end tests something you can ask for in plain words, for example: "Start the office sensors, set CO2 on office-0 to 2500, wait for it to publish, and check that our backend raised an alarm." The [AI agent recipe](/docs/recipes/ai-agent-testing) walks through such a session. Every tool is listed in the [MCP tools reference](/docs/reference/mcp-tools).
@@ -19,7 +19,7 @@ Both programs serve the same tools:
 | | `senzor-cli mcp` | The GUI with MCP on |
 | --- | --- | --- |
 | Who starts it | The agent starts it, as a background process. | You start the window; the agent connects to it. |
-| Transport | stdio | HTTP on `127.0.0.1` |
+| Transport | stdio (`senzor-cli run --mcp-port` serves HTTP) | HTTP on `127.0.0.1`, or on every address with a token |
 | You see | Nothing, unless you subscribe to the broker. | Every change, live in the window. |
 | Good for | Automated test runs, an agent working on its own. | Working together: you watch, correct and take over. |
 
@@ -90,21 +90,23 @@ Use an absolute path when the client does not start servers in your project's fo
 
 The tools follow the GUI:
 
-- **Observe**: `get_status` lists every instance with its status, counters and pins. `get_instance` adds the current value of every field. `get_messages` returns published messages with sequence numbers. The agent passes the last number back to get only newer messages, and can wait for the next matching one.
+- **Observe**: `get_status` lists every instance with its status, counters and pins. `get_instance` adds the current value of every field. `get_messages` returns published messages with sequence numbers. The agent passes the last number back to get only newer messages, and can wait for the next matching one. Instead of asking again and again, the agent can subscribe to the project, the instances or the message log, and Senzor tells it when they change ([Resources and subscriptions](/docs/reference/mcp-tools#resources-and-subscriptions)).
 - **Run**: `start`, `stop`, `kill` and `restart` take all instances, a list of devices or a list of instances. They wait until the instances are up (`online`, `reconnecting` or `failed`) or stopped, and report their status. `pin` and `unpin` force a field's value, as **Pin** does in the [instance view](/docs/gui/instance-view).
-- **Edit**: `get_project` returns the project as TOML. `set_project` replaces it. `put_device`, `put_template` and `set_broker` take the same keys as the project file, and further tools rename and remove devices and templates, or copy a built-in template.
+- **Edit**: `get_project` returns the project as TOML. `set_project` replaces it. `put_device`, `put_template` and `set_broker` take the same keys as the project file, and further tools rename and remove devices and templates, or copy a built-in template. `set` changes one value by its path, such as `devices.office.count` or `templates.office-air.fields.co2.max`, and `unset` removes a key so its default applies. `undo` and `redo` step through the project's history.
 - **Files**: `new_project`, `open_project` and `save_project`.
 
 Edits change the project in memory, as edits in the GUI do. They never start, stop or restart anything. Running instances keep their settings, and each edit reports the instances that need a restart to use the new ones (see [Editing while running](/docs/concepts/editing-while-running)). The file changes only when the agent calls `save_project`.
 
 The server also gives the agent the [project file](/docs/reference/project-file), [generators](/docs/reference/generators) and [template variables](/docs/reference/template-variables) references and the built-in templates, so it can write templates without guessing.
 
+Three [prompts](/docs/reference/mcp-tools#prompts) start common tasks: `simulate-device` imitates a real device you describe, `test-consumer` drives values and checks how the program that reads them reacts, and `explain-problems` explains and fixes the project's problems. In Claude Code they are commands named after the server: with the setups above, type `/mcp__senzor__simulate-device` (or `/mcp__senzor-gui__simulate-device`) and the description.
+
 ## Working together in the GUI
 
 While MCP is on, the agent and you work on the same project:
 
 - The agent's changes appear in the window right away: the device tree, the detail panel, the problems and the message log.
-- An edit by the agent marks the project as unsaved, so the title shows `*`, and closing the window asks **Save**, **Discard** or **Cancel** as usual. **Undo** takes back the agent's edits like your own ([Undo and redo](/docs/gui/window#undo-and-redo)).
+- An edit by the agent marks the project as unsaved, so the title shows `*`, and closing the window asks **Save**, **Discard** or **Cancel** as usual. You and the agent share one undo history: **Undo** takes back the agent's edits like your own ([Undo and redo](/docs/gui/window#undo-and-redo)), and the agent's `undo` takes back the latest edit, also when you made it.
 - Text you are still typing into a field is dropped when the agent edits the project, so the window never shows stale values. Finish typing (or press Enter) before you ask the agent to change things.
 - A device or template you have selected stays selected when the agent's edit moves it in the list, and the selection clears if the agent removes it.
 - While a dialog is open, for example **Unsaved changes**, the agent cannot save, open or start a new project. It gets an error asking it to try again after the dialog closes. Its other requests still work.
@@ -113,9 +115,10 @@ The window applies the agent's changes while it draws. On Linux (checked on KDE 
 
 ## Security
 
-- The endpoint listens on `127.0.0.1` only, so other machines cannot reach it.
+- By default the endpoint listens on `127.0.0.1` only, so other machines cannot reach it.
 - It answers only requests addressed to `127.0.0.1`, `localhost` or `::1`. A web page that tricks your browser into sending requests to it (DNS rebinding) is refused.
-- It has no password. While MCP is on, any program on your computer can control the window: start devices, change the project and save it to any file you can write. Turn the **MCP** switch off when you do not need it.
+- On `127.0.0.1` it has no password. While MCP is on, any program on your computer can control the window: start devices, change the project and save it to any file you can write. Turn the **MCP** switch off when you do not need it.
+- With **let agents on other machines connect, with a token** in the [settings](/docs/gui/settings#mcp), or `run --mcp-port` with `--mcp-bind`, the endpoint listens on every address, answers any host name, and requires the token as `Authorization: Bearer <token>`; requests without it get `401 Unauthorized`. Anyone with the token can control Senzor, so share it like a password. The connection is plain HTTP, not encrypted: use it on a network you trust, or put it behind a proxy that adds TLS.
 - `senzor-cli mcp` opens no port: only the agent that started it can talk to it.
 - Broker passwords never leave Senzor through MCP. `get_project` shows `password = "<redacted>"`, and when the agent sends `<redacted>` back, the stored password is kept. The name in `password_env` is shown, because it is not a secret.
 
@@ -123,5 +126,5 @@ The window applies the agent's changes while it draws. On Linux (checked on KDE 
 
 - One project at a time, as in the GUI.
 - The agent cannot see or change GUI-only state such as the selection, the panels or the message-log filter.
-- There is no undo for the agent's edits. Keep the project file under version control, or open it again with `open_project` and `discard_unsaved = true` to throw the changes away.
+- `undo` reaches back only to when the project was opened, and at most 100 steps. Keep the project file under version control, or open it again with `open_project` and `discard_unsaved = true` to throw all unsaved changes away.
 - `get_messages` sees what the message log sees: the last 1,000 published messages, without the `online` and `offline` availability messages. To check those, subscribe to the broker.

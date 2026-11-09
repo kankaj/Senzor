@@ -15,6 +15,8 @@ use senzor_core::project::{
 use senzor_core::value::Value;
 use tokio::sync::oneshot;
 
+use crate::key_path;
+use crate::output::StepChanges;
 use crate::redact::restore_password;
 
 /// What the server needs from the program that owns the project and the engine.
@@ -34,6 +36,11 @@ pub trait Host {
     /// [`EngineHandle::commands_sent`](senzor_core::engine::EngineHandle::commands_sent) of the
     /// current engine.
     fn commands_sent(&self) -> u64;
+    /// Takes back the latest edit as the user's Undo does, and hands the project to the engine.
+    /// Returns false when there is nothing to undo.
+    fn undo(&mut self) -> bool;
+    /// Applies the latest undone edit again as the user's Redo does; false when there is none.
+    fn redo(&mut self) -> bool;
     /// Why the host cannot save or replace the project right now (the GUI shows a dialog).
     fn busy(&self) -> Option<String> {
         None
@@ -103,6 +110,17 @@ pub enum Request {
         new_id: String,
     },
     SetBroker(BrokerSpec),
+    /// Sets the value at a key path (see the `set` tool).
+    Set {
+        path: String,
+        value: serde_json::Value,
+    },
+    /// Removes the key at a key path, so its default applies.
+    Unset {
+        path: String,
+    },
+    Undo,
+    Redo,
     NewProject {
         discard_unsaved: bool,
     },
@@ -139,6 +157,13 @@ pub enum Reply {
     },
     Edited {
         changed: bool,
+        sync: u64,
+    },
+    /// An undo or redo: what it changed, and what can be undone and redone now.
+    Stepped {
+        changes: StepChanges,
+        can_undo: bool,
+        can_redo: bool,
         sync: u64,
     },
     /// A dry run: the problems the project would have.
@@ -257,6 +282,18 @@ pub fn apply(host: &mut impl Host, request: Request) -> Result<Reply, String> {
             restore_password(&mut broker, &host.document().file().broker);
             edit(host, |f| f.broker = broker.clone())
         }
+        Request::Set { path, value } => try_edit(host, |f| {
+            let mut changed = key_path::set(f, &path, &value)?;
+            restore_password(&mut changed.broker, &f.broker);
+            *f = changed;
+            Ok(())
+        }),
+        Request::Unset { path } => try_edit(host, |f| {
+            *f = key_path::unset(f, &path)?;
+            Ok(())
+        }),
+        Request::Undo => step(host, false),
+        Request::Redo => step(host, true),
         Request::NewProject { discard_unsaved } => {
             check_can_replace(host, discard_unsaved)?;
             host.replace(Document::new_empty(), false);
@@ -298,6 +335,27 @@ fn try_edit(
     result?;
     Ok(Reply::Edited {
         changed,
+        sync: host.commands_sent(),
+    })
+}
+
+/// Undoes (or with `redo`, redoes) the latest edit and says what that changed.
+fn step(host: &mut impl Host, redo: bool) -> Result<Reply, String> {
+    let before = host.document().file().clone();
+    let done = if redo { host.redo() } else { host.undo() };
+    if !done {
+        return Err(if redo {
+            "there is nothing to redo: redo applies again what undo took back, until the next edit"
+        } else {
+            "there is nothing to undo: the history starts when the project is opened or created"
+        }
+        .into());
+    }
+    let doc = host.document();
+    Ok(Reply::Stepped {
+        changes: StepChanges::between(&before, doc.file()),
+        can_undo: doc.can_undo(),
+        can_redo: doc.can_redo(),
         sync: host.commands_sent(),
     })
 }

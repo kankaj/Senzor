@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::io::IsTerminal;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use senzor_core::engine::{
     ReloadSummary, Target, clear_retained, retained_topics,
 };
 use senzor_core::project::{Project, ProjectError, ProjectFile};
-use senzor_mcp::{Session, serve_stdio};
+use senzor_mcp::{SenzorServer, Session, serve_http, serve_stdio};
 use tracing_subscriber::EnvFilter;
 use watch::{FileWatch, Stamp};
 
@@ -47,8 +48,15 @@ enum Cmd {
         duration: Option<Duration>,
         /// Apply each save of the project file: restart the devices that changed, start added
         /// ones, stop removed ones.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "mcp_port")]
         watch: bool,
+        /// Also serve MCP over HTTP on this port, so an AI agent can control the run.
+        #[arg(long)]
+        mcp_port: Option<u16>,
+        /// The address MCP listens on. Other than a loopback address, it needs a token in
+        /// SENZOR_MCP_TOKEN.
+        #[arg(long, default_value = "127.0.0.1", requires = "mcp_port")]
+        mcp_bind: IpAddr,
     },
     /// Delete the retained messages the project's instances leave on the broker.
     ClearRetained {
@@ -79,7 +87,12 @@ fn main() -> ExitCode {
             only,
             duration,
             watch,
-        } => run(&project, &only, duration, watch),
+            mcp_port,
+            mcp_bind,
+        } => {
+            let mcp = mcp_port.map(|port| SocketAddr::new(mcp_bind, port));
+            run(&project, &only, duration, watch, mcp)
+        }
         Cmd::ClearRetained { project, only } => clear(&project, &only),
         Cmd::Schema => schema(),
         Cmd::Mcp {
@@ -238,7 +251,17 @@ fn requested_devices(project: &Project, only: &[String]) -> Result<Vec<String>, 
     }
 }
 
-fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) -> ExitCode {
+/// The variable that holds the token agents send when `run --mcp-port` listens on an address
+/// other machines can reach.
+const MCP_TOKEN_VARIABLE: &str = "SENZOR_MCP_TOKEN";
+
+fn run(
+    path: &Path,
+    only: &[String],
+    duration: Option<Duration>,
+    watch: bool,
+    mcp: Option<SocketAddr>,
+) -> ExitCode {
     // Before reading, so a save while the file is read is not missed.
     let stamp = Stamp::of(path);
     let text = match read(path) {
@@ -254,11 +277,27 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) ->
     };
     let devices = match select_devices(&project, only) {
         Ok(devices) => devices,
+        // With MCP, an agent can start the devices itself.
+        Err(_) if mcp.is_some() && only.is_empty() => Vec::new(),
         Err(message) => {
             eprintln!("error: {message}");
             return ExitCode::from(INVALID);
         }
     };
+    let token = std::env::var(MCP_TOKEN_VARIABLE)
+        .ok()
+        .filter(|token| !token.is_empty());
+    if let Some(address) = mcp
+        && !address.ip().is_loopback()
+        && token.is_none()
+    {
+        eprintln!(
+            "error: --mcp-bind {} lets other machines connect; set {MCP_TOKEN_VARIABLE} to the \
+             token they must send",
+            address.ip()
+        );
+        return ExitCode::from(INVALID);
+    }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => {
@@ -266,6 +305,17 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) ->
             return ExitCode::FAILURE;
         }
     };
+    if let Some(address) = mcp {
+        let all = only.is_empty();
+        let failed = runtime.block_on(run_with_mcp(path, devices, all, duration, address, token));
+        return match failed {
+            Ok(failed) => failed_exit(failed),
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let watch = watch.then(|| Watch {
         file: FileWatch::new(path, stamp, text),
         path: path.to_path_buf(),
@@ -274,6 +324,11 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) ->
         devices: devices.clone(),
     });
     let failed = runtime.block_on(run_engine(project, devices, duration, watch));
+    failed_exit(failed)
+}
+
+/// Success, or the instances that failed and exit code 3.
+fn failed_exit(failed: Vec<String>) -> ExitCode {
     if failed.is_empty() {
         return ExitCode::SUCCESS;
     }
@@ -283,6 +338,67 @@ fn run(path: &Path, only: &[String], duration: Option<Duration>, watch: bool) ->
         failed.join(", ")
     );
     ExitCode::from(INSTANCE_FAILED)
+}
+
+/// As [`run_engine`], with the project in an MCP session that agents reach over HTTP at
+/// `address`: they can edit the project, start and stop devices, and pin values while it runs.
+/// `all` starts the autostart devices, otherwise `devices`. Returns the IDs of the instances
+/// that ended Failed, or why MCP could not listen.
+async fn run_with_mcp(
+    path: &Path,
+    devices: Vec<String>,
+    all: bool,
+    duration: Option<Duration>,
+    address: SocketAddr,
+    token: Option<String>,
+) -> Result<Vec<String>, String> {
+    let shutdown = shutdown_signal();
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .map_err(|e| format!("cannot listen on {address}: {e}"))?;
+    let session = Session::new(&tokio::runtime::Handle::current(), Some(path), all);
+    if !all {
+        for id in &devices {
+            session.start_device(id);
+        }
+    }
+    let view = session.view();
+    let (to_session, session_requests) = tokio::sync::mpsc::unbounded_channel();
+    let owner = tokio::spawn(session.run(session_requests));
+    let (requests, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let server = SenzorServer::new(view, requests, Arc::new(|| {}), "senzor-cli run");
+    let serving = tokio::spawn(serve_http(listener, server, token));
+    tracing::info!("MCP at http://{address}/mcp");
+    let end = async {
+        match duration {
+            Some(duration) => {
+                tokio::select! {
+                    _ = shutdown => {}
+                    _ = tokio::time::sleep(duration) => {}
+                }
+            }
+            None => shutdown.await,
+        }
+    };
+    // Requests pass through here, so the session ends when the run does even while agents
+    // stay connected: dropping `to_session` with this future closes the session's channel.
+    let forward = async move {
+        while let Some(envelope) = received.recv().await {
+            if to_session.send(envelope).is_err() {
+                break;
+            }
+        }
+    };
+    tokio::select! {
+        _ = end => {}
+        _ = forward => {}
+    }
+    serving.abort();
+    tracing::info!("shutting down");
+    let session = owner.await.expect("the session task does not panic");
+    let observer = session.observer();
+    session.shutdown().await;
+    Ok(observer.read(failed_instances))
 }
 
 /// Starts `devices`, applies the saves `watch` finds, waits for Ctrl+C, SIGTERM or `duration`,

@@ -30,7 +30,7 @@ pub fn show(
                     theme_row(ui, settings.theme, actions);
                     zoom_row(ui);
                     notify_row(ui, settings.notify_failures, actions);
-                    mcp_row(ui, mcp, actions);
+                    mcp_row(ui, mcp, settings, actions);
 
                     updates_row(ui, settings.check_updates, actions);
 
@@ -179,8 +179,44 @@ fn updates_row(ui: &mut egui::Ui, check: bool, actions: &mut Vec<Action>) {
     ui.end_row();
 }
 
+/// Whether agents on other machines may connect, and the token they need.
+fn remote_rows(ui: &mut egui::Ui, settings: &AppSettings, actions: &mut Vec<Action>) {
+    ui.label("");
+    let mut remote = settings.mcp_remote;
+    ui.horizontal(|ui| {
+        let hint = "MCP listens on every address of this machine, and agents need a token. \
+                    Anyone on your network who has the token can control this window.";
+        if switch(ui, &mut remote, "MCP from other machines")
+            .on_hover_text(hint)
+            .clicked()
+        {
+            actions.push(Action::SetMcpRemote(remote));
+        }
+        ui.label("let agents on other machines connect, with a token");
+    });
+    ui.end_row();
+    if settings.mcp_remote {
+        ui.label("Token");
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("••••••••").monospace())
+                .on_hover_text("Agents send it as Authorization: Bearer <token>");
+            if ui.button("Copy token").clicked() {
+                actions.push(Action::CopyMcpToken);
+            }
+            if ui
+                .button("New token")
+                .on_hover_text("Agents that use the old token can no longer connect")
+                .clicked()
+            {
+                actions.push(Action::NewMcpToken);
+            }
+        });
+        ui.end_row();
+    }
+}
+
 /// The MCP toggle, with the address agents connect to while it is on, or why it is off.
-fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, actions: &mut Vec<Action>) {
+fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: &mut Vec<Action>) {
     let hint = match mcp {
         McpStatus::Listening(address) => {
             format!("AI agents can control this window at http://{address}/mcp. Click to stop.")
@@ -224,7 +260,21 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, actions: &mut Vec<Action>) {
     }
     ui.end_row();
 
+    remote_rows(ui, settings, actions);
+
     match mcp {
+        McpStatus::Listening(address) if address.ip().is_unspecified() => {
+            ui.label("Address");
+            ui.label(format!(
+                "this machine's name or address, port {}",
+                address.port()
+            ))
+            .on_hover_text(format!(
+                "Agents connect to http://<this machine>:{}/mcp with the token",
+                address.port()
+            ));
+            ui.end_row();
+        }
         McpStatus::Listening(address) => {
             ui.label("Address");
             ui.label(address.to_string());

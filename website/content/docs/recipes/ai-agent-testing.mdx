@@ -115,4 +115,4 @@ The agent calls `start` for `office-0`. A new run clears the pin, so the agent w
 - Ask the agent to write the scenario down as a checklist, or as a test script for your project, once it works.
 - Add `[simulation] seed = 1` to the project, so the generated values repeat from run to run (see [Reproducible runs](/docs/concepts/reproducible-runs)).
 - With `--no-autostart`, every run starts from the same state: all instances stopped.
-- The agent can also change the project: "add ten more CO2 sensors in a device called `lab`" becomes a `put_device` call. It saves the file only when you ask. See the [MCP tools reference](/docs/reference/mcp-tools).
+- The agent can also change the project: "add ten more CO2 sensors in a device called `lab`" becomes a `put_device` call, and "make them publish every 30 seconds" a `set` of `devices.lab.interval` to `"30s"`. `undo` takes the latest change back. It saves the file only when you ask. See the [MCP tools reference](/docs/reference/mcp-tools).

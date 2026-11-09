@@ -4543,6 +4543,7 @@ dependencies = [
  "axum 0.8.9",
  "humantime",
  "jsonschema",
+ "rand 0.10.3",
  "rmcp",
  "schemars",
  "senzor-core",

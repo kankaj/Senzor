@@ -578,6 +578,9 @@ async fn the_reference_pages_are_resources() {
     assert_eq!(
         uris,
         [
+            "senzor://project",
+            "senzor://instances",
+            "senzor://messages",
             "senzor://reference/project-file",
             "senzor://reference/generators",
             "senzor://reference/template-variables",
@@ -629,5 +632,164 @@ async fn save_reports_the_absolute_path_of_a_project_opened_by_a_relative_one() 
         std::fs::canonicalize(saved).unwrap(),
         std::fs::canonicalize(&absolute).unwrap()
     );
+    agent.finish().await;
+}
+
+/// The project as `get_project` shows it.
+async fn project_file(agent: &Agent) -> ProjectFile {
+    let out = agent.ok("get_project", json!({})).await;
+    ProjectFile::parse(out["toml"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_changes_one_value_deep_in_the_project() {
+    let agent = Agent::with_project("set").await;
+    let out = agent
+        .ok("set", json!({"path": "devices.office.count", "value": 3}))
+        .await;
+    assert_eq!(out["changed"], true);
+    assert_eq!(state(&agent.status_of("office-2").await), "stopped");
+
+    let mut sub = Subscriber::connect(agent.port, "t/lab/state").await;
+    agent.ok("start", json!({"instances": ["lab"]})).await;
+    let out = agent
+        .ok(
+            "set",
+            json!({"path": "templates.air.messages[1].payload", "value": "v={{ v }}"}),
+        )
+        .await;
+    assert_eq!(names(&out["needs_restart"]), Vec::<&str>::new());
+    let seen = sub
+        .wait_for(Duration::from_secs(5), |m| m.payload == "v=1")
+        .await;
+    assert!(seen.is_some(), "the running instance takes the new payload");
+
+    let out = agent
+        .ok(
+            "set",
+            json!({"path": "devices.lab.params.room", "value": "lab"}),
+        )
+        .await;
+    assert_eq!(out["changed"], true);
+    let out = agent
+        .ok("set", json!({"path": "devices.lab.count", "value": 1}))
+        .await;
+    assert_eq!(out["changed"], false, "the value it already had");
+
+    let before = project_file(&agent).await;
+    let message = agent
+        .err(
+            "set",
+            json!({"path": "devices.office.count", "value": "many"}),
+        )
+        .await;
+    assert!(message.contains("`devices.office.count`"), "{message}");
+    assert!(message.contains("u32"), "{message}");
+    let message = agent
+        .err("set", json!({"path": "devices.nope.count", "value": 1}))
+        .await;
+    assert!(message.contains("no device `nope`"), "{message}");
+    let message = agent
+        .err("set", json!({"path": "devices..count", "value": 1}))
+        .await;
+    assert!(message.contains("messages numbered from 1"), "{message}");
+    assert_eq!(
+        project_file(&agent).await,
+        before,
+        "a refused set changes nothing"
+    );
+
+    let out = agent
+        .ok(
+            "set",
+            json!({"path": "devices.lab.template", "value": "missing"}),
+        )
+        .await;
+    assert!(out["problems"].to_string().contains("missing"), "{out}");
+    assert_eq!(names(&out["blocked"]), ["lab"]);
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unset_lets_the_default_apply() {
+    let agent = Agent::with_project("unset").await;
+    let out = agent
+        .ok("unset", json!({"path": "devices.office.count"}))
+        .await;
+    assert_eq!(out["changed"], true);
+    assert_eq!(project_file(&agent).await.devices[0].count, 1);
+    let status = agent.ok("get_status", json!({})).await;
+    assert!(!status.to_string().contains("office-1"), "{status}");
+
+    let message = agent
+        .err("unset", json!({"path": "devices.office.template"}))
+        .await;
+    assert!(message.contains("missing field `template`"), "{message}");
+    let message = agent
+        .err("unset", json!({"path": "devices.office.interval"}))
+        .await;
+    assert!(message.contains("not set"), "{message}");
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn undo_and_redo_step_through_the_edits() {
+    let agent = Agent::with_project("undo").await;
+    let message = agent.err("undo", json!({})).await;
+    assert!(message.contains("nothing to undo"), "{message}");
+    let message = agent.err("redo", json!({})).await;
+    assert!(message.contains("nothing to redo"), "{message}");
+    let original = project_file(&agent).await;
+
+    agent
+        .ok("set", json!({"path": "devices.office.count", "value": 3}))
+        .await;
+    agent
+        .ok("set", json!({"path": "broker.port", "value": 1}))
+        .await;
+    agent
+        .err("set", json!({"path": "broker.port", "value": "x"}))
+        .await;
+
+    let out = agent.ok("undo", json!({})).await;
+    assert_eq!(out["broker"], true, "{out}");
+    assert_eq!(out["devices"], json!([]), "{out}");
+    assert_eq!(out["can_undo"], true);
+    assert_eq!(out["can_redo"], true);
+    assert_eq!(project_file(&agent).await.broker.port, agent.port);
+
+    let out = agent.ok("undo", json!({})).await;
+    assert_eq!(out["broker"], false, "{out}");
+    assert_eq!(names(&out["devices"]), ["office"]);
+    assert_eq!(out["can_undo"], false);
+    assert_eq!(project_file(&agent).await, original);
+    let status = agent.ok("get_status", json!({})).await;
+    assert_eq!(status["dirty"], false, "back to the file as opened");
+    assert!(
+        !status.to_string().contains("office-2"),
+        "the engine follows"
+    );
+    let message = agent.err("undo", json!({})).await;
+    assert!(message.contains("nothing to undo"), "{message}");
+
+    let out = agent.ok("redo", json!({})).await;
+    assert_eq!(names(&out["devices"]), ["office"]);
+    assert_eq!(state(&agent.status_of("office-2").await), "stopped");
+    let out = agent.ok("redo", json!({})).await;
+    assert_eq!(out["broker"], true);
+    assert_eq!(out["can_redo"], false);
+    assert_eq!(project_file(&agent).await.broker.port, 1);
+
+    agent.ok("undo", json!({})).await;
+    agent
+        .ok("put_device", json!({"id": "probe", "template": "co2"}))
+        .await;
+    let message = agent.err("redo", json!({})).await;
+    assert!(
+        message.contains("nothing to redo"),
+        "a new edit drops the redo: {message}"
+    );
+    let out = agent.ok("undo", json!({})).await;
+    assert_eq!(names(&out["devices"]), ["probe"]);
     agent.finish().await;
 }

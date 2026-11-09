@@ -222,6 +222,56 @@ pub struct EditOut {
     pub orphaned: Vec<String>,
 }
 
+/// What an undo or redo changed in the project.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct StepChanges {
+    /// The broker settings changed.
+    pub broker: bool,
+    /// The `[simulation]` settings changed.
+    pub simulation: bool,
+    /// Devices added, removed or changed (a rename lists both ids).
+    pub devices: Vec<String>,
+    /// Project templates added, removed or changed (a rename lists both ids).
+    pub templates: Vec<String>,
+}
+
+impl StepChanges {
+    pub fn between(before: &ProjectFile, after: &ProjectFile) -> Self {
+        Self {
+            broker: before.broker != after.broker,
+            simulation: before.simulation != after.simulation,
+            devices: changed_ids(&before.devices, &after.devices, |d| &d.id),
+            templates: changed_ids(&before.templates, &after.templates, |t| &t.id),
+        }
+    }
+}
+
+/// The ids of the entries that differ between `before` and `after`, or are in only one of them.
+fn changed_ids<T: PartialEq>(before: &[T], after: &[T], id: fn(&T) -> &String) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for (list, other) in [(before, after), (after, before)] {
+        for entry in list {
+            let counterpart = other.iter().find(|x| id(x) == id(entry));
+            if counterpart != Some(entry) && !ids.contains(id(entry)) {
+                ids.push(id(entry).clone());
+            }
+        }
+    }
+    ids
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct StepOut {
+    #[serde(flatten)]
+    pub changes: StepChanges,
+    /// Another undo is possible.
+    pub can_undo: bool,
+    /// A redo is possible (until the next edit).
+    pub can_redo: bool,
+    #[serde(flatten)]
+    pub edit: EditOut,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProjectOut {
     /// The project as TOML, as Save writes it (passwords redacted).

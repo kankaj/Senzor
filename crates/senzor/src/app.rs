@@ -768,6 +768,24 @@ impl SenzorApp {
                 self.mcp_port = port;
                 self.mcp_error = None;
             }
+            Action::SetMcpRemote(remote) => {
+                self.settings.mcp_remote = remote;
+                if remote && self.settings.mcp_token.is_none() {
+                    self.settings.mcp_token = Some(senzor_mcp::new_token());
+                }
+                self.restart_mcp();
+            }
+            Action::NewMcpToken => {
+                self.settings.mcp_token = Some(senzor_mcp::new_token());
+                if self.settings.mcp_remote {
+                    self.restart_mcp();
+                }
+            }
+            Action::CopyMcpToken => {
+                if let Some(token) = &self.settings.mcp_token {
+                    self.ctx.copy_text(token.clone());
+                }
+            }
             Action::GoTo(ProblemTarget::Broker) => self.ui.broker_open = true,
             Action::GoTo(ProblemTarget::Select(selection)) => self.reveal(selection),
         }

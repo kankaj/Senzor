@@ -72,5 +72,8 @@ The first release.
 #### AI agents
 
 - `senzor-cli mcp` runs a project for an AI agent over MCP; the window offers the same tools once MCP is turned on in its settings.
+- Agents on other machines can connect with a token: a settings switch in the window, and `senzor-cli run --mcp-port` with `--mcp-bind` and `SENZOR_MCP_TOKEN` for runs in containers.
+- An agent can change one value by its path with `set` (e.g. `devices.office.count`), remove a key with `unset`, and step through the project's history with `undo` and `redo`; in the window, that history is the one Ctrl+Z uses.
+- Agents can subscribe to the project, the instances and the message log instead of polling, and three prompts (`simulate-device`, `test-consumer`, `explain-problems`) start common tasks.
 
 [1.0.0]: https://github.com/kankaj/Senzor/releases/tag/v1.0.0

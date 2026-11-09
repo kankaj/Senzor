@@ -2,7 +2,7 @@
 //! Reads keep working while the host is busy (or, in the GUI, while no frames are drawn).
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use senzor_core::engine::EngineObserver;
 use senzor_core::project::{Document, ProjectFile, Validated};
@@ -21,7 +21,14 @@ pub(crate) struct Snapshot {
 
 /// The read model a host publishes for the server. Cheap to clone and shared across threads.
 #[derive(Clone, Default)]
-pub struct View(Arc<Mutex<Option<Snapshot>>>);
+pub struct View(Arc<Mutex<Published>>);
+
+#[derive(Default)]
+struct Published {
+    snapshot: Option<Snapshot>,
+    /// Grows whenever the project, its file, its unsaved-changes flag or the open error changes.
+    project_version: u64,
+}
 
 impl View {
     /// Replaces what readers see. Hosts call this after every change to the document or engine.
@@ -34,23 +41,46 @@ impl View {
             open_error,
             observer,
         };
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
+        let mut published = self.lock();
+        let project_changed = published.snapshot.as_ref().is_none_or(|old| {
+            old.file != snapshot.file
+                || old.path != snapshot.path
+                || old.dirty != snapshot.dirty
+                || old.open_error != snapshot.open_error
+        });
+        if project_changed {
+            published.project_version += 1;
+        }
+        published.snapshot = Some(snapshot);
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Published> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn get(&self) -> Result<Snapshot, String> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| "Senzor is still starting; try again".to_string())
+        self.lock().snapshot.clone().ok_or_else(starting)
     }
 
     pub(crate) fn observer(&self) -> Result<EngineObserver, String> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.lock()
+            .snapshot
             .as_ref()
             .map(|s| s.observer.clone())
-            .ok_or_else(|| "Senzor is still starting; try again".to_string())
+            .ok_or_else(starting)
     }
+
+    /// A number that changes whenever what `get_project` shows may have; none before the host
+    /// first published.
+    pub(crate) fn project_version(&self) -> Option<u64> {
+        let published = self.lock();
+        published
+            .snapshot
+            .as_ref()
+            .map(|_| published.project_version)
+    }
+}
+
+fn starting() -> String {
+    "Senzor is still starting; try again".to_string()
 }
