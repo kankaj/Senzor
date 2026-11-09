@@ -106,6 +106,13 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `messages[<n>].content_type must not be empty` | Remove `content_type`, or give it a value such as `"application/json"`. |
 | `<key> needs MQTT 5; the broker settings use MQTT 3.1.1` | `<key>` is `messages[<n>].message_expiry`, `messages[<n>].content_type`, `messages[<n>].user_properties` or `availability.will_delay`. Remove it, or switch `mqtt_version` to `"5"`. |
 | `<key> must be at most 4294967295 seconds` | `<key>` is `messages[<n>].message_expiry` or `availability.will_delay`. Use a shorter duration. |
+| `message <n>: encoding protobuf needs a proto file` | Message `<n>` (counted from 1) has `encoding = "protobuf"` but no `proto`. Give the `.proto` file that defines its message type. See [Binary payloads](/docs/recipes/binary-payloads#protobuf). |
+| `message <n>: encoding protobuf needs a message type` | Message `<n>` has `encoding = "protobuf"` but no `message`. Give the fully qualified type, such as `"sensors.v1.Reading"`. |
+| `message <n>: proto is used only with encoding protobuf` | Message `<n>` sets `proto` with another encoding. Remove `proto`, or set `encoding = "protobuf"`. |
+| `message <n>: message is used only with encoding protobuf` | Message `<n>` sets `message` with another encoding. Remove `message`, or set `encoding = "protobuf"`. |
+| `` message <n>: cannot read proto `<path>`: <reason> `` | The `.proto` file cannot be read, for example `No such file or directory (os error 2)`. A relative path starts at the folder of the project file. |
+| `` message <n>: proto `<path>`: <file>:<line>:<column>: <error> `` | The `.proto` file, or a file it imports, does not compile, for example `` proto `proto/sensor.proto`: sensor.proto:4:1: expected ';' or '[', but found '}' `` or `` sensor.proto:2:1: import 'units.proto' not found ``. Imports are looked up in the folder of the `.proto` file, then among protobuf's well-known types. |
+| `` message <n>: proto `<path>` has no message type `<type>` `` | The file defines no message type of that name. When the name is a message's short name, the problem ends with `` ; did you mean `<package>.<type>`? ``: `message` takes the fully qualified name. |
 | `availability.will_delay must be whole seconds, got <duration>` | Write the delay in whole seconds, such as `"30s"`. |
 | `availability.will_delay <delay> is longer than the broker's session_expiry <expiry>; set session_expiry to at least <delay>` | MQTT 5 brokers may send the Last Will when the session ends, before the delay passes. Raise `session_expiry` in `[broker]`. |
 | `subscription <n>: qos must be 0, 1 or 2, got <q>` | Set the `qos` of subscription `<n>` (counted from 1) to 0, 1 or 2. |
@@ -165,6 +172,15 @@ and the topics of its subscriptions for every instance. It reports the first fai
 | `subscription <n> topic is empty` | Subscription `<n>` (counted from 1) has a topic that renders to nothing. |
 | `` subscription <n> topic `<topic>`: `#` must be the whole last level, as in `a/#` `` | The rendered filter has `#` before its last level, or next to other characters in a level, such as `a/#/b` or `a#`. |
 | `` subscription <n> topic `<topic>`: `+` must be a whole level, as in `a/+/b` `` | The rendered filter has `+` next to other characters in a level, such as `a+`. |
+| `message <n> payload as hex: odd number of hex digits (<count>)` | With `encoding = "hex"`, the payload renders to an odd number of hex digits. Each byte takes two; the [byte filters](/docs/reference/template-variables#byte-filters) always write whole bytes. |
+| `` message <n> payload as hex: `<character>` is not a hex digit `` | The payload renders to something other than hex digits and whitespace. |
+| `` message <n> payload as base64: `<character>` is not a base64 character `` | With `encoding = "base64"`, the payload is not standard base64. URL-safe base64 (`-` and `_`) is not accepted. |
+| `message <n> payload as base64: base64 needs padding (=) to a multiple of 4 characters` | The base64 text lacks its `=` padding, or has it in the wrong place. Other base64 problems: `the length does not fit base64; a character is missing or one too many` and `` the last character `<c>` leaves bits over; the text is cut short or changed ``. |
+| `message <n> payload as CBOR: not JSON: <reason>` | With `encoding = "cbor"`, the payload must render to JSON, such as `{"co2": 600}`. `<reason>` names the line and column. |
+| `message <n> payload as protobuf: <reason>` | With `encoding = "protobuf"`, the payload does not render to JSON in protobuf's JSON mapping for the message type: invalid JSON, a key the message does not have, or a value of the wrong type, such as `unrecognized field name 'pressure' at line 1 column 11`. |
+| `` <filter>: <value> is out of range (<min> to <max>) `` | An integer [byte filter](/docs/reference/template-variables#byte-filters), such as `u8`, gets a value its type cannot hold, after rounding: `u8: 256 is out of range (0 to 255)`. Scale or clamp the value, or use a wider type. |
+| `<filter>: expected a number, got <kind>` | A byte filter gets a string or a boolean. |
+| `<filter>: <value> is out of range for a 32-bit float` | `f32be` or `f32le` gets a number larger than a 32-bit float holds. Use `f64be` or `f64le`. |
 | Other MiniJinja errors, e.g. `unknown filter: filter <name> is unknown (in <template>:<line>)` | A filter or operation fails on the sample values. |
 
 ## Field overrides

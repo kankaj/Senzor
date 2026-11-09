@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package sensors.v1;
+
+enum Unit {
+  UNIT_UNSPECIFIED = 0;
+  CELSIUS = 1;
+  FAHRENHEIT = 2;
+}

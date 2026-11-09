@@ -12,6 +12,7 @@ use super::file::{
 use super::model::{
     DeviceConfig, InstanceConfig, Project, SharedTemplates, Subscription, Validated,
 };
+use crate::encoding::{Encoder, message_encoder_located};
 use crate::render::{
     CompiledTemplate, TemplateError, base_context, instance_id_context, is_reserved, tick_context,
 };
@@ -48,7 +49,7 @@ impl ProjectFile {
                 None
             }
         };
-        let templates = self.template_lookup(&mut errors);
+        let templates = self.template_lookup(base_dir, &mut errors);
         let (mut devices, mut blocked) = self.resolve_devices(&templates, &mut errors);
 
         let broker = match broker {
@@ -73,6 +74,7 @@ impl ProjectFile {
     /// can use it.
     fn template_lookup<'a>(
         &'a self,
+        base_dir: &Path,
         errors: &mut Vec<ProjectError>,
     ) -> HashMap<String, TemplateStatus<'a>> {
         let mut templates: HashMap<String, TemplateStatus<'a>> = builtin_templates()
@@ -105,7 +107,7 @@ impl ProjectFile {
                 templates.insert(template.id.clone(), TemplateStatus::Broken);
                 continue;
             }
-            let status = match check_template(template, &self.broker) {
+            let status = match check_template(template, &self.broker, base_dir) {
                 Ok(compiled) => TemplateStatus::Usable(template, compiled),
                 Err(mut problems) => {
                     errors.append(&mut problems);
@@ -201,9 +203,11 @@ fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Op
 }
 
 /// Checks `template` and compiles its messages and subscription topics; `Err` lists its problems.
+/// `.proto` files are read relative to `base_dir`.
 fn check_template(
     template: &TemplateSpec,
     broker: &BrokerSpec,
+    base_dir: &Path,
 ) -> Result<Compiled, Vec<ProjectError>> {
     let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
     let mut problems = check_properties(template, broker);
@@ -238,7 +242,22 @@ fn check_template(
         }
     }
     let subscription_topics = check_subscriptions(template, &mut problems);
-    match SharedTemplates::compile_located(&template.messages, template.availability.as_ref()) {
+    let encoders = template
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, message)| {
+            message_encoder_located(message, i, base_dir).unwrap_or_else(|located| {
+                problems.extend(located.into_iter().map(|e| at(&e.field, e.message)));
+                Encoder::Text
+            })
+        })
+        .collect();
+    match SharedTemplates::compile_with_located(
+        &template.messages,
+        template.availability.as_ref(),
+        encoders,
+    ) {
         Ok(templates) if problems.is_empty() => Ok(Compiled {
             templates,
             subscription_topics,
@@ -573,6 +592,7 @@ fn sample_render(instance: &InstanceConfig) -> Result<(), TemplateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encoding::Encoding;
     use crate::generator::GeneratorSpec;
     use crate::project::error::Location;
     use std::time::Duration;
@@ -1652,5 +1672,154 @@ params = {{ room = "{room}" }}
             "{errors:?}"
         );
         assert_eq!(errors[0].1.as_deref(), Some("fields.temp.script"));
+    }
+
+    /// A project with one template whose one message has `message` (the keys after `topic`),
+    /// and a device, validated with the project file in `dir`.
+    fn encoded_in(dir: &Path, message: &str) -> Validated {
+        let src = format!(
+            "[[templates]]\nid = \"t\"\n\
+             messages = [{{ topic = \"t/{{{{ device_id }}}}\", {message} }}]\n\
+             fields.v = {{ generator = \"constant\", value = 215 }}\n\n\
+             [[devices]]\nid = \"d\"\ntemplate = \"t\"\n"
+        );
+        ProjectFile::parse(&src)
+            .unwrap()
+            .validate_with(dir, &|_| None)
+    }
+
+    fn proto_dir() -> std::path::PathBuf {
+        crate::proto::tests::sensor_proto()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    #[test]
+    fn a_protobuf_message_validates_with_its_proto_file_next_to_the_project() {
+        let validated = encoded_in(
+            &proto_dir(),
+            r#"payload = '{"humidity": {{ v }}}', encoding = "protobuf", proto = "sensor.proto", message = "sensors.v1.Reading""#,
+        );
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(&validated)
+        );
+        let templates = &validated.project.instance("d").unwrap().templates;
+        assert_eq!(templates.encoders()[0].encoding(), Encoding::Protobuf);
+    }
+
+    #[test]
+    fn encoding_problems_name_their_key_and_block_the_template() {
+        let here = Path::new(".");
+        let cases = [
+            (
+                encoded_in(here, r#"payload = "{}", encoding = "protobuf""#),
+                vec![
+                    (
+                        "template `t`: message 1: encoding protobuf needs a proto file",
+                        "messages[1].proto",
+                    ),
+                    (
+                        "template `t`: message 1: encoding protobuf needs a message type",
+                        "messages[1].message",
+                    ),
+                ],
+            ),
+            (
+                encoded_in(
+                    here,
+                    r#"payload = "{}", encoding = "cbor", proto = "a.proto""#,
+                ),
+                vec![(
+                    "template `t`: message 1: proto is used only with encoding protobuf",
+                    "messages[1].proto",
+                )],
+            ),
+            (
+                encoded_in(
+                    &proto_dir(),
+                    r#"payload = "{}", encoding = "protobuf", proto = "sensor.proto", message = "sensors.v1.Nope""#,
+                ),
+                vec![(
+                    "template `t`: message 1: proto `sensor.proto` has no message type \
+                     `sensors.v1.Nope`",
+                    "messages[1].message",
+                )],
+            ),
+        ];
+        for (validated, expected) in cases {
+            let found: Vec<(String, Option<String>)> = error_fields(&validated);
+            let expected: Vec<(String, Option<String>)> = expected
+                .into_iter()
+                .map(|(m, f)| (m.to_string(), Some(f.to_string())))
+                .collect();
+            assert_eq!(found, expected);
+            assert!(validated.blocked.contains("d"));
+        }
+    }
+
+    #[test]
+    fn a_proto_file_that_cannot_be_read_names_the_file() {
+        let validated = encoded_in(
+            Path::new("."),
+            r#"payload = "{}", encoding = "protobuf", proto = "nope/missing.proto", message = "a.A""#,
+        );
+        let errors = error_fields(&validated);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .0
+                .starts_with("template `t`: message 1: cannot read proto `nope/missing.proto`: "),
+            "{errors:?}"
+        );
+        assert_eq!(errors[0].1.as_deref(), Some("messages[1].proto"));
+    }
+
+    #[test]
+    fn a_sample_render_that_does_not_encode_is_a_problem_at_the_payload() {
+        let validated = encoded_in(
+            Path::new("."),
+            r#"payload = "{{ v | u8 }}{{ v }}", encoding = "hex""#,
+        );
+        assert_eq!(
+            error_fields(&validated),
+            [(
+                "device `d`: message 1 payload as hex: odd number of hex digits (5)".to_string(),
+                Some("messages[1].payload".to_string())
+            )]
+        );
+        let fine = encoded_in(
+            Path::new("."),
+            r#"payload = "{{ v | u16be }}", encoding = "hex""#,
+        );
+        assert!(fine.errors.is_empty(), "{:?}", error_strings(&fine));
+    }
+
+    #[test]
+    fn validating_again_does_not_compile_an_unchanged_proto_file_and_sees_a_changed_one() {
+        let dir = crate::proto::tests::temp_dir("validate-cache");
+        let path = dir.join("a.proto");
+        std::fs::write(&path, "syntax = \"proto3\";\nmessage A { int32 v = 1; }\n").unwrap();
+        let message = r#"payload = '{"v": {{ v }}}', encoding = "protobuf", proto = "a.proto", message = "A""#;
+        let first = encoded_in(&dir, message);
+        let again = encoded_in(&dir, message);
+        assert!(first.errors.is_empty(), "{:?}", error_strings(&first));
+        assert_eq!(crate::proto::compile_count::of(&path), 1);
+        assert_eq!(
+            first.project.instance("d"),
+            again.project.instance("d"),
+            "an unchanged file compiles to the same configuration"
+        );
+
+        std::fs::write(&path, "syntax = \"proto3\";\nmessage A { int64 v = 1; }\n").unwrap();
+        let changed = encoded_in(&dir, message);
+        assert_eq!(crate::proto::compile_count::of(&path), 2);
+        assert_ne!(
+            first.project.instance("d"),
+            changed.project.instance("d"),
+            "a running instance takes the changed file as an edit"
+        );
     }
 }

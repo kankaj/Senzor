@@ -1,5 +1,6 @@
 use eframe::egui::{self, RichText, TextEdit, TextStyle};
 use senzor_core::engine::{EngineState, LogEntry};
+use senzor_core::render::Payload;
 
 use super::{Action, BottomTab, ERROR, UiState, request_field_focus, shortcuts};
 use crate::document::Document;
@@ -214,7 +215,12 @@ fn log_row(ui: &mut egui::Ui, entry: &LogEntry, columns: Columns, selected: bool
     ui.label(cell(if entry.retain { "R" } else { " " }.to_string()))
         .on_hover_text("Retained");
     ui.label(cell("   ".to_string()));
-    let payload = clickable(ui, cell(format::log_payload(&entry.payload)));
+    // Cut at the edge, so a long payload does not run under the shown message.
+    let payload = ui.add(
+        egui::Label::new(cell(format::log_payload(&entry.payload)))
+            .truncate()
+            .sense(egui::Sense::click()),
+    );
     RowClick {
         instance: instance.clicked().then(|| entry.instance.clone()),
         row: (time.clicked() || topic.clicked() || payload.clicked()).then_some(entry.seq),
@@ -271,6 +277,10 @@ fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
                 row("User property", format!("{name} = {value}"));
             }
         });
+    let Some(text) = entry.payload.as_text() else {
+        binary_payload(ui, &entry.payload);
+        return;
+    };
     ui.horizontal(|ui| {
         ui.strong("Payload");
         if ui
@@ -278,14 +288,44 @@ fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
             .on_hover_text("Copy the payload as it was sent")
             .clicked()
         {
-            ui.ctx().copy_text(entry.payload.clone());
+            ui.ctx().copy_text(text.to_string());
         }
     });
     egui::ScrollArea::vertical()
         .id_salt("log-detail-payload")
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            ui.label(RichText::new(pretty_payload(&entry.payload)).monospace());
+            ui.label(RichText::new(pretty_payload(text)).monospace());
+        });
+}
+
+/// A binary payload in the details: its bytes as a hex dump, then the text they were encoded
+/// from.
+fn binary_payload(ui: &mut egui::Ui, payload: &Payload) {
+    let bytes = payload.bytes();
+    ui.horizontal(|ui| {
+        ui.strong("Payload");
+        ui.weak(format!(
+            "{}, {}",
+            payload.encoding().label(),
+            format::byte_count(bytes.len())
+        ));
+        if ui
+            .button("Copy as hex")
+            .on_hover_text("Copy the bytes sent, as hex digits")
+            .clicked()
+        {
+            ui.ctx().copy_text(payload.hex());
+        }
+    });
+    egui::ScrollArea::both()
+        .id_salt("log-detail-payload")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            super::hex_dump_label(ui, bytes);
+            ui.add_space(6.0);
+            ui.strong("Rendered text");
+            ui.label(RichText::new(pretty_payload(payload.text())).monospace());
         });
 }
 
@@ -332,7 +372,7 @@ mod tests {
                 time: SystemTime::UNIX_EPOCH,
                 instance: "office".to_string(),
                 topic: format!("topic-{i:03}"),
-                payload: "1".to_string(),
+                payload: "1".into(),
                 qos: 0,
                 retain: false,
                 properties: Default::default(),
@@ -352,7 +392,7 @@ mod tests {
                 time: SystemTime::UNIX_EPOCH,
                 instance: if i % 2 == 0 { "office-0" } else { "lab-0" }.to_string(),
                 topic: format!("b/{}/state", if i % 2 == 0 { "office" } else { "lab" }),
-                payload: format!(r#"{{"co2":{}}}"#, 600 + i),
+                payload: format!(r#"{{"co2":{}}}"#, 600 + i).into(),
                 qos: 1,
                 retain: i == 5,
                 properties: Default::default(),
@@ -401,6 +441,68 @@ mod tests {
         assert!(h.query_by_label("Message").is_some());
         assert!(h.query_by_label_contains("\"co2\": 605").is_some());
         assert!(h.query_by_label("Copy payload").is_some());
+    }
+
+    #[test]
+    fn a_long_payload_stops_short_of_the_shown_message() {
+        let mut state = two_instances();
+        state.log[0].payload = "long payload ".repeat(30).into();
+        let mut h = log_harness(state);
+        h.get_by_label_contains(r#"{"co2":605}"#).click();
+        h.run();
+        let panel_left = h.get_by_label("Message").rect().min.x;
+        let row = h
+            .get_all_by_label_contains("long payload long payload")
+            .min_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x))
+            .unwrap();
+        assert!(
+            row.rect().max.x <= panel_left,
+            "the row ends at {}, under the panel at {panel_left}",
+            row.rect().max.x
+        );
+    }
+
+    /// A log with one CBOR message of 20 bytes.
+    fn binary_log() -> EngineState {
+        let entry = LogEntry {
+            seq: 1,
+            time: SystemTime::UNIX_EPOCH,
+            instance: "office".to_string(),
+            topic: "b/office/cbor".to_string(),
+            payload: senzor_core::render::Payload::Binary {
+                encoding: senzor_core::encoding::Encoding::Cbor,
+                bytes: (0..20).collect(),
+                text: r#"{"co2":600}"#.into(),
+            },
+            qos: 0,
+            retain: false,
+            properties: Default::default(),
+        };
+        EngineState {
+            log: [entry].into(),
+            ..EngineState::default()
+        }
+    }
+
+    #[test]
+    fn a_binary_message_shows_as_hex_with_its_encoding_and_size() {
+        let mut h = log_harness(binary_log());
+        let row = "cbor, 20 bytes: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f …";
+        h.get_by_label(row).click();
+        h.run();
+        // The panel's default width fits 8 bytes a line.
+        assert!(
+            h.query_by_label_contains("0000  00 01 02 03 04 05 06 07\n0008  08 09")
+                .is_some(),
+            "the hex dump"
+        );
+        assert!(h.query_by_label_contains("0010  10 11 12 13").is_some());
+        assert!(h.query_by_label("Rendered text").is_some());
+        assert!(
+            h.query_by_label_contains("\"co2\": 600").is_some(),
+            "the text it came from, indented"
+        );
+        assert!(h.query_by_label("Copy as hex").is_some());
     }
 
     #[test]

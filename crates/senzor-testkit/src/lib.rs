@@ -308,7 +308,10 @@ fn v5_reason(code: ConnectReturnCode) -> u8 {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Received {
     pub topic: String,
+    /// The payload as text, with bytes that are not UTF-8 replaced.
     pub payload: String,
+    /// The payload as it was sent.
+    pub bytes: Vec<u8>,
     pub retain: bool,
     pub message_expiry: Option<u32>,
     pub content_type: Option<String>,
@@ -357,6 +360,7 @@ impl Subscriber {
                         let received = Received {
                             topic: String::from_utf8_lossy(&p.topic).into_owned(),
                             payload: String::from_utf8_lossy(&p.payload).into_owned(),
+                            bytes: p.payload.to_vec(),
                             retain: p.retain,
                             message_expiry: properties.message_expiry_interval,
                             content_type: properties.content_type,

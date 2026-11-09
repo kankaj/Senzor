@@ -3,6 +3,7 @@
 use std::time::{Duration, SystemTime};
 
 use senzor_core::engine::InstanceStatus;
+use senzor_core::render::Payload;
 use senzor_core::value::Value;
 
 /// A field value as shown in the instance view: integral numbers plain (below 9e15, see
@@ -61,9 +62,27 @@ pub fn clock(time: SystemTime) -> String {
 /// Longest payload shown in one message log row.
 pub const LOG_PAYLOAD_CHARS: usize = 200;
 
-/// A payload as one log row: whitespace runs (including newlines) become one space, and
-/// anything past [`LOG_PAYLOAD_CHARS`] is cut with `…`.
-pub fn log_payload(payload: &str) -> String {
+/// Most bytes of a binary payload shown in one message log row.
+pub const LOG_PAYLOAD_BYTES: usize = 16;
+
+/// A payload as one log row. Text: whitespace runs (including newlines) become one space, and
+/// anything past [`LOG_PAYLOAD_CHARS`] is cut with `…`. Binary: the encoding, the size and the
+/// first [`LOG_PAYLOAD_BYTES`] bytes in hex.
+pub fn log_payload(payload: &Payload) -> String {
+    let Some(payload) = payload.as_text() else {
+        let bytes = payload.bytes();
+        let shown = spaced_hex(&bytes[..bytes.len().min(LOG_PAYLOAD_BYTES)]);
+        let more = if bytes.len() > LOG_PAYLOAD_BYTES {
+            " …"
+        } else {
+            ""
+        };
+        return format!(
+            "{}, {}: {shown}{more}",
+            payload.encoding().label(),
+            byte_count(bytes.len())
+        );
+    };
     let one_line = payload.split_whitespace().collect::<Vec<_>>().join(" ");
     if one_line.chars().count() > LOG_PAYLOAD_CHARS {
         let mut shown: String = one_line.chars().take(LOG_PAYLOAD_CHARS).collect();
@@ -74,9 +93,51 @@ pub fn log_payload(payload: &str) -> String {
     }
 }
 
+/// `bytes` as a hex dump: `per_line` bytes a line, after the offset of the line's first byte.
+pub fn hex_dump(bytes: &[u8], per_line: usize) -> String {
+    let width = offset_width(bytes.len());
+    bytes
+        .chunks(per_line)
+        .enumerate()
+        .map(|(i, line)| format!("{:0width$x}  {}", i * per_line, spaced_hex(line)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// How many bytes a line of the dump of `len` bytes holds within `chars` characters: 16, else
+/// 8, else 4.
+pub fn hex_dump_line_bytes(len: usize, chars: usize) -> usize {
+    let fits = |per_line: usize| offset_width(len) + 2 + per_line * 3 - 1 <= chars;
+    [16, 8].into_iter().find(|&n| fits(n)).unwrap_or(4)
+}
+
+/// Four hex digits, or as many as the last offset of `len` bytes needs.
+fn offset_width(len: usize) -> usize {
+    format!("{:x}", len.saturating_sub(1)).len().max(4)
+}
+
+/// `bytes` as lowercase hex, a space between bytes.
+pub fn spaced_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `n` bytes, as "1 byte" or "20 bytes".
+pub fn byte_count(n: usize) -> String {
+    if n == 1 {
+        "1 byte".into()
+    } else {
+        format!("{n} bytes")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use senzor_core::encoding::Encoding;
 
     #[test]
     fn values_are_compact() {
@@ -123,9 +184,65 @@ mod tests {
 
     #[test]
     fn log_payloads_are_one_line_and_shortened() {
-        assert_eq!(log_payload("{\n  \"co2\": 600\n}"), "{ \"co2\": 600 }");
-        let shown = log_payload(&"x".repeat(300));
+        let text = |t: &str| log_payload(&Payload::from(t));
+        assert_eq!(text("{\n  \"co2\": 600\n}"), "{ \"co2\": 600 }");
+        let shown = text(&"x".repeat(300));
         assert_eq!(shown.chars().count(), 201);
         assert!(shown.ends_with('…'));
+    }
+
+    fn binary(encoding: Encoding, bytes: Vec<u8>) -> Payload {
+        Payload::Binary {
+            encoding,
+            bytes,
+            text: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_binary_log_payload_is_its_encoding_size_and_first_bytes() {
+        assert_eq!(
+            log_payload(&binary(Encoding::Cbor, vec![0xa1, 0x61, 0x76, 0x01])),
+            "cbor, 4 bytes: a1 61 76 01"
+        );
+        assert_eq!(
+            log_payload(&binary(Encoding::Hex, vec![0x0a])),
+            "hex, 1 byte: 0a"
+        );
+        let long = log_payload(&binary(Encoding::Protobuf, vec![0xff; 40]));
+        assert_eq!(
+            long,
+            format!(
+                "protobuf, 40 bytes: {} …",
+                vec!["ff"; LOG_PAYLOAD_BYTES].join(" ")
+            )
+        );
+    }
+
+    #[test]
+    fn a_hex_dump_has_16_bytes_a_line_after_the_offset() {
+        let bytes: Vec<u8> = (0..20).collect();
+        assert_eq!(
+            hex_dump(&bytes, 16),
+            "0000  00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n0010  10 11 12 13"
+        );
+        assert_eq!(hex_dump(&[], 16), "");
+        assert!(
+            hex_dump(&vec![0; 70_000], 16)
+                .ends_with("\n11160  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
+        );
+    }
+
+    #[test]
+    fn a_hex_dump_takes_fewer_bytes_a_line_when_16_do_not_fit() {
+        let bytes: Vec<u8> = (0..20).collect();
+        // "0000  " and 16 bytes need 53 characters.
+        assert_eq!(hex_dump_line_bytes(bytes.len(), 53), 16);
+        assert_eq!(hex_dump_line_bytes(bytes.len(), 52), 8);
+        assert_eq!(hex_dump_line_bytes(bytes.len(), 10), 4);
+        assert_eq!(
+            hex_dump(&bytes, 8),
+            "0000  00 01 02 03 04 05 06 07\n0008  08 09 0a 0b 0c 0d 0e 0f\n0010  10 11 12 13"
+        );
     }
 }

@@ -108,6 +108,50 @@ async fn both_versions_connect_and_publish_on_mosquitto_2() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the Docker brokers in dev/compose.yaml"]
+async fn a_binary_payload_arrives_intact_on_mosquitto_2() {
+    let port = mosquitto_port();
+    for version in ["5", "3.1.1"] {
+        let prefix = unique("binary");
+        let mut sub = Subscriber::connect(port, &format!("{prefix}/#")).await;
+        // Bytes that are not UTF-8: 0xff, 0x00 and a lone continuation byte.
+        let src = format!(
+            r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+client_id_prefix = "{prefix}-"
+mqtt_version = "{version}"
+
+[[templates]]
+id = "t"
+interval = "200ms"
+messages = [{{ topic = "{prefix}/state", payload = "ff 00 {{{{ v | i16be }}}} 80", encoding = "hex" }}]
+fields.v = {{ generator = "constant", value = -2 }}
+
+[[devices]]
+id = "d"
+template = "t"
+autostart = false
+"#
+        );
+        let validated = ProjectFile::parse(&src)
+            .unwrap()
+            .validate(std::path::Path::new("."));
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let engine = spawn(validated.project);
+        start_online(&engine).await;
+        let state = sub.wait_for(WAIT, |m| m.topic.ends_with("/state")).await;
+        assert_eq!(
+            state.map(|m| m.bytes),
+            Some(vec![0xff, 0x00, 0xff, 0xfe, 0x80]),
+            "MQTT {version}"
+        );
+        engine.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the Docker brokers in dev/compose.yaml"]
 async fn both_versions_publish_over_websocket() {
     let tcp = mosquitto_port();
     let ws = mosquitto_ws_port();

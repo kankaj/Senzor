@@ -216,6 +216,17 @@ fn default_interval() -> Duration {
 pub struct MessageSpec {
     pub topic: String,
     pub payload: String,
+    /// How the rendered payload becomes the bytes that are published.
+    #[serde(default, skip_serializing_if = "Encoding::is_text")]
+    pub encoding: Encoding,
+    /// With `encoding = "protobuf"`: the `.proto` file that defines `message`, relative to the
+    /// project file's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto: Option<PathBuf>,
+    /// With `encoding = "protobuf"`: the fully qualified message type, such as
+    /// `sensors.v1.Reading`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     /// MQTT 5 message expiry interval, in whole seconds.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     #[serde(
@@ -238,6 +249,9 @@ impl MessageSpec {
         Self {
             topic: topic.into(),
             payload: payload.into(),
+            encoding: Encoding::Text,
+            proto: None,
+            message: None,
             message_expiry: None,
             content_type: None,
             user_properties: BTreeMap::new(),
@@ -249,6 +263,59 @@ impl MessageSpec {
         self.message_expiry.is_some()
             || self.content_type.is_some()
             || !self.user_properties.is_empty()
+    }
+}
+
+/// How a message's rendered payload becomes the bytes that are published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum Encoding {
+    /// The text as it is rendered, in UTF-8.
+    #[default]
+    Text,
+    /// The text is hex digits, two per byte; whitespace is ignored.
+    Hex,
+    /// The text is standard base64 with padding; whitespace is ignored.
+    Base64,
+    /// The text is JSON, published as CBOR.
+    Cbor,
+    /// The text is JSON in protobuf's JSON mapping, published as the protobuf message `message`
+    /// of the `proto` file.
+    Protobuf,
+}
+
+impl Encoding {
+    pub const ALL: [Encoding; 5] = [
+        Encoding::Text,
+        Encoding::Hex,
+        Encoding::Base64,
+        Encoding::Cbor,
+        Encoding::Protobuf,
+    ];
+
+    pub fn is_text(&self) -> bool {
+        *self == Encoding::Text
+    }
+
+    /// The encoding as written in the project file: `text`, `hex`, `base64`, `cbor` or
+    /// `protobuf`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Encoding::Text => "text",
+            Encoding::Hex => "hex",
+            Encoding::Base64 => "base64",
+            Encoding::Cbor => "cbor",
+            Encoding::Protobuf => "protobuf",
+        }
+    }
+
+    /// The encoding as the window shows it: `text`, `hex`, `base64`, `CBOR` or `protobuf`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Encoding::Cbor => "CBOR",
+            other => other.label(),
+        }
     }
 }
 
@@ -588,6 +655,50 @@ fields.v = { generator = "constant", value = 1 }
         let written = file.to_toml_string();
         assert_eq!(ProjectFile::parse(&written).unwrap(), file);
         assert_eq!(written.matches("message_expiry").count(), 1, "{written}");
+    }
+
+    const ENCODED: &str = r#"
+[[templates]]
+id = "t"
+messages = [
+    { topic = "a", payload = "{{ v | u8 }}", encoding = "hex" },
+    { topic = "b", payload = '{"v": {{ v }}}', encoding = "protobuf", proto = "proto/sensor.proto", message = "sensors.v1.Reading" },
+    { topic = "c", payload = "plain" },
+]
+fields.v = { generator = "constant", value = 1 }
+"#;
+
+    #[test]
+    fn encodings_round_trip_and_text_is_not_written() {
+        let file = ProjectFile::parse(ENCODED).unwrap();
+        let messages = &file.templates[0].messages;
+        assert_eq!(messages[0].encoding, Encoding::Hex);
+        assert_eq!(messages[1].encoding, Encoding::Protobuf);
+        assert_eq!(
+            messages[1].proto.as_deref(),
+            Some(std::path::Path::new("proto/sensor.proto"))
+        );
+        assert_eq!(messages[1].message.as_deref(), Some("sensors.v1.Reading"));
+        assert_eq!(messages[2].encoding, Encoding::Text, "the default");
+        let written = file.to_toml_string();
+        assert_eq!(written.matches("encoding").count(), 2, "{written}");
+        assert!(written.contains("encoding = \"protobuf\""), "{written}");
+        assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(serde_json::from_value::<ProjectFile>(json).unwrap(), file);
+    }
+
+    #[test]
+    fn an_unknown_encoding_names_the_accepted_ones() {
+        let src = ENCODED.replace("encoding = \"hex\"", "encoding = \"bson\"");
+        let errors = ProjectFile::parse(&src).unwrap_err();
+        assert!(
+            errors[0]
+                .message
+                .contains("expected one of `text`, `hex`, `base64`, `cbor`, `protobuf`"),
+            "{}",
+            errors[0].message
+        );
     }
 
     const SCRIPTED: &str = r#"

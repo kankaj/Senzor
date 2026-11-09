@@ -80,6 +80,36 @@ Filters that payloads use most:
 `22.0` for `22.04`. MiniJinja's built-in filters are available, including `tojson`, except
 `urlencode`. The loop controls `{% break %}` and `{% continue %}` are not available either.
 
+## Byte filters
+
+The byte filters write a number as the bytes of a binary integer or float, in lowercase hex digits.
+Use them in a payload with `encoding = "hex"`, which publishes the hex digits as bytes, to build a
+binary frame. See [Binary payloads](/docs/recipes/binary-payloads).
+
+| Filter | Writes | Hex digits |
+| --- | --- | --- |
+| `u8`, `i8` | Unsigned or signed 8-bit integer | 2 |
+| `u16be`, `u16le`, `i16be`, `i16le` | Unsigned or signed 16-bit integer | 4 |
+| `u32be`, `u32le`, `i32be`, `i32le` | Unsigned or signed 32-bit integer | 8 |
+| `f32be`, `f32le` | 32-bit float (IEEE 754) | 8 |
+| `f64be`, `f64le` | 64-bit float (IEEE 754) | 16 |
+
+`be` is big-endian, the most significant byte first; `le` is little-endian. Signed integers are
+written in two's complement.
+
+| Expression | Value | Renders |
+| --- | --- | --- |
+| `{{ temp \| i16be }}` | `215` | `00d7` |
+| `{{ temp \| i16le }}` | `215` | `d700` |
+| `{{ temp \| i16be }}` | `-2` | `fffe` |
+| `{{ (temp * 10) \| i16be }}` | `21.5` | `00d7` |
+| `{{ temp \| f32be }}` | `1.5` | `3fc00000` |
+
+The integer filters round to the nearest integer first, halves away from zero: `21.5` becomes `22`.
+A value out of range for the type is an error, such as `` u8: 256 is out of range (0 to 255) ``,
+and so is a value that is not a number: `` u8: expected a number, got string ``. A float filter
+fails only for a number too large for its type.
+
 ## Undefined variables are errors
 
 A variable that does not exist is an error, not an empty string. A typo such as `{{ c02 }}` is
@@ -93,7 +123,9 @@ parentheses names the template string, with messages counted from 1, and the lin
   project. See [Validation errors](/docs/reference/validation-errors).
 - **While running**, a message that fails to render is skipped and counted as an error; the other
   messages of the tick are still published. This can happen when a later value breaks a filter that
-  the first value passed, for example a `sequence` that mixes numbers and strings.
+  the first value passed, for example a `sequence` that mixes numbers and strings. A payload whose
+  rendered text does not fit its [`encoding`](/docs/recipes/binary-payloads) is skipped the same
+  way.
 
 ## Topic rules
 
@@ -103,7 +135,8 @@ to message topics and the availability topic.
 ## Message size
 
 A message whose topic, payload and MQTT 5 properties together are larger than 1 MiB (1,048,576 bytes)
-is not published. An MQTT 5 broker that announces a smaller maximum packet size lowers this limit to
+is not published. For a message with a binary `encoding`, the payload's size is the size of its
+bytes, not of the text they were encoded from. An MQTT 5 broker that announces a smaller maximum packet size lowers this limit to
 that size minus 16 bytes. The message counts as an error, and the log shows
 `` message on `<topic>` is <size> bytes; the limit is <limit> ``, where `<limit>` is 1048576 unless the
 broker set a lower one.

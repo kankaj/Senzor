@@ -56,6 +56,17 @@ The `{ }` button after a box's name lists the variables that box can use: `devic
 
 While you type a name inside `{{`, the box lists the variables that start with what you typed, under the box after **Tab:**. Press Tab to take the first one, or click one; Senzor completes the name and adds ` }}` unless the block is already closed.
 
+### Encoding
+
+Under **Payload**, **Encoding** says how the rendered payload is published: **text**, the default, sends it as it is; **hex** and **base64** read it as bytes written in hex digits or in base64; **CBOR** and **protobuf** read it as JSON and send it in that binary format. See [Binary payloads](/docs/recipes/binary-payloads).
+
+With **protobuf**, two more boxes appear:
+
+- **Proto file**: the `.proto` file that defines the message type, such as `proto/sensor.proto`. A relative path starts at the folder of the project file; while the project has no file, at the folder Senzor was started in.
+- **Message type**: the fully qualified type, such as `sensors.v1.Reading`.
+
+Their problems show under them, such as **message 1: encoding protobuf needs a proto file**. Choosing another encoding clears both boxes.
+
 ### MQTT 5 properties
 
 Under each message, **MQTT 5 properties** opens three more settings. The section starts open when the message sets any of them.
@@ -123,7 +134,9 @@ If no valid device uses the template, the preview says **No valid device uses th
 
 The preview shows the availability topic (as `availability: …`) and each message's topic and payload, followed by the MQTT 5 properties the message sets, such as `content type: application/json`, `message expiry: 300 s` and `user property: room = office`. A message that fails to render shows its error in red, such as `message 1: …`.
 
-When a rendered payload starts with `{` or `[` but is not valid JSON, the preview warns under it in amber: **looks like JSON but is not valid JSON**, followed by where the JSON breaks, such as a comma before `}`. A message whose **Content type** names JSON, such as `application/json`, gets the same check for any payload. The warning is not a problem: the device still runs, so you can publish broken JSON on purpose to test how your consumer copes.
+For a message with a binary [encoding](#encoding), the preview shows the rendered text, then its size, such as `5 bytes`, and the bytes it encodes to as hex, 16 bytes a line after their offset. When the text does not encode, the reason shows in red instead, such as **not encoded as hex: odd number of hex digits (5)**.
+
+When a rendered payload starts with `{` or `[` but is not valid JSON, the preview warns under it in amber: **looks like JSON but is not valid JSON**, followed by where the JSON breaks, such as a comma before `}`. A message whose **Content type** names JSON, such as `application/json`, gets the same check for any payload, and so does a message with the encoding **CBOR** or **protobuf**, which must be JSON: **encoding CBOR needs JSON, but the payload is not valid JSON**. The warning is not a problem: the device still runs, so you can publish broken JSON on purpose to test how your consumer copes.
 
 ## Built-in templates
 

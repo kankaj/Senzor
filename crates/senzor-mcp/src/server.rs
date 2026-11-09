@@ -286,7 +286,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "Published messages, oldest first, with sequence numbers. Pass the previous call's last_seq as after_seq to get only new ones; filter by instance, device or topic text; wait_seconds waits for a matching message.",
+        description = "Published messages, oldest first, with sequence numbers. Pass the previous call's last_seq as after_seq to get only new ones; filter by instance, device or topic text; wait_seconds waits for a matching message. A text message has its payload; a message with a binary encoding has encoding, payload_base64 (the bytes sent) and rendered (the text they were encoded from) instead.",
         annotations(read_only_hint = true)
     )]
     async fn get_messages(

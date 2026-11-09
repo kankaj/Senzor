@@ -15,8 +15,8 @@ pub use document::{Document, OpenError};
 pub use error::{Location, ProjectError};
 pub use field::FieldSpec;
 pub use file::{
-    AvailabilitySpec, BrokerSpec, DEFAULT_WEBSOCKET_PATH, DeviceSpec, MessageSpec, MqttVersion,
-    ProjectFile, SimulationSpec, SubscriptionSpec, TemplateSpec, TlsSpec, Transport,
+    AvailabilitySpec, BrokerSpec, DEFAULT_WEBSOCKET_PATH, DeviceSpec, Encoding, MessageSpec,
+    MqttVersion, ProjectFile, SimulationSpec, SubscriptionSpec, TemplateSpec, TlsSpec, Transport,
 };
 pub use model::{
     BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, SharedTemplates,

@@ -105,7 +105,7 @@ Published messages, oldest first. These are the messages your templates define, 
 
 | Key | Meaning |
 | --- | --- |
-| `messages` | Each with `seq`, `time`, `instance`, `topic`, `payload`, `qos` and `retain`, plus the MQTT 5 properties the message was sent with: `message_expiry` (seconds), `content_type` and `user_properties` (an object of rendered values). Properties the message did not set are left out. |
+| `messages` | Each with `seq`, `time`, `instance`, `topic`, `payload`, `qos` and `retain`, plus the MQTT 5 properties the message was sent with: `message_expiry` (seconds), `content_type` and `user_properties` (an object of rendered values). Properties the message did not set are left out. A message with a [binary encoding](/docs/recipes/binary-payloads) has no `payload`; it has `encoding` (`hex`, `base64`, `cbor` or `protobuf`), `payload_base64` (the bytes sent, in standard base64) and `rendered` (the text they were encoded from) instead. |
 | `last_seq` | The highest sequence number assigned so far. Sequence numbers keep growing when another project is opened. |
 | `truncated` | Messages after `after_seq` left the 1,000-message log before they could be read. |
 

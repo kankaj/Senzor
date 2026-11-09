@@ -9,6 +9,7 @@ use tokio_rustls::rustls::ClientConfig;
 use super::error::ProjectError;
 use super::field::FieldSpec;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion, Transport};
+use crate::encoding::Encoder;
 use crate::render::{InstanceTemplates, TemplateError};
 use crate::script::Script;
 use crate::value::Value;
@@ -91,8 +92,9 @@ pub struct Subscription {
 }
 
 /// A template's messages and availability topic, compiled once and shared by every instance of
-/// the template. It is made from an instance's `messages` and `availability` alone, which the
-/// instance compares itself, so it takes no part in the comparison: any two are equal.
+/// the template, with each message's encoder. The templates are made from an instance's
+/// `messages` and `availability`, which the instance compares itself, so only the encoders take
+/// part in the comparison: a protobuf encoder differs when its `.proto` file changed.
 #[derive(Clone)]
 pub struct SharedTemplates(Arc<InstanceTemplates>);
 
@@ -104,12 +106,14 @@ impl SharedTemplates {
         InstanceTemplates::compile(messages, availability).map(|t| Self(Arc::new(t)))
     }
 
-    /// [`Self::compile`], with the key path of the broken template.
-    pub(crate) fn compile_located(
+    /// [`InstanceTemplates::compile_with`], with the key path of the broken template.
+    pub(crate) fn compile_with_located(
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
+        encoders: Vec<Encoder>,
     ) -> Result<Self, TemplateError> {
-        InstanceTemplates::compile_located(messages, availability).map(|t| Self(Arc::new(t)))
+        InstanceTemplates::compile_with_located(messages, availability, encoders)
+            .map(|t| Self(Arc::new(t)))
     }
 
     /// Whether both are the same compiled templates, not just equal ones.
@@ -128,8 +132,8 @@ impl Deref for SharedTemplates {
 }
 
 impl PartialEq for SharedTemplates {
-    fn eq(&self, _: &Self) -> bool {
-        true
+    fn eq(&self, other: &Self) -> bool {
+        self.encoders() == other.encoders()
     }
 }
 

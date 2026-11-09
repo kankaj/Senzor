@@ -1,0 +1,11 @@
+// The message type of the protobuf message in binary-payloads.toml.
+syntax = "proto3";
+
+package sensors.v1;
+
+message Reading {
+  string device = 1;
+  double temperature = 2;
+  uint32 humidity = 3;
+  uint64 timestamp_ms = 4;
+}

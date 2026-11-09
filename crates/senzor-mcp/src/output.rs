@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
+use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use schemars::JsonSchema;
 use senzor_core::engine::{InstanceState, InstanceStatus, LogEntry};
 use senzor_core::project::builtin::builtin_templates;
@@ -127,7 +129,18 @@ pub struct Message {
     pub time: String,
     pub instance: String,
     pub topic: String,
-    pub payload: String,
+    /// The payload of a text message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    /// How a binary message's payload was encoded: `hex`, `base64`, `cbor` or `protobuf`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    /// The bytes of a binary message's payload, in standard base64.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_base64: Option<String>,
+    /// The rendered text a binary message's payload was encoded from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered: Option<String>,
     pub qos: u8,
     pub retain: bool,
     /// MQTT 5 message expiry in seconds, when the message set one.
@@ -143,12 +156,16 @@ pub struct Message {
 
 impl From<&LogEntry> for Message {
     fn from(entry: &LogEntry) -> Self {
+        let binary = entry.payload.as_text().is_none();
         Self {
             seq: entry.seq,
             time: time(entry.time),
             instance: entry.instance.clone(),
             topic: entry.topic.clone(),
-            payload: entry.payload.clone(),
+            payload: entry.payload.as_text().map(String::from),
+            encoding: binary.then(|| entry.payload.encoding().label().to_string()),
+            payload_base64: binary.then(|| BASE64_STANDARD.encode(entry.payload.bytes())),
+            rendered: binary.then(|| entry.payload.text().to_string()),
             qos: entry.qos,
             retain: entry.retain,
             message_expiry: entry.properties.message_expiry,
@@ -347,5 +364,49 @@ pub fn templates(file: &ProjectFile) -> TemplatesOut {
     let own = file.templates.iter().map(|t| info(t, false));
     TemplatesOut {
         templates: builtins.chain(own).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use senzor_core::encoding::Encoding;
+    use senzor_core::render::Payload;
+    use serde_json::json;
+
+    fn logged(payload: Payload) -> serde_json::Value {
+        let entry = LogEntry {
+            seq: 7,
+            time: SystemTime::UNIX_EPOCH,
+            instance: "d".into(),
+            topic: "t".into(),
+            payload,
+            qos: 0,
+            retain: false,
+            properties: Default::default(),
+        };
+        serde_json::to_value(Message::from(&entry)).unwrap()
+    }
+
+    #[test]
+    fn a_text_message_has_its_payload() {
+        let message = logged(Payload::Text("21.5".into()));
+        assert_eq!(message["payload"], "21.5");
+        for key in ["encoding", "payload_base64", "rendered"] {
+            assert!(message.get(key).is_none(), "{key}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_binary_message_has_its_encoding_bytes_in_base64_and_rendered_text() {
+        let message = logged(Payload::Binary {
+            encoding: Encoding::Cbor,
+            bytes: vec![0xa1, 0x61, 0x76, 0x01],
+            text: r#"{"v": 1}"#.into(),
+        });
+        assert_eq!(message["encoding"], "cbor");
+        assert_eq!(message["payload_base64"], "oWF2AQ==");
+        assert_eq!(message["rendered"], json!(r#"{"v": 1}"#));
+        assert!(message.get("payload").is_none(), "{message}");
     }
 }

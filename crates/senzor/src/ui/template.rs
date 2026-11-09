@@ -6,7 +6,7 @@ use senzor_core::engine::unannounced_fields;
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
 use senzor_core::project::{
-    FieldSpec, Location, MessageSpec, MqttVersion, SubscriptionSpec, TemplateSpec,
+    Encoding, FieldSpec, Location, MessageSpec, MqttVersion, SubscriptionSpec, TemplateSpec,
 };
 
 use super::template_text::{self, TextKind, Variable};
@@ -21,7 +21,8 @@ use crate::edits::{
     DEFAULT_NOISE, GeneratorKind, Removal, Rename, default_generator, new_availability,
     new_message, new_subscription, set_generator_kind, unique_name,
 };
-use crate::preview::{json_problem, preview};
+use crate::format;
+use crate::preview::{PreviewMessage, json_problem, preview};
 
 /// The editor for project template `index`.
 /// Without `preview_beside`, the preview is a section under the editor; with it, the window
@@ -522,6 +523,7 @@ fn messages_editor(
                 template_text::edit(ui, &mut message.payload, id, true, variables)
                     .labelled_by(label.id)
             });
+            encoding_editor(ui, message, &format!("{key}/message/{i}"), project, &field);
             let has_properties = message.has_properties();
             egui::CollapsingHeader::new("MQTT 5 properties")
                 .id_salt(format!("{key}/message/{i}/properties"))
@@ -548,6 +550,62 @@ fn messages_editor(
     if ui.button("Add message").clicked() {
         messages.push(new_message());
     }
+}
+
+/// How one message's payload is encoded and, for protobuf, its proto file and message type.
+/// `field` gives the key path of one of the message's keys.
+fn encoding_editor(
+    ui: &mut egui::Ui,
+    message: &mut MessageSpec,
+    key: &str,
+    project: Option<ProjectTemplate>,
+    field: &dyn Fn(&str) -> String,
+) {
+    egui::Grid::new(format!("{key}/encoding"))
+        .num_columns(2)
+        .show(ui, |ui| {
+            let label = help::label(ui, "Encoding", help::ENCODING);
+            let before = message.encoding;
+            cell(ui, project, &field("encoding"), |ui| {
+                egui::ComboBox::from_id_salt(format!("{key}/encoding"))
+                    .selected_text(message.encoding.name())
+                    .show_ui(ui, |ui| {
+                        for encoding in Encoding::ALL {
+                            ui.selectable_value(&mut message.encoding, encoding, encoding.name());
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id)
+            });
+            ui.end_row();
+            if message.encoding != before && message.encoding != Encoding::Protobuf {
+                message.proto = None;
+                message.message = None;
+            }
+            // Also shown when a file sets them without protobuf, so their problem shows.
+            if message.encoding != Encoding::Protobuf
+                && message.proto.is_none()
+                && message.message.is_none()
+            {
+                return;
+            }
+            let label = help::label(ui, "Proto file", help::PROTO_FILE);
+            cell(ui, project, &field("proto"), |ui| {
+                let mut path = message.proto.as_ref().map(|p| p.display().to_string());
+                let response = optional_text(ui, &mut path, "e.g. proto/sensor.proto");
+                if response.changed() {
+                    message.proto = path.map(Into::into);
+                }
+                response.labelled_by(label.id)
+            });
+            ui.end_row();
+            let label = help::label(ui, "Message type", help::MESSAGE_TYPE);
+            cell(ui, project, &field("message"), |ui| {
+                optional_text(ui, &mut message.message, "e.g. sensors.v1.Reading")
+                    .labelled_by(label.id)
+            });
+            ui.end_row();
+        });
 }
 
 /// Message expiry, content type and user properties of one message.
@@ -910,7 +968,12 @@ fn noise_editor(ui: &mut egui::Ui, noise: &mut Option<f64>) {
 }
 
 fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
-    let preview = preview(template, &doc.validated().project, SystemTime::now());
+    let preview = preview(
+        template,
+        &doc.validated().project,
+        doc.folder(),
+        SystemTime::now(),
+    );
     match &preview.instance {
         Some(instance) => ui.weak(format!(
             "Rendered as {instance} with its params and sample values."
@@ -927,19 +990,35 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
             Err(e) => ui.colored_label(ERROR, format!("availability topic: {e}")),
         };
     }
-    for (i, message) in preview.messages.iter().enumerate() {
+    for ((i, message), spec) in preview.messages.iter().enumerate().zip(&template.messages) {
         match message {
-            Ok(message) => {
-                ui.label(RichText::new(&message.topic).monospace().strong());
-                ui.label(RichText::new(&message.payload).monospace());
-                let properties = &message.properties;
-                if let Some(problem) =
-                    json_problem(&message.payload, properties.content_type.as_deref())
-                {
+            Ok(PreviewMessage { rendered, encoded }) => {
+                ui.label(RichText::new(&rendered.topic).monospace().strong());
+                let text = rendered.payload.text();
+                ui.label(RichText::new(text).monospace());
+                let properties = &rendered.properties;
+                let json = json_problem(text, properties.content_type.as_deref(), spec.encoding);
+                if let Some(problem) = &json {
                     ui.colored_label(
                         WARNING,
                         format!("{} {problem}", egui_phosphor::regular::WARNING),
                     );
+                }
+                match encoded {
+                    Some(Ok(bytes)) => {
+                        ui.weak(format::byte_count(bytes.len()));
+                        egui::ScrollArea::horizontal()
+                            .id_salt(format!("preview/bytes/{i}"))
+                            .show(ui, |ui| super::hex_dump_label(ui, bytes));
+                    }
+                    // A payload that is not JSON is told above.
+                    Some(Err(e)) if json.is_none() => {
+                        ui.colored_label(
+                            ERROR,
+                            format!("not encoded as {}: {e}", spec.encoding.name()),
+                        );
+                    }
+                    Some(Err(_)) | None => {}
                 }
                 if let Some(content_type) = &properties.content_type {
                     ui.weak(format!("content type: {content_type}"));
@@ -1070,6 +1149,11 @@ template = "air"
     #[test]
     fn add_subscription_adds_one_that_validates() {
         let mut h = user_harness();
+        // Folded, the sections above leave the button inside the 800x600 test window.
+        for section in ["Settings", "Messages"] {
+            h.get_by_label(section).click();
+            h.run();
+        }
         h.get_by_label("Add subscription").click();
         h.run();
         let template = &h.state().doc.file().templates[0];
@@ -1393,7 +1477,11 @@ template = "air"
                 noise: None
             }
         );
-        assert!(h.query_by_value("text").is_some(), "a type selector");
+        assert_eq!(
+            h.query_all_by_value("text").count(),
+            2,
+            "a type selector, beside the message's Encoding"
+        );
     }
 
     #[test]
@@ -1430,6 +1518,85 @@ template = "air"
         assert!(
             h.query_by_label_contains("looks like JSON but is not valid JSON")
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn choosing_protobuf_shows_the_proto_file_and_message_type_with_their_problems() {
+        let mut h = user_harness();
+        assert!(h.query_by_label("Proto file").is_none(), "text needs none");
+        h.get_by_label("Encoding").click();
+        h.run();
+        h.get_by_label("protobuf").click();
+        h.run();
+        let message =
+            |h: &Harness<'static, Fixture>| h.state().doc.file().templates[0].messages[0].clone();
+        assert_eq!(message(&h).encoding, Encoding::Protobuf);
+        assert!(h.query_by_label("Proto file").is_some());
+        assert!(h.query_by_label("Message type").is_some());
+        assert!(
+            h.query_all_by_label("message 1: encoding protobuf needs a proto file")
+                .next()
+                .is_some(),
+            "shown next to the box"
+        );
+
+        let proto = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../senzor-core/testdata/proto/sensor.proto"
+        );
+        type_into_label(&mut h, "Proto file", proto);
+        type_into_label(&mut h, "Message type", "sensors.v1.Reading");
+        assert_eq!(message(&h).proto, Some(proto.into()));
+        assert_eq!(message(&h).message.as_deref(), Some("sensors.v1.Reading"));
+
+        h.get_by_label("Encoding").click();
+        h.run();
+        h.get_by_label("CBOR").click();
+        h.run();
+        assert_eq!(message(&h).encoding, Encoding::Cbor);
+        assert_eq!(
+            (message(&h).proto, message(&h).message),
+            (None, None),
+            "only protobuf uses them"
+        );
+        assert!(h.query_by_label("Proto file").is_none());
+    }
+
+    #[test]
+    fn the_preview_shows_the_bytes_of_a_binary_message() {
+        let h = user_harness_with(&src_replacing(
+            r#"payload = "{{ co2 }}""#,
+            r#"payload = "{{ co2 | u16be }}01", encoding = "hex""#,
+        ));
+        assert!(h.query_by_label("025801").is_some(), "the rendered text");
+        assert!(h.query_by_label("3 bytes").is_some());
+        assert!(h.query_by_label("0000  02 58 01").is_some());
+    }
+
+    #[test]
+    fn the_preview_shows_why_a_payload_does_not_encode() {
+        let h = user_harness_with(&src_replacing(
+            r#"payload = "{{ co2 }}""#,
+            r#"payload = "{{ co2 }}", encoding = "hex""#,
+        ));
+        assert!(
+            h.query_by_label_contains("odd number of hex digits (3)")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn the_preview_says_a_cbor_payload_must_be_json() {
+        let h = user_harness_with(&src_replacing(
+            r#"payload = "{{ co2 }}""#,
+            r#"payload = "co2={{ co2 }}", encoding = "cbor""#,
+        ));
+        assert!(
+            h.query_by_label_contains(
+                "encoding CBOR needs JSON, but the payload is not valid JSON"
+            )
+            .is_some()
         );
     }
 

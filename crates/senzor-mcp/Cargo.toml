@@ -8,6 +8,7 @@ edition.workspace = true
 
 [dependencies]
 axum.workspace = true
+base64.workspace = true
 rand.workspace = true
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
 humantime.workspace = true

@@ -216,6 +216,20 @@ pub const PAYLOAD: Help = help(
     "What the message carries, as a Jinja template, such as {\"co2\": {{ co2 }}}.",
     "reference/template-variables",
 );
+pub const ENCODING: Help = help(
+    "How the rendered payload is sent: as text, or as bytes. hex and base64 read the text as \
+     bytes; CBOR and protobuf read it as JSON.",
+    "gui/editing-templates#encoding",
+);
+pub const PROTO_FILE: Help = help(
+    "The .proto file that defines the message type, relative to the project file's folder.",
+    "recipes/binary-payloads#protobuf",
+);
+pub const MESSAGE_TYPE: Help = help(
+    "The fully qualified protobuf message type, such as sensors.v1.Reading: the package, a \
+     dot and the message name.",
+    "recipes/binary-payloads#protobuf",
+);
 pub const MESSAGE_EXPIRY: Help = help(
     "MQTT 5: after this time the broker drops the message instead of delivering it.",
     "gui/editing-templates#mqtt-5-properties",
@@ -306,6 +320,9 @@ mod tests {
             WILL_DELAY,
             TOPIC,
             PAYLOAD,
+            ENCODING,
+            PROTO_FILE,
+            MESSAGE_TYPE,
             MESSAGE_EXPIRY,
             CONTENT_TYPE,
             USER_PROPERTIES,

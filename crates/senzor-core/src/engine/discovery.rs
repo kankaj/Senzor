@@ -164,14 +164,16 @@ fn place(a: &RenderedMessage, b: &RenderedMessage) -> Option<Found> {
     if a.topic != b.topic || a.payload == b.payload {
         return None;
     }
+    // Home Assistant reads values out of text, not out of encoded bytes.
+    let (a_text, b_text) = (a.payload.as_text()?, b.payload.as_text()?);
     let found = |path, first| Found {
         state_topic: a.topic.clone(),
         path,
         first,
     };
     match (
-        serde_json::from_str::<Json>(&a.payload),
-        serde_json::from_str::<Json>(&b.payload),
+        serde_json::from_str::<Json>(a_text),
+        serde_json::from_str::<Json>(b_text),
     ) {
         (Ok(ja), Ok(jb)) if ja.is_object() || ja.is_array() => {
             let mut changed = Vec::new();
@@ -182,8 +184,8 @@ fn place(a: &RenderedMessage, b: &RenderedMessage) -> Option<Found> {
         }
         // A quoted string: Home Assistant reads it through `value_json`.
         (Ok(Json::String(text)), Ok(_)) => Some(found(Some(Vec::new()), Json::String(text))),
-        _ => single_token(&a.payload)
-            .zip(single_token(&b.payload))
+        _ => single_token(a_text)
+            .zip(single_token(b_text))
             .map(|(text, _)| found(None, Json::String(text.to_string()))),
     }
 }
@@ -592,6 +594,22 @@ template = "odd"
 "#,
         );
         assert_eq!(announcements, [], "not JSON, in the topic, twice, unused");
+    }
+
+    /// Home Assistant reads values out of text; the JSON of a CBOR message is not what it gets.
+    #[test]
+    fn a_field_in_a_binary_payload_is_not_announced() {
+        let src = OFFICE.replace(
+            "payload = '{\"co2\"",
+            "encoding = \"cbor\"\npayload = '{\"co2\"",
+        );
+        assert_ne!(src, OFFICE);
+        assert_eq!(announced(&src), []);
+        let project = valid_project(&src);
+        assert_eq!(
+            unannounced_fields(&project.devices[0].instances[0]),
+            ["co2", "open", "temp"]
+        );
     }
 
     #[test]

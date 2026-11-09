@@ -427,8 +427,7 @@ impl SenzorApp {
             }
             Pending::OpenPath(path) => self.open_path(&path),
             Pending::OpenExample(index) => {
-                let project = crate::examples::EXAMPLES[index].project();
-                self.replace_document(Document::untitled(project));
+                self.replace_document(crate::examples::EXAMPLES[index].document());
             }
             Pending::Close => {
                 self.allow_close = true;

@@ -15,6 +15,9 @@ senzor-mcp = { path = "crates/senzor-mcp" }
 senzor-testkit = { path = "crates/senzor-testkit" }
 assert_cmd = "2.2.2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+# Binary payloads: base64 (also used by rmcp) and CBOR.
+base64 = "0.23.1"
+ciborium = "0.2.2"
 clap = { version = "4.6.7", features = ["derive"] }
 eframe = { version = "0.36.2", features = ["persistence"] }
 # Icons for the GUI: one icon font (Phosphor, MIT) instead of egui's mixed emoji fonts.
@@ -33,6 +36,12 @@ hyper = { version = "1.12.0", features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 jsonschema = { version = "0.58.6", default-features = false }
 minijinja = { version = "3.0.0", features = ["json"] }
+# The position of a .proto file's compile error (protox reports it as a miette diagnostic).
+miette = { version = "7.6.0", default-features = false }
+# Protobuf payloads: protox compiles .proto files in pure Rust (no protoc) into a descriptor pool,
+# prost-reflect encodes a message from its JSON mapping (`serde`) with it and re-exports prost.
+prost-reflect = { version = "0.16.5", features = ["serde"] }
+protox = "0.10.0"
 rand = { version = "0.10.3", features = ["chacha"] }
 # Field scripts and subscription scripts. `sync`: scripts run on tokio worker threads.
 rhai = { version = "1.27.0", features = ["sync"] }

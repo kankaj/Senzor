@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use crate::render::MessageProperties;
+use crate::render::{MessageProperties, Payload};
 use crate::value::Value;
 
 /// How many published messages the shared log keeps.
@@ -89,7 +89,7 @@ pub struct LogEntry {
     pub time: SystemTime,
     pub instance: String,
     pub topic: String,
-    pub payload: String,
+    pub payload: Payload,
     pub qos: u8,
     pub retain: bool,
     /// The MQTT 5 properties the message was published with; empty on 3.1.1.
@@ -253,7 +253,7 @@ mod tests {
             time: SystemTime::UNIX_EPOCH,
             instance: "i".into(),
             topic: format!("t/{n}"),
-            payload: String::new(),
+            payload: Payload::Text(String::new()),
             qos: 0,
             retain: false,
             properties: MessageProperties::default(),

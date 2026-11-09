@@ -229,19 +229,19 @@ impl Client {
         topic: &str,
         qos: u8,
         retain: bool,
-        payload: &str,
+        payload: &[u8],
         properties: &MessageProperties,
     ) -> Result<(), String> {
         match self {
             Client::V311(client) => client
-                .try_publish(topic, qos_v311(qos), retain, payload)
+                .try_publish(topic, qos_v311(qos), retain, payload.to_vec())
                 .map_err(|e| e.to_string()),
             Client::V5(client) => client
                 .try_publish_with_properties(
                     topic,
                     qos_v5(qos),
                     retain,
-                    payload.to_string(),
+                    payload.to_vec(),
                     publish_properties(properties),
                 )
                 .map_err(|e| e.to_string()),

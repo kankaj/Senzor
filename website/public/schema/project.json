@@ -148,6 +148,36 @@
       ],
       "type": "object"
     },
+    "Encoding": {
+      "description": "How a message's rendered payload becomes the bytes that are published.",
+      "oneOf": [
+        {
+          "const": "text",
+          "description": "The text as it is rendered, in UTF-8.",
+          "type": "string"
+        },
+        {
+          "const": "hex",
+          "description": "The text is hex digits, two per byte; whitespace is ignored.",
+          "type": "string"
+        },
+        {
+          "const": "base64",
+          "description": "The text is standard base64 with padding; whitespace is ignored.",
+          "type": "string"
+        },
+        {
+          "const": "cbor",
+          "description": "The text is JSON, published as CBOR.",
+          "type": "string"
+        },
+        {
+          "const": "protobuf",
+          "description": "The text is JSON in protobuf's JSON mapping, published as the protobuf message `message`\nof the `proto` file.",
+          "type": "string"
+        }
+      ]
+    },
     "FieldOverride": {
       "description": "Generator parameters, unit or name that replace the template field's, e.g. {\"start\": 1200}",
       "type": "object"
@@ -407,6 +437,17 @@
             "null"
           ]
         },
+        "encoding": {
+          "$ref": "#/$defs/Encoding",
+          "description": "How the rendered payload becomes the bytes that are published."
+        },
+        "message": {
+          "description": "With `encoding = \"protobuf\"`: the fully qualified message type, such as\n`sensors.v1.Reading`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message_expiry": {
           "description": "MQTT 5 message expiry interval, in whole seconds.",
           "type": [
@@ -416,6 +457,13 @@
         },
         "payload": {
           "type": "string"
+        },
+        "proto": {
+          "description": "With `encoding = \"protobuf\"`: the `.proto` file that defines `message`, relative to the\nproject file's folder.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "topic": {
           "type": "string"

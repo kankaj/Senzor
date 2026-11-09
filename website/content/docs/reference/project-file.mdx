@@ -161,14 +161,18 @@ Each entry of `messages` is one MQTT message published on every tick, with the t
 | Key | Type | Default | Rules |
 | --- | --- | --- | --- |
 | `topic` | template string | required | Must render to a non-empty topic without the wildcards `+` and `#`. |
-| `payload` | template string | required | Any text. |
+| `payload` | template string | required | Any text. With a binary `encoding`, text that encoding reads. |
+| `encoding` | string | `"text"` | How the rendered payload is published: `"text"` as it is, or as bytes from `"hex"` digits, `"base64"`, JSON as `"cbor"`, or JSON as a `"protobuf"` message. See [Binary payloads](/docs/recipes/binary-payloads). |
+| `proto` | path | none | Only with `encoding = "protobuf"`, and then required. The `.proto` file that defines `message`, relative to the folder of the project file. Its imports are looked up in its own folder, then among protobuf's well-known types. |
+| `message` | string | none | Only with `encoding = "protobuf"`, and then required. The fully qualified message type, such as `"sensors.v1.Reading"`. |
 | `message_expiry` | duration | none | MQTT 5 only. Whole seconds, from `"1s"` to 4294967295 seconds. How long the broker may keep the message for subscribers that have not received it yet, including a retained message. |
 | `content_type` | string | none | MQTT 5 only. Sent as written, for example `"application/json"`. Must not be empty. |
 | `user_properties` | table of strings | none | MQTT 5 only. Each value is a template string with the same variables as the payload; keys are sent as written, sorted by key. |
 
 `topic`, `payload` and the `user_properties` values are rendered on every tick and can use the field
 values. A message whose topic, payload and MQTT 5 properties together are larger than 1 MiB
-(1,048,576 bytes) is not published and counts as an error. An MQTT 5 broker that announces a smaller
+(1,048,576 bytes) is not published and counts as an error; a binary payload counts with the size of
+its bytes. An MQTT 5 broker that announces a smaller
 maximum packet size lowers this limit to that size minus 16 bytes.
 
 ```toml

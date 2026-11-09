@@ -15,7 +15,9 @@ use super::state::{InstanceStatus, LogEntry, Shared};
 use crate::generator::{TickContext, ValueSource};
 use crate::project::Subscription;
 use crate::project::{BrokerConfig, InstanceConfig, MqttVersion, mqtt_seconds};
-use crate::render::{Context, MessageProperties, RenderedMessage, base_context, tick_context};
+use crate::render::{
+    Context, MessageProperties, Payload, RenderedMessage, base_context, tick_context,
+};
 use crate::rng::instance_rng;
 use crate::script::{Action, Message, Runtime};
 use crate::topic::matches;
@@ -101,7 +103,13 @@ impl Availability {
     }
 
     fn publish(&self, client: &Client, payload: &str) -> Result<(), String> {
-        client.try_publish(&self.topic, 1, true, payload, &MessageProperties::default())
+        client.try_publish(
+            &self.topic,
+            1,
+            true,
+            payload.as_bytes(),
+            &MessageProperties::default(),
+        )
     }
 }
 
@@ -171,8 +179,13 @@ fn publish_announcements(
     messages: impl Iterator<Item = (String, String)>,
 ) {
     for (topic, payload) in messages {
-        let published =
-            client.try_publish(&topic, 1, true, &payload, &MessageProperties::default());
+        let published = client.try_publish(
+            &topic,
+            1,
+            true,
+            payload.as_bytes(),
+            &MessageProperties::default(),
+        );
         if let Err(e) = published {
             shared.record_error(id, &format!("announce to Home Assistant: {e}"));
         }
@@ -502,7 +515,7 @@ impl Ticker {
                     Action::Publish { topic, payload } => {
                         let message = RenderedMessage {
                             topic,
-                            payload,
+                            payload: Payload::Text(payload),
                             properties: MessageProperties::default(),
                         };
                         match self.publish(client, message, now) {
@@ -575,7 +588,8 @@ impl Ticker {
         now: SystemTime,
     ) -> Result<LogEntry, String> {
         let id = self.config.id.as_str();
-        let size = message.topic.len() + message.payload.len() + message.properties.encoded_len();
+        let size =
+            message.topic.len() + message.payload.bytes().len() + message.properties.encoded_len();
         let limit = message_limit(self.broker_max_packet_size);
         if size > limit {
             return Err(format!(
@@ -588,14 +602,16 @@ impl Ticker {
                 &message.topic,
                 self.config.qos,
                 self.config.retain,
-                &message.payload,
+                message.payload.bytes(),
                 &message.properties,
             )
             .map_err(|e| format!("publish: {e}"))?;
         // `Option` fields are logged only when `Some`.
         let properties =
             (!message.properties.is_empty()).then(|| tracing::field::debug(&message.properties));
-        tracing::debug!(instance = %id, topic = %message.topic, payload = %message.payload, properties, "publish");
+        let encoding =
+            (!message.payload.encoding().is_text()).then(|| message.payload.encoding().label());
+        tracing::debug!(instance = %id, topic = %message.topic, payload = %message.payload.text(), encoding, properties, "publish");
         Ok(LogEntry {
             // `record_publish` numbers it.
             seq: 0,
@@ -1340,7 +1356,7 @@ fields.co2 = { generator = "constant", value = 600 }"#,
         let state = running.shared.snapshot();
         let logged = state.log.iter().find(|e| e.topic == "lv/d/ack").unwrap();
         assert_eq!(
-            (logged.qos, logged.payload.as_str()),
+            (logged.qos, logged.payload.text()),
             (0, reply.payload.as_str())
         );
         let logged = state.log.iter().filter(|e| e.instance == "d").count();
@@ -1483,7 +1499,118 @@ fields.co2 = { generator = "constant", value = 600 }"#,
         };
     }
 
+    /// A project of one instance `d` with `messages` (TOML entries) and a field `v`, validated in
+    /// the folder of the test `.proto` files.
+    fn encoded_project(port: u16, version: MqttVersion, messages: &str, v: &str) -> Project {
+        let src = format!(
+            r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+mqtt_version = "{}"
+
+[[templates]]
+id = "bin"
+interval = "100ms"
+messages = [{messages}]
+fields.v = {v}
+
+[[devices]]
+id = "d"
+template = "bin"
+"#,
+            version.label()
+        );
+        let dir = crate::proto::tests::sensor_proto()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let validated = crate::project::ProjectFile::parse(&src)
+            .unwrap()
+            .validate(&dir);
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        validated.project
+    }
+
+    async fn binary_payloads_arrive_as_their_bytes(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "bin/#").await;
+        let project = encoded_project(
+            port,
+            version,
+            r#"
+    { topic = "bin/hex", payload = "{{ v | i16be }} {{ 1 | u8 }}", encoding = "hex" },
+    { topic = "bin/cbor", payload = '{"t": {{ v }}, "h": 21.5}', encoding = "cbor" },
+    { topic = "bin/proto", payload = '{"humidity": {{ v }}, "ok": true}', encoding = "protobuf", proto = "sensor.proto", message = "sensors.v1.Reading" },
+"#,
+            r#"{ generator = "constant", value = 215 }"#,
+        );
+        let running = spawn(&project, "d");
+        async fn bytes(sub: &mut Subscriber, topic: &str) -> Vec<u8> {
+            sub.wait_for(WAIT, |m| m.topic == topic)
+                .await
+                .unwrap_or_else(|| panic!("nothing on {topic}"))
+                .bytes
+        }
+        assert_eq!(bytes(&mut sub, "bin/hex").await, [0x00, 0xd7, 0x01]);
+        let cbor = crate::encoding::Encoder::Cbor
+            .encode(r#"{"t": 215, "h": 21.5}"#)
+            .unwrap();
+        assert_eq!(bytes(&mut sub, "bin/cbor").await, cbor);
+        // humidity (field 3) = 215 as a varint, ok (field 4) = 1.
+        assert_eq!(
+            bytes(&mut sub, "bin/proto").await,
+            [0x18, 0xd7, 0x01, 0x20, 0x01]
+        );
+
+        let state = running.shared.snapshot();
+        assert_eq!(state.instances["d"].errors, 0);
+        let logged = state.log.iter().find(|e| e.topic == "bin/hex").unwrap();
+        assert_eq!(
+            logged.payload,
+            Payload::Binary {
+                encoding: crate::encoding::Encoding::Hex,
+                bytes: vec![0x00, 0xd7, 0x01],
+                text: "00d7 01".into(),
+            }
+        );
+    }
+
+    async fn a_payload_that_does_not_encode_counts_an_error_and_publishes_nothing(
+        version: MqttVersion,
+    ) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "bin/#").await;
+        // The first value encodes, so the project validates; the second, held from then on,
+        // does not.
+        let project = encoded_project(
+            port,
+            version,
+            r#"{ topic = "bin/hex", payload = "{{ v }}", encoding = "hex" }"#,
+            r#"{ generator = "sequence", values = ["0a", "zz"], loop = false }"#,
+        );
+        let running = spawn(&project, "d");
+        let first = sub.wait_for(WAIT, |m| m.topic == "bin/hex").await;
+        assert_eq!(first.map(|m| m.bytes), Some(vec![0x0a]));
+        eventually(
+            || format!("{:?}", running.shared.snapshot().instances["d"]),
+            || running.shared.snapshot().instances["d"].errors >= 2,
+        )
+        .await;
+        let later = sub.collect(Duration::from_millis(300)).await;
+        assert_eq!(
+            later,
+            [],
+            "nothing published once the payload stops encoding"
+        );
+        let state = running.shared.snapshot();
+        assert_eq!(state.instances["d"].published, 1);
+        assert_eq!(state.instances["d"].status, InstanceStatus::Online);
+    }
+
     on_both_versions!(
+        binary_payloads_arrive_as_their_bytes,
+        a_payload_that_does_not_encode_counts_an_error_and_publishes_nothing,
         publishes_online_retained_and_data_on_interval,
         announces_itself_to_home_assistant_before_it_goes_online,
         stop_publishes_offline_without_last_will,

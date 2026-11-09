@@ -110,7 +110,7 @@ pub async fn clear_retained(
                     progress.accepted = true;
                     for topic in topics {
                         client
-                            .try_publish(topic, 1, true, "", &MessageProperties::default())
+                            .try_publish(topic, 1, true, b"", &MessageProperties::default())
                             .map_err(|e| format!("publish: {e}"))?;
                     }
                 }

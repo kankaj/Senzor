@@ -1,0 +1,96 @@
+---
+title: Binary payloads
+description: Publish bytes instead of text, as a packed frame built from hex digits, as CBOR or as a protobuf message.
+---
+
+Some devices do not send text. A battery sensor packs its reading into a few bytes, a gateway sends CBOR, a backend expects protobuf. A message's `encoding` lets Senzor publish such payloads: you still write the payload as a template, Senzor renders it to text as usual, and then turns the text into the bytes it publishes.
+
+| `encoding` | The rendered text is | Published as |
+| --- | --- | --- |
+| `"text"` (the default) | anything | the text itself, in UTF-8 |
+| `"hex"` | hex digits, two per byte | those bytes |
+| `"base64"` | standard base64 with `=` padding | those bytes |
+| `"cbor"` | JSON | the same value in CBOR |
+| `"protobuf"` | JSON in protobuf's JSON mapping | a protobuf message |
+
+MQTT 3.1.1 and MQTT 5 both carry binary payloads. Senzor sets no MQTT 5 content type for them; set `content_type` on the message if your subscribers want one.
+
+## The project
+
+<include lang="toml" meta='title="examples/binary-payloads.toml"'>../../../../examples/binary-payloads.toml</include>
+
+The template publishes one reading three ways, on three topics. The sections below explain each.
+
+## A frame of bytes
+
+With `encoding = "hex"`, the payload renders to hex digits and Senzor publishes the bytes they stand for. Spaces and line breaks between the digits are ignored, so you can group them as you like. An odd number of digits, or a character that is not a hex digit, is an error.
+
+The [byte filters](/docs/reference/template-variables#byte-filters) write a number as the hex digits of a binary integer or float: `u8`, `i16be`, `u32le`, `f32be` and the others. The frame of the example is a version byte, the temperature in tenths of a degree as a signed 16-bit big-endian integer, and the humidity as an unsigned 16-bit one:
+
+```toml
+payload = "01 {{ (temperature * 10) | i16be }} {{ humidity | u16be }}"
+```
+
+For 21.5 °C and 45 %, this renders `01 00d7 002d` and publishes the 5 bytes `01 00 d7 00 2d`. The integer filters round to the nearest integer, and a value out of range for the type, such as 300 for `u8`, is an error.
+
+`encoding = "base64"` works the same way for a payload you have as base64 text, such as a fixed blob in a param.
+
+## CBOR
+
+With `encoding = "cbor"`, the payload must render to JSON, and Senzor publishes the same value as [CBOR](https://cbor.io/). Integers stay integers, and numbers with a fraction or an exponent, such as `21.5` or `1.0`, stay floats. A float is written in the shortest of half, single and double precision that holds it exactly: `21.5` takes 3 bytes, `21.6` takes 9. Objects keep their keys in the order you write them.
+
+```toml
+payload = '{"temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}}'
+```
+
+## Protobuf
+
+With `encoding = "protobuf"`, the payload must render to JSON in [protobuf's JSON mapping](https://protobuf.dev/programming-guides/json/), and Senzor publishes it as the protobuf message of the type you name. Two more keys say which type:
+
+- `proto`: the `.proto` file, relative to the folder of the project file. Files it imports are looked up in its own folder, then among protobuf's well-known types, such as `google/protobuf/timestamp.proto`.
+- `message`: the fully qualified message type, the package and the message name: `sensors.v1.Reading`.
+
+<include lang="protobuf" meta='title="examples/proto/sensor.proto"'>../../../../examples/proto/sensor.proto</include>
+
+```toml
+encoding = "protobuf"
+proto = "proto/sensor.proto"
+message = "sensors.v1.Reading"
+payload = '{"device": "{{ device_id }}", "temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}, "timestampMs": "{{ now_ms }}"}'
+```
+
+In the JSON mapping, keys are the field names or their lowerCamelCase form (`timestampMs` or `timestamp_ms`), 64-bit integers can be strings, and enum values are their names. A key the message does not have, or a value of the wrong type, is an error.
+
+Senzor compiles the `.proto` file itself when it checks the project, so you need no `protoc`. A file that does not compile, or a `message` the file does not define, is a [problem](/docs/reference/validation-errors#templates) of the template. When you change the `.proto` file, Senzor reads it again the next time it checks the project: in the window, at your next edit.
+
+## Run it
+
+Start a broker as in the [Quick start](/docs/quick-start), then run the project in the GUI or the CLI:
+
+```bash
+senzor examples/binary-payloads.toml
+```
+
+```bash
+senzor-cli run examples/binary-payloads.toml
+```
+
+`mosquitto_sub` prints payloads as text by default; `-F '%t %x'` prints each topic and its payload in hex. With the broker container from the Quick start:
+
+```bash
+docker exec mosquitto mosquitto_sub -F '%t %x' -t 'senzor/#'
+```
+
+The output looks like this; your values differ:
+
+```text
+senzor/climate/frame 0100d7002d
+senzor/climate/cbor a26b74656d7065726174757265f94d606868756d6964697479182d
+senzor/climate/proto 0a07636c696d617465110000000000803540182d20d39dff8d9c34
+```
+
+In the window, the [message log](/docs/gui/window#message-log) shows each binary payload as its encoding, its size and its first 16 bytes in hex, such as `hex, 5 bytes: 01 00 d7 00 2d`. Click it to see all the bytes and the text they were encoded from. The template's preview shows the bytes too; see [Editing templates](/docs/gui/editing-templates#encoding).
+
+## When a payload does not encode
+
+Senzor renders every message once when it checks the project, and a payload whose text does not fit its encoding there is a problem of the device, at the payload: `` message 1 payload as hex: odd number of hex digits (5) ``. While running, a message whose text stops fitting, because a later value breaks it, is not published and counts as an error of its instance, as a message that fails to render does.

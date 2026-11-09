@@ -35,6 +35,9 @@ impl fmt::Display for OpenError {
 /// The project being edited: the file model, where it lives, whether it changed, and its validation.
 pub struct Document {
     path: Option<PathBuf>,
+    /// Where relative paths start while the project has no file; `None` means the working
+    /// directory.
+    untitled_folder: Option<PathBuf>,
     file: ProjectFile,
     saved: ProjectFile,
     validated: Validated,
@@ -103,30 +106,41 @@ const HISTORY: usize = 100;
 
 impl Document {
     pub fn new_empty() -> Self {
-        Self::from_file(None, ProjectFile::default())
+        Self::from_file(None, None, ProjectFile::default())
     }
 
     /// A project that has no file yet and nothing to save, such as an example.
     pub fn untitled(file: ProjectFile) -> Self {
-        Self::from_file(None, file)
+        Self::from_file(None, None, file)
+    }
+
+    /// [`Self::untitled`], with relative paths (TLS and `.proto` files) resolved against
+    /// `folder` until the project is saved, such as an example's own files.
+    pub fn untitled_in(file: ProjectFile, folder: PathBuf) -> Self {
+        Self::from_file(None, Some(folder), file)
     }
 
     pub fn open(path: &Path) -> Result<Self, OpenError> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| OpenError::Read(format!("cannot read {}: {e}", path.display())))?;
         let file = ProjectFile::parse(&text).map_err(OpenError::Parse)?;
-        let mut doc = Self::from_file(Some(path.to_path_buf()), file.clone());
+        let mut doc = Self::from_file(Some(path.to_path_buf()), None, file.clone());
         doc.schema_line = schema_line(&text);
         doc.on_file = Some(text.clone());
         doc.source = Source::new(text, file);
         Ok(doc)
     }
 
-    fn from_file(path: Option<PathBuf>, file: ProjectFile) -> Self {
-        let validated = validate_in_folder(&file, path.as_deref());
+    fn from_file(
+        path: Option<PathBuf>,
+        untitled_folder: Option<PathBuf>,
+        file: ProjectFile,
+    ) -> Self {
+        let validated = file.validate(folder_of(path.as_deref(), untitled_folder.as_deref()));
         let disk = path.as_deref().and_then(DiskStamp::of);
         Self {
             path,
+            untitled_folder,
             saved: file.clone(),
             file,
             validated,
@@ -148,6 +162,13 @@ impl Document {
 
     pub fn file(&self) -> &ProjectFile {
         &self.file
+    }
+
+    /// The folder that relative paths in the project (TLS and `.proto` files) start from: the
+    /// project file's folder or, while the project has no file, the folder it was opened in
+    /// ([`Self::untitled_in`]) or the working directory.
+    pub fn folder(&self) -> &Path {
+        folder_of(self.path.as_deref(), self.untitled_folder.as_deref())
     }
 
     pub fn validated(&self) -> &Validated {
@@ -261,7 +282,7 @@ impl Document {
     }
 
     fn revalidate(&mut self) {
-        self.validated = validate_in_folder(&self.file, self.path.as_deref());
+        self.validated = self.file.validate(self.folder());
         self.revision += 1;
     }
 
@@ -336,7 +357,7 @@ impl Document {
     pub fn save_as(&mut self, path: PathBuf) -> Result<(), String> {
         self.write(&path)?;
         self.path = Some(path);
-        self.validated = validate_in_folder(&self.file, self.path.as_deref());
+        self.validated = self.file.validate(self.folder());
         Ok(())
     }
 
@@ -498,14 +519,16 @@ fn has_other_hard_links(_file: &Metadata) -> bool {
     false
 }
 
-/// Validates `file` with relative paths (TLS files) resolved against the folder of `path`, or
-/// against the working directory while the project has no file.
-fn validate_in_folder(file: &ProjectFile, path: Option<&Path>) -> Validated {
-    let folder = match path.and_then(Path::parent) {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
-    };
-    file.validate(folder)
+/// Where relative paths start: the folder of the project file at `path`; without a file,
+/// `untitled` or else the working directory.
+fn folder_of<'a>(path: Option<&'a Path>, untitled: Option<&'a Path>) -> &'a Path {
+    match path {
+        Some(path) => match path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir,
+            _ => Path::new("."),
+        },
+        None => untitled.unwrap_or(Path::new(".")),
+    }
 }
 
 #[cfg(test)]
@@ -519,6 +542,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn an_untitled_project_reads_its_files_from_the_folder_it_was_opened_in_until_saved() {
+        let dir = temp_dir("untitled-in");
+        std::fs::write(
+            dir.join("a.proto"),
+            "syntax = \"proto3\";\nmessage A { int32 v = 1; }\n",
+        )
+        .unwrap();
+        let file = ProjectFile::parse(
+            "[[templates]]\nid = \"t\"\n\
+             messages = [{ topic = \"t\", payload = '{\"v\": 1}', encoding = \"protobuf\", \
+             proto = \"a.proto\", message = \"A\" }]\n\
+             fields.v = { generator = \"constant\", value = 1 }\n",
+        )
+        .unwrap();
+        let doc = Document::untitled_in(file.clone(), dir.clone());
+        assert_eq!(doc.folder(), dir);
+        assert!(
+            doc.validated().errors.is_empty(),
+            "{:?}",
+            doc.validated().errors
+        );
+        assert_eq!(
+            Document::untitled(file).validated().errors.len(),
+            1,
+            "the working directory has no a.proto"
+        );
+
+        let mut doc = doc;
+        let elsewhere = temp_dir("untitled-in-saved").join("p.toml");
+        doc.save_as(elsewhere.clone()).unwrap();
+        assert_eq!(doc.folder(), elsewhere.parent().unwrap());
+        assert_eq!(
+            doc.validated().errors.len(),
+            1,
+            "saved where a.proto is not"
+        );
     }
 
     const PROJECT: &str = r#"

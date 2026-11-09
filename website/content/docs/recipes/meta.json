@@ -4,6 +4,7 @@
     "ikea-zigbee2mqtt",
     "home-assistant-statestream",
     "home-assistant-discovery",
+    "binary-payloads",
     "fleet",
     "device-dropping-off",
     "ai-agent-testing",

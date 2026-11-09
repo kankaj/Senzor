@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use minijinja::value::{Rest, StringInput, ValueKind, ValueOrKwargs};
-use minijinja::{AutoEscape, Environment, UndefinedBehavior};
+use minijinja::{AutoEscape, Environment, ErrorKind, UndefinedBehavior};
 
+use crate::encoding::{Encoder, Encoding, message_encoder_located, to_hex};
 use crate::project::file::{AvailabilitySpec, MessageSpec};
 use crate::project::mqtt_seconds;
 use crate::value::Value;
@@ -37,7 +39,7 @@ pub(crate) struct TemplateError {
 }
 
 impl TemplateError {
-    fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             field: field.into(),
             message: message.into(),
@@ -49,8 +51,85 @@ impl TemplateError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedMessage {
     pub topic: String,
-    pub payload: String,
+    pub payload: Payload,
     pub properties: MessageProperties,
+}
+
+/// A message's payload: the rendered text, or for a message with a binary encoding, the bytes
+/// the text was encoded to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Payload {
+    /// Published as the text's UTF-8 bytes.
+    Text(String),
+    Binary {
+        encoding: Encoding,
+        /// What is published.
+        bytes: Vec<u8>,
+        /// The rendered text the bytes were encoded from.
+        text: String,
+    },
+}
+
+impl Payload {
+    /// The bytes that are published.
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            Payload::Text(text) => text.as_bytes(),
+            Payload::Binary { bytes, .. } => bytes,
+        }
+    }
+
+    /// The rendered text: the payload itself, or what its bytes were encoded from.
+    pub fn text(&self) -> &str {
+        match self {
+            Payload::Text(text) | Payload::Binary { text, .. } => text,
+        }
+    }
+
+    pub fn encoding(&self) -> Encoding {
+        match self {
+            Payload::Text(_) => Encoding::Text,
+            Payload::Binary { encoding, .. } => *encoding,
+        }
+    }
+
+    /// The text, for a text payload.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Payload::Text(text) => Some(text),
+            Payload::Binary { .. } => None,
+        }
+    }
+
+    /// The published bytes as lowercase hex, without spaces.
+    pub fn hex(&self) -> String {
+        to_hex(self.bytes())
+    }
+}
+
+impl From<String> for Payload {
+    fn from(text: String) -> Self {
+        Payload::Text(text)
+    }
+}
+
+impl From<&str> for Payload {
+    fn from(text: &str) -> Self {
+        Payload::Text(text.to_string())
+    }
+}
+
+/// A text payload equals its text; a binary one equals no text.
+impl PartialEq<str> for Payload {
+    fn eq(&self, other: &str) -> bool {
+        self.as_text() == Some(other)
+    }
+}
+
+impl PartialEq<&str> for Payload {
+    fn eq(&self, other: &&str) -> bool {
+        self == *other
+    }
 }
 
 /// The MQTT 5 properties a message is published with. Empty for messages that set none, and
@@ -95,10 +174,13 @@ struct CompiledMessage {
     user_properties: Vec<(String, String)>,
 }
 
-/// The compiled topic/payload templates of one template.
+/// The compiled topic/payload templates of one template, and how each message's payload is
+/// encoded.
 pub struct InstanceTemplates {
     env: Environment<'static>,
     messages: Vec<CompiledMessage>,
+    /// One per message.
+    encoders: Vec<Encoder>,
     has_availability: bool,
 }
 
@@ -119,6 +201,7 @@ fn strict_environment() -> Environment<'static> {
     env.add_filter("string", string_filter);
     env.add_filter("join", join_filter);
     env.add_filter("format", format_filter);
+    add_byte_filters(&mut env);
     env
 }
 
@@ -164,6 +247,84 @@ fn format_filter(
     minijinja::filters::format(state, format, Rest(args))
 }
 
+/// Adds the byte filters, which write a number as the hex digits of a binary integer or float,
+/// for building binary payloads with `encoding = "hex"`.
+fn add_byte_filters(env: &mut Environment<'static>) {
+    macro_rules! integer {
+        ($name:literal, $type:ty, $endian:ident) => {
+            env.add_filter($name, |value: minijinja::Value| {
+                let n = integer($name, &value, <$type>::MIN.into(), <$type>::MAX.into())?;
+                Ok::<_, minijinja::Error>(to_hex(&(n as $type).$endian()))
+            });
+        };
+    }
+    integer!("u8", u8, to_be_bytes);
+    integer!("i8", i8, to_be_bytes);
+    integer!("u16be", u16, to_be_bytes);
+    integer!("u16le", u16, to_le_bytes);
+    integer!("i16be", i16, to_be_bytes);
+    integer!("i16le", i16, to_le_bytes);
+    integer!("u32be", u32, to_be_bytes);
+    integer!("u32le", u32, to_le_bytes);
+    integer!("i32be", i32, to_be_bytes);
+    integer!("i32le", i32, to_le_bytes);
+    macro_rules! float {
+        ($name:literal, $type:ty, $endian:ident) => {
+            env.add_filter($name, |value: minijinja::Value| {
+                let x = number($name, &value)?;
+                let narrowed = x as $type;
+                if x.is_finite() && !narrowed.is_finite() {
+                    return Err(filter_error(
+                        $name,
+                        format!(
+                            "{:e} is out of range for a {}-bit float",
+                            x,
+                            8 * std::mem::size_of::<$type>()
+                        ),
+                    ));
+                }
+                Ok(to_hex(&narrowed.$endian()))
+            });
+        };
+    }
+    float!("f32be", f32, to_be_bytes);
+    float!("f32le", f32, to_le_bytes);
+    float!("f64be", f64, to_be_bytes);
+    float!("f64le", f64, to_le_bytes);
+}
+
+fn filter_error(filter: &str, message: String) -> minijinja::Error {
+    minijinja::Error::new(ErrorKind::InvalidOperation, format!("{filter}: {message}"))
+}
+
+/// `value` as a number, for the byte filter `filter`.
+fn number(filter: &str, value: &minijinja::Value) -> Result<f64, minijinja::Error> {
+    if value.kind() != ValueKind::Number {
+        return Err(filter_error(
+            filter,
+            format!("expected a number, got {}", value.kind()),
+        ));
+    }
+    f64::try_from(value.clone()).map_err(|e| filter_error(filter, e.to_string()))
+}
+
+/// `value` rounded to the nearest integer, which must lie in `min..=max`.
+fn integer(
+    filter: &str,
+    value: &minijinja::Value,
+    min: i64,
+    max: i64,
+) -> Result<i64, minijinja::Error> {
+    let rounded = number(filter, value)?.round();
+    if rounded.is_nan() || rounded < min as f64 || rounded > max as f64 {
+        return Err(filter_error(
+            filter,
+            format!("{value} is out of range ({min} to {max})"),
+        ));
+    }
+    Ok(rounded as i64)
+}
+
 fn topic_name(index: usize) -> String {
     format!("messages[{}].topic", index + 1)
 }
@@ -193,7 +354,9 @@ fn add_template(
 }
 
 impl InstanceTemplates {
-    /// Compiles all templates; the error names the first broken one.
+    /// Compiles all templates; the error names the first broken one. Each message's payload is
+    /// encoded as its `encoding` says, with `.proto` files relative to the working directory:
+    /// validation compiles with [`Self::compile_with`] and the project's folder instead.
     pub fn compile(
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
@@ -206,6 +369,33 @@ impl InstanceTemplates {
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, TemplateError> {
+        let encoders = messages
+            .iter()
+            .enumerate()
+            .map(|(i, message)| {
+                message_encoder_located(message, i, Path::new("."))
+                    .map_err(|mut problems| problems.remove(0))
+            })
+            .collect::<Result<_, _>>()?;
+        Self::compile_with_located(messages, availability, encoders)
+    }
+
+    /// Compiles all templates, with one encoder per message.
+    pub fn compile_with(
+        messages: &[MessageSpec],
+        availability: Option<&AvailabilitySpec>,
+        encoders: Vec<Encoder>,
+    ) -> Result<Self, String> {
+        Self::compile_with_located(messages, availability, encoders).map_err(|e| e.message)
+    }
+
+    /// [`Self::compile_with`], with the key path of the broken template.
+    pub(crate) fn compile_with_located(
+        messages: &[MessageSpec],
+        availability: Option<&AvailabilitySpec>,
+        encoders: Vec<Encoder>,
+    ) -> Result<Self, TemplateError> {
+        assert_eq!(encoders.len(), messages.len(), "one encoder per message");
         #[cfg(test)]
         compile_count::record(messages);
         let mut env = strict_environment();
@@ -237,8 +427,14 @@ impl InstanceTemplates {
         Ok(Self {
             env,
             messages: compiled,
+            encoders,
             has_availability: availability.is_some(),
         })
+    }
+
+    /// How each message's payload is encoded, in message order.
+    pub fn encoders(&self) -> &[Encoder] {
+        &self.encoders
     }
 
     /// Renders the availability topic, or `None` when the template has no availability.
@@ -308,8 +504,25 @@ impl InstanceTemplates {
         ctx: &Context,
     ) -> Result<RenderedMessage, TemplateError> {
         let topic = self.render_topic(i, message, ctx)?;
-        let payload = render_named(&self.env, &message.payload, ctx)
+        let text = render_named(&self.env, &message.payload, ctx)
             .map_err(|e| TemplateError::new(&message.payload, e))?;
+        let payload = match &self.encoders[i] {
+            Encoder::Text => Payload::Text(text),
+            encoder => {
+                let encoding = encoder.encoding();
+                let bytes = encoder.encode(&text).map_err(|e| {
+                    TemplateError::new(
+                        &message.payload,
+                        format!("message {} payload as {}: {e}", i + 1, encoding.name()),
+                    )
+                })?;
+                Payload::Binary {
+                    encoding,
+                    bytes,
+                    text,
+                }
+            }
+        };
         let user_properties = message
             .user_properties
             .iter()
@@ -724,6 +937,178 @@ mod tests {
         spec.user_properties = BTreeMap::from([("room".to_string(), "{{ x ".to_string())]);
         let err = InstanceTemplates::compile(&[spec], None).err().unwrap();
         assert!(err.contains("messages[1].user_properties.room"), "{err}");
+    }
+
+    /// What `source` renders to in a payload, with no variables.
+    fn render_payload(source: &str) -> Result<String, String> {
+        let templates = InstanceTemplates::compile(&[message("t", source)], None)?;
+        templates
+            .render_messages(&tick_ctx(&BTreeMap::new()))
+            .remove(0)
+            .map(|m| m.payload.text().to_string())
+    }
+
+    #[test]
+    fn byte_filters_write_big_and_little_endian_hex() {
+        for (source, expected) in [
+            ("{{ 215 | i16be }}", "00d7"),
+            ("{{ 215 | i16le }}", "d700"),
+            ("{{ -2 | i16be }}", "fffe"),
+            ("{{ 300 | u16le }}", "2c01"),
+            ("{{ 255 | u8 }}", "ff"),
+            ("{{ -128 | i8 }}", "80"),
+            ("{{ 127 | i8 }}", "7f"),
+            ("{{ 4294967295 | u32be }}", "ffffffff"),
+            ("{{ 1 | u32le }}", "01000000"),
+            ("{{ -2147483648 | i32le }}", "00000080"),
+            ("{{ 1 | i32be }}", "00000001"),
+            ("{{ 1.5 | f32be }}", "3fc00000"),
+            ("{{ 1.5 | f32le }}", "0000c03f"),
+            ("{{ 1.5 | f64be }}", "3ff8000000000000"),
+            ("{{ 1.5 | f64le }}", "000000000000f83f"),
+            ("{{ 3 | f32be }}", "40400000"),
+        ] {
+            assert_eq!(render_payload(source), Ok(expected.into()), "{source}");
+        }
+    }
+
+    #[test]
+    fn integer_byte_filters_round_to_the_nearest_integer() {
+        for (source, expected) in [
+            ("{{ 21.4 | u8 }}", "15"),
+            ("{{ 21.5 | u8 }}", "16"),
+            ("{{ 21.6 | u16be }}", "0016"),
+            ("{{ -0.4 | u8 }}", "00"),
+            ("{{ -1.5 | i8 }}", "fe"),
+            ("{{ 255.4 | u8 }}", "ff"),
+        ] {
+            assert_eq!(render_payload(source), Ok(expected.into()), "{source}");
+        }
+    }
+
+    #[test]
+    fn each_byte_filter_writes_its_width() {
+        for (filter, digits) in [
+            ("u8", 2),
+            ("i8", 2),
+            ("u16be", 4),
+            ("u16le", 4),
+            ("i16be", 4),
+            ("i16le", 4),
+            ("u32be", 8),
+            ("u32le", 8),
+            ("i32be", 8),
+            ("i32le", 8),
+            ("f32be", 8),
+            ("f32le", 8),
+            ("f64be", 16),
+            ("f64le", 16),
+        ] {
+            let rendered = render_payload(&format!("{{{{ 0 | {filter} }}}}")).unwrap();
+            assert_eq!(rendered, "0".repeat(digits), "{filter}");
+        }
+    }
+
+    #[test]
+    fn a_value_out_of_range_for_a_byte_filter_is_an_error() {
+        for (source, expected) in [
+            ("{{ 256 | u8 }}", "u8: 256 is out of range (0 to 255)"),
+            ("{{ 255.5 | u8 }}", "u8: 255.5 is out of range (0 to 255)"),
+            ("{{ -1 | u16be }}", "u16be: -1 is out of range (0 to 65535)"),
+            ("{{ 128 | i8 }}", "i8: 128 is out of range (-128 to 127)"),
+            (
+                "{{ 2147483648 | i32le }}",
+                "i32le: 2147483648 is out of range (-2147483648 to 2147483647)",
+            ),
+            (
+                "{{ 1e39 | f32be }}",
+                "f32be: 1e39 is out of range for a 32-bit float",
+            ),
+            ("{{ 'a' | u8 }}", "u8: expected a number, got string"),
+            ("{{ true | i16be }}", "i16be: expected a number, got bool"),
+        ] {
+            let error = render_payload(source).unwrap_err();
+            assert!(error.contains(expected), "{source}: {error}");
+        }
+    }
+
+    fn encoded(source: &str, encoding: Encoding) -> MessageSpec {
+        MessageSpec {
+            encoding,
+            ..message("t", source)
+        }
+    }
+
+    #[test]
+    fn a_binary_message_keeps_its_text_and_publishes_the_bytes() {
+        let templates = InstanceTemplates::compile(
+            &[encoded("{{ 215 | i16be }} {{ 1 | u8 }}", Encoding::Hex)],
+            None,
+        )
+        .unwrap();
+        let rendered = templates
+            .render_messages(&tick_ctx(&BTreeMap::new()))
+            .remove(0)
+            .unwrap();
+        assert_eq!(
+            rendered.payload,
+            Payload::Binary {
+                encoding: Encoding::Hex,
+                bytes: vec![0x00, 0xd7, 0x01],
+                text: "00d7 01".into(),
+            }
+        );
+        assert_eq!(rendered.payload.bytes(), [0x00, 0xd7, 0x01]);
+        assert_eq!(rendered.payload.text(), "00d7 01");
+        assert_eq!(rendered.payload.encoding(), Encoding::Hex);
+    }
+
+    #[test]
+    fn a_text_message_publishes_its_text() {
+        let payload = Payload::from("21.5");
+        assert_eq!(payload, Payload::Text("21.5".into()));
+        assert_eq!(payload.bytes(), b"21.5");
+        assert_eq!(payload.text(), "21.5");
+        assert_eq!(payload.encoding(), Encoding::Text);
+    }
+
+    #[test]
+    fn a_payload_that_does_not_encode_is_an_error_at_the_payload() {
+        let templates = InstanceTemplates::compile(
+            &[
+                encoded("{{ 2 | u8 }}z", Encoding::Hex),
+                encoded("{co2: 1}", Encoding::Cbor),
+            ],
+            None,
+        )
+        .unwrap();
+        let ctx = tick_ctx(&BTreeMap::new());
+        let rendered: Vec<_> = templates.render_messages_located(&ctx).collect();
+        assert_eq!(
+            rendered[0],
+            Err(TemplateError::new(
+                "messages[1].payload",
+                "message 1 payload as hex: `z` is not a hex digit"
+            ))
+        );
+        let error = rendered[1].clone().unwrap_err();
+        assert_eq!(error.field, "messages[2].payload");
+        assert!(
+            error
+                .message
+                .starts_with("message 2 payload as CBOR: not JSON: "),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn templates_with_the_same_messages_differ_by_their_encoders() {
+        let messages = [message("t", "{{ 1 | u8 }}")];
+        let text = InstanceTemplates::compile(&messages, None).unwrap();
+        let hex = InstanceTemplates::compile_with(&messages, None, vec![Encoder::Hex]).unwrap();
+        assert_eq!(text.encoders(), [Encoder::Text]);
+        assert_eq!(hex.encoders(), [Encoder::Hex]);
     }
 
     fn id_context() -> Context {

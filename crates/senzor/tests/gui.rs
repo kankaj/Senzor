@@ -106,11 +106,11 @@ fn export_saves_the_logged_messages_as_csv() {
     let mut lines = text.lines();
     assert_eq!(
         lines.next(),
-        Some("time,instance,topic,qos,retained,payload")
+        Some("time,instance,topic,qos,retained,payload,encoding")
     );
     let first = lines.next().unwrap();
     assert!(first.contains(",gui/office-"), "{first}");
-    assert!(first.ends_with(",0,false,600"), "{first}");
+    assert!(first.ends_with(",0,false,600,text"), "{first}");
 }
 
 #[test]

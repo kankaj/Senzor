@@ -27,9 +27,30 @@ async fn subscriber_receives_messages_from_a_3_1_1_client_on_the_other_listener(
         Some(Received {
             topic: "kit/a".into(),
             payload: "hello".into(),
+            bytes: b"hello".to_vec(),
             ..Received::default()
         })
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscriber_records_binary_payloads_byte_for_byte() {
+    let ports = start_broker_ports();
+    let mut subscriber = Subscriber::connect(ports.v5, "kit/#").await;
+    let (client, mut eventloop) =
+        AsyncClient::new(MqttOptions::new("kit-pub-bin", "127.0.0.1", ports.v311), 10);
+    let bytes = vec![0x00, 0xff, 0xc3, 0x28, 0x0a];
+    client
+        .publish("kit/bin", QoS::AtLeastOnce, false, bytes.clone())
+        .await
+        .unwrap();
+    tokio::spawn(async move { while eventloop.poll().await.is_ok() {} });
+
+    let got = subscriber
+        .wait_for(Duration::from_secs(5), |m| m.topic == "kit/bin")
+        .await
+        .unwrap();
+    assert_eq!(got.bytes, bytes, "not valid UTF-8, kept as sent");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -346,6 +346,16 @@ fn status_color(status: &InstanceStatus) -> Color32 {
 }
 
 /// A small filled circle in the status colour.
+/// `bytes` as a hex dump, with as many bytes a line as fit the width left.
+pub fn hex_dump_label(ui: &mut egui::Ui, bytes: &[u8]) -> egui::Response {
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    let glyph = ui.fonts_mut(|fonts| fonts.glyph_width(&font, '0')).max(1.0);
+    let chars = (ui.available_width() / glyph) as usize;
+    let per_line = crate::format::hex_dump_line_bytes(bytes.len(), chars);
+    let dump = egui::RichText::new(crate::format::hex_dump(bytes, per_line)).monospace();
+    ui.add(egui::Label::new(dump).extend())
+}
+
 pub fn status_dot(ui: &mut egui::Ui, status: &InstanceStatus) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
     ui.painter()

@@ -37,20 +37,25 @@ impl LogFilter {
 }
 
 /// The messages as CSV with a header row, for a spreadsheet: time (RFC 3339, UTC), instance,
-/// topic, QoS, retained and payload.
+/// topic, QoS, retained, payload and encoding. A binary payload is written as hex.
 pub fn csv(entries: &[&LogEntry]) -> String {
-    let mut out = String::from("time,instance,topic,qos,retained,payload\n");
+    let mut out = String::from("time,instance,topic,qos,retained,payload,encoding\n");
     for entry in entries {
         let time = humantime::format_rfc3339_millis(entry.time).to_string();
         let qos = entry.qos.to_string();
         let retain = entry.retain.to_string();
+        let payload = match entry.payload.as_text() {
+            Some(text) => text.to_string(),
+            None => entry.payload.hex(),
+        };
         let cells = [
             time.as_str(),
             &entry.instance,
             &entry.topic,
             &qos,
             &retain,
-            &entry.payload,
+            &payload,
+            entry.payload.encoding().label(),
         ];
         let row: Vec<String> = cells.iter().map(|cell| csv_cell(cell)).collect();
         out.push_str(&row.join(","));
@@ -81,6 +86,9 @@ pub fn pretty_payload(payload: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, SystemTime};
+
+    use senzor_core::encoding::Encoding;
+    use senzor_core::render::Payload;
 
     use super::*;
 
@@ -141,9 +149,26 @@ mod tests {
         let refs: Vec<&LogEntry> = rows.iter().collect();
         assert_eq!(
             csv(&refs),
-            "time,instance,topic,qos,retained,payload\n\
-             2026-11-06T16:00:00.123Z,office-0,b/office/state,1,true,\"{\"\"co2\"\": 600, \"\"note\"\": \"\"a \"\"\"\"b\"\"\"\"\"\"}\"\n\
-             2026-11-06T16:00:00.123Z,lab-0,b/lab/state,1,true,plain\n"
+            "time,instance,topic,qos,retained,payload,encoding\n\
+             2026-11-06T16:00:00.123Z,office-0,b/office/state,1,true,\"{\"\"co2\"\": 600, \"\"note\"\": \"\"a \"\"\"\"b\"\"\"\"\"\"}\",text\n\
+             2026-11-06T16:00:00.123Z,lab-0,b/lab/state,1,true,plain,text\n"
+        );
+    }
+
+    #[test]
+    fn csv_writes_a_binary_payload_as_hex() {
+        let row = LogEntry {
+            payload: Payload::Binary {
+                encoding: Encoding::Cbor,
+                bytes: vec![0xa1, 0x61, 0x76, 0x01],
+                text: r#"{"v": 1}"#.into(),
+            },
+            ..entry("office-0", "b/office/state", "")
+        };
+        assert_eq!(
+            csv(&[&row]),
+            "time,instance,topic,qos,retained,payload,encoding\n\
+             2026-11-06T16:00:00.123Z,office-0,b/office/state,1,true,a1617601,cbor\n"
         );
     }
 

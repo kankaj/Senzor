@@ -16,7 +16,7 @@ The first release.
 - Simulate MQTT sensors from templates: one template gives as many devices and instances as you need, each with its own connection.
 - A desktop window to edit a project, start and stop devices, pin values and watch every message, and `senzor-cli` to run the same project in a terminal, in Docker or in CI.
 - MQTT 5 by default, with message expiry, content type, user properties and a delayed Last Will; MQTT 3.1.1 can be chosen per project.
-- Built-in templates and seven example projects to start from.
+- Built-in templates and eight example projects to start from.
 - Scripts in Rhai compute field values, and subscriptions let simulated devices take commands: change their state, pin a field or answer.
 - Simulated devices can appear in Home Assistant by themselves, through MQTT Discovery.
 - Problems are shown next to the box they are about, and a device with problems does not start.
@@ -28,6 +28,7 @@ The first release.
 
 - One TOML project file holds the broker settings, templates and devices. A template defines topics, payloads, fields and the interval; a device runs it `count` times.
 - Topics and payloads are Jinja templates, so payloads can be JSON, plain numbers or any text format.
+- Binary payloads: a message's `encoding` turns its rendered payload into bytes, from hex digits (`hex`), base64 (`base64`), or JSON as CBOR (`cbor`) or as a protobuf message of a `.proto` file (`protobuf`, with `proto` and `message`). Filters such as `u8`, `i16be` and `f32le` write a number as the hex digits of a binary integer or float. The `binary-payloads` example uses all three.
 - Field generators: `constant`, `random_walk`, `sine`, `uniform` and `sequence`, with optional noise, and per-device field overrides.
 - The `script` generator computes a field's value with a Rhai script, from its previous value, the time, the params, the other fields and a `state` shared by the instance's scripts. Scripts are compiled when the project is checked and limited in how long they run and how much they build.
 - Subscriptions (`[[templates.subscriptions]]`): each instance subscribes to topic filters, with `+` and `#`, and runs a script for every message that arrives. The script sees the topic, the payload and the payload read as JSON, and can change `state`, pin and unpin fields, and publish replies. The `thermostat` example takes a setpoint and a mode this way.
@@ -52,7 +53,7 @@ The first release.
 #### Window
 
 - A device tree with search, a status filter and "4/5 online" counts, an editor for devices, templates and the broker, and a live preview of every template.
-- A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, export to CSV and a Clear button.
+- A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, export to CSV and a Clear button. Binary payloads show as hex, with their encoding and size.
 - A Problems tab, and a status bar with the broker state, instance counts and messages per second.
 - A `?` next to every setting that explains it and opens its documentation.
 - Select several instances with Ctrl+click or Shift+click to start, stop, restart, kill or pin a field on all of them.
