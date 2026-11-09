@@ -242,7 +242,15 @@ fn mqtt_probe(port: u16, protocol: Protocol) -> std::io::Result<()> {
 
 /// Sends a raw CONNECT and returns the connection once an accepting CONNACK arrived.
 fn mqtt_connect(port: u16, protocol: Protocol) -> std::io::Result<std::net::TcpStream> {
-    const CLIENT_ID: &[u8] = b"testkit-probe";
+    // A client ID of its own for every probe: probes that follow each other with one ID make the
+    // broker take the previous session over, which can drop the new connection.
+    static NEXT_PROBE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let client_id = format!(
+        "testkit-probe-{}-{}",
+        std::process::id(),
+        NEXT_PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let client_id = client_id.as_bytes();
     // Protocol name "MQTT", the level, connect flags: clean session, keep-alive 60 s; MQTT 5
     // adds an empty property list.
     let mut variable_header = vec![0x00, 0x04, b'M', b'Q', b'T', b'T', protocol.level(), 0x02];
@@ -251,10 +259,10 @@ fn mqtt_connect(port: u16, protocol: Protocol) -> std::io::Result<std::net::TcpS
         variable_header.push(0x00);
     }
     // The remaining length counts the variable header and the length-prefixed client ID.
-    let mut connect = vec![0x10, (variable_header.len() + 2 + CLIENT_ID.len()) as u8];
+    let mut connect = vec![0x10, (variable_header.len() + 2 + client_id.len()) as u8];
     connect.extend_from_slice(&variable_header);
-    connect.extend_from_slice(&[0x00, CLIENT_ID.len() as u8]);
-    connect.extend_from_slice(CLIENT_ID);
+    connect.extend_from_slice(&[0x00, client_id.len() as u8]);
+    connect.extend_from_slice(client_id);
 
     let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))?;
     stream.set_read_timeout(Some(Duration::from_millis(500)))?;

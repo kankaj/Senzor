@@ -2033,7 +2033,20 @@ fn instances_failing_together_show_one_notification() {
     let notifier = RecordingNotifier::default();
     let mut harness = notifying_app(path, Default::default(), &notifier);
     set_focused(&mut harness, false);
-    click(&mut harness, "Start all");
+    harness.get_by_label("Start all").click();
+    harness.step();
+    // The window sees failures when it draws. Both fail before it draws again, so they fall in
+    // one gathering window however slowly the second one fails on a busy machine.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !["office-0", "office-1"].iter().all(|id| {
+        matches!(
+            harness.state().engine_state().instances[*id].status,
+            InstanceStatus::Failed { .. }
+        )
+    }) {
+        assert!(Instant::now() < deadline, "both instances fail");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     wait_until(&mut harness, "a notification", |_| {
         !notifier.shown().is_empty()
     });
