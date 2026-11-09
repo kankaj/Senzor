@@ -1044,7 +1044,7 @@ template = "slow"
         assert_eq!(
             co2_override(&h),
             Some(table(
-                "generator = \"sine\"\ncenter = 0.0\namplitude = 1.0\nperiod = \"1m\"\nphase = \"0s\""
+                "generator = \"sine\"\ncenter = 0.0\namplitude = 1.0\nperiod = \"1m\""
             ))
         );
         let validated = h.state().doc.validated();

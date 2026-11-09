@@ -31,8 +31,12 @@ pub enum GeneratorSpec {
         #[cfg_attr(feature = "schema", schemars(with = "String"))]
         #[serde(with = "humantime_serde")]
         period: Duration,
-        #[cfg_attr(feature = "schema", schemars(with = "String"))]
-        #[serde(default, with = "humantime_serde")]
+        #[cfg_attr(feature = "schema", schemars(with = "String", extend("default" = "0s")))]
+        #[serde(
+            default,
+            with = "humantime_serde",
+            skip_serializing_if = "Duration::is_zero"
+        )]
         phase: Duration,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         noise: Option<f64>,

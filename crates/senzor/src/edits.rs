@@ -376,12 +376,18 @@ pub fn override_setting(table: &mut toml::Table, view: &FieldOverride, field: &s
     let value = current
         .get(setting)
         .cloned()
+        .or_else(|| unwritten_default(setting))
         .unwrap_or_else(|| match setting {
             "noise" => toml::Value::Float(DEFAULT_NOISE),
             "name" => toml::Value::String(field.to_string()),
             _ => toml::Value::String(String::new()),
         });
     table.insert(setting.to_string(), value);
+}
+
+/// The value of a parameter the file leaves out when it has it: a sine's `phase` of zero.
+fn unwritten_default(key: &str) -> Option<toml::Value> {
+    (key == "phase").then(|| toml::Value::String("0s".to_string()))
 }
 
 /// Stops overriding `setting`. For the generator, that also drops the parameters the template's
@@ -407,9 +413,17 @@ pub fn set_override_kind(table: &mut toml::Table, kind: GeneratorKind) {
 /// Writes the settings the editor changed from `before` to `after` into the table.
 pub fn store_override_edits(table: &mut toml::Table, before: &FieldSpec, after: &FieldSpec) {
     let before = field_table(before);
-    for (key, value) in field_table(after) {
-        if key != "generator" && before.get(&key) != Some(&value) {
-            table.insert(key, value);
+    let after = field_table(after);
+    for (key, value) in &after {
+        if key != "generator" && before.get(key) != Some(value) {
+            table.insert(key.clone(), value.clone());
+        }
+    }
+    // A value edited back to one the file leaves out, such as a zero phase, must still be
+    // written, or the template's value would show through.
+    for key in before.keys().filter(|key| !after.contains_key(*key)) {
+        if let Some(value) = unwritten_default(key) {
+            table.insert(key.clone(), value);
         }
     }
 }
@@ -717,13 +731,17 @@ mod tests {
     fn every_kind_is_found_by_its_label_and_lists_the_parameters_it_writes() {
         for kind in GeneratorKind::ALL {
             assert_eq!(GeneratorKind::from_label(kind.label()), Some(kind));
-            // Every kind has noise, which is written only when set.
+            // Every kind has noise, and a sine a phase, which are written only when set.
             let written = toml::Table::try_from(default_generator(kind)).unwrap();
+            let optional = match kind {
+                GeneratorKind::Sine => &["noise", "phase"][..],
+                _ => &["noise"][..],
+            };
             let keys: BTreeSet<&str> = written
                 .keys()
                 .map(String::as_str)
                 .filter(|k| *k != "generator")
-                .chain(["noise"])
+                .chain(optional.iter().copied())
                 .collect();
             let parameters: BTreeSet<&str> = kind.parameters().iter().copied().collect();
             assert_eq!(keys, parameters, "{kind:?}");
@@ -790,6 +808,38 @@ mod tests {
         let view = FieldOverride::new(&co2_field(), &table("generator = \"square\""));
         assert_eq!(view.kind, GeneratorKind::RandomWalk);
         assert_eq!(view.unreadable, BTreeSet::from(["generator".to_string()]));
+    }
+
+    /// A sine field whose phase is `phase` (zero is not written to the file).
+    fn sine_field(phase: Duration) -> FieldSpec {
+        GeneratorSpec::Sine {
+            center: 20.0,
+            amplitude: 2.0,
+            period: Duration::from_secs(3600),
+            phase,
+            noise: None,
+        }
+        .into()
+    }
+
+    #[test]
+    fn overriding_a_phase_that_is_not_written_starts_at_zero() {
+        let template = sine_field(Duration::ZERO);
+        let view = FieldOverride::new(&template, &toml::Table::new());
+        let mut overrides = toml::Table::new();
+        override_setting(&mut overrides, &view, "t", "phase");
+        assert_eq!(overrides, table("phase = \"0s\""));
+    }
+
+    #[test]
+    fn a_phase_changed_back_to_zero_is_stored() {
+        let template = sine_field(Duration::from_secs(900));
+        let mut overrides = table("phase = \"15m\"");
+        let before = FieldOverride::new(&template, &overrides).effective;
+        store_override_edits(&mut overrides, &before, &sine_field(Duration::ZERO));
+        assert_eq!(overrides, table("phase = \"0s\""));
+        let view = FieldOverride::new(&template, &overrides);
+        assert_eq!(view.effective, sine_field(Duration::ZERO));
     }
 
     #[test]

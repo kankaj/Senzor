@@ -11,7 +11,7 @@ use rumqttc::ConnectReturnCode;
 use senzor_testkit::{Received, Subscriber, free_port, refusing_broker, start_broker};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-const BIN: &str = "senzor-cli";
+use support::BIN;
 
 fn project_toml(port: u16, autostart: bool) -> String {
     format!(
@@ -43,7 +43,7 @@ autostart = false
 
 /// Writes `content` to a project file in a fresh temp folder, removed when the result is dropped.
 fn write_project(name: &str, content: &str) -> support::TempProject {
-    support::TempProject::new("senzor-cli", name, content)
+    support::TempProject::new(BIN, name, content)
 }
 
 #[test]

@@ -1,5 +1,10 @@
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use tokio_rustls::rustls::pki_types::pem::PemObject;
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tokio_rustls::rustls::{self, ClientConfig, RootCertStore};
 
 use super::error::ProjectError;
 use super::file::{BrokerSpec, MqttVersion, TlsSpec};
@@ -180,7 +185,98 @@ fn resolve_tls(spec: &TlsSpec, base_dir: &Path) -> Result<TlsConfig, Vec<Project
     if !errors.is_empty() {
         return Err(errors);
     }
-    Ok(TlsConfig { ca, client_auth })
+    let client = match &ca {
+        Some(ca) => client_config(spec, ca, client_auth.as_ref()),
+        // A client certificate requires a CA file, so this is the plain system-roots setup.
+        None => system_client_config(),
+    }
+    .map_err(|e| vec![e])?;
+    Ok(TlsConfig {
+        ca,
+        client_auth,
+        client,
+    })
+}
+
+/// The TLS setup with `spec`'s CA file and client certificate, already read into `ca` and
+/// `client_auth`. A file that holds no PEM certificate or key is a problem here rather than
+/// a failed connect in every instance.
+fn client_config(
+    spec: &TlsSpec,
+    ca: &[u8],
+    client_auth: Option<&(Vec<u8>, Vec<u8>)>,
+) -> Result<Arc<ClientConfig>, ProjectError> {
+    let shown = |path: &Option<std::path::PathBuf>| {
+        path.as_deref()
+            .map(Path::display)
+            .map(|p| p.to_string())
+            .unwrap_or_default()
+    };
+    let mut roots = RootCertStore::empty();
+    roots.add_parsable_certificates(certificates(ca));
+    if roots.is_empty() {
+        return Err(no_certificate("ca_file", &shown(&spec.ca_file)));
+    }
+    let builder = builder()?.with_root_certificates(roots);
+    let config = match client_auth {
+        None => builder.with_no_client_auth(),
+        Some((cert, key)) => {
+            let chain = certificates(cert);
+            if chain.is_empty() {
+                return Err(no_certificate("client_cert", &shown(&spec.client_cert)));
+            }
+            let key = PrivateKeyDer::from_pem_slice(key).map_err(|_| {
+                ProjectError::broker(format!(
+                    "tls.client_key `{}` holds no PEM private key",
+                    shown(&spec.client_key)
+                ))
+                .at("tls.client_key")
+            })?;
+            builder.with_client_auth_cert(chain, key).map_err(|e| {
+                ProjectError::broker(format!("tls.client_key: {e}")).at("tls.client_key")
+            })?
+        }
+    };
+    Ok(Arc::new(config))
+}
+
+/// The TLS setup that trusts the system's certificates, built once per process: loading them
+/// takes milliseconds, and validation runs on every edit in the window.
+fn system_client_config() -> Result<Arc<ClientConfig>, ProjectError> {
+    static SYSTEM: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
+    SYSTEM
+        .get_or_init(|| {
+            let mut roots = RootCertStore::empty();
+            roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
+            if roots.is_empty() {
+                return Err("no trusted certificates found on this system; set tls.ca_file".into());
+            }
+            let builder = builder().map_err(|e| e.message)?;
+            Ok(Arc::new(
+                builder.with_root_certificates(roots).with_no_client_auth(),
+            ))
+        })
+        .clone()
+        .map_err(|e| ProjectError::broker(e).at("tls.ca_file"))
+}
+
+fn builder() -> Result<rustls::ConfigBuilder<ClientConfig, rustls::WantsVerifier>, ProjectError> {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| ProjectError::broker(format!("TLS: {e}")))
+}
+
+/// The PEM certificates in `pem`, skipping what does not parse.
+fn certificates(pem: &[u8]) -> Vec<CertificateDer<'static>> {
+    CertificateDer::pem_slice_iter(pem)
+        .filter_map(Result::ok)
+        .collect()
+}
+
+fn no_certificate(key: &str, path: &str) -> ProjectError {
+    ProjectError::broker(format!("tls.{key} `{path}` holds no PEM certificate"))
+        .at(format!("tls.{key}"))
 }
 
 #[cfg(test)]
@@ -387,43 +483,95 @@ mod tests {
         assert_eq!(messages(errors), ["a password requires a username"]);
     }
 
-    #[test]
-    fn tls_files_are_read_relative_to_base_dir() {
-        let dir = std::env::temp_dir().join(format!("senzor-tls-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("certs")).unwrap();
-        std::fs::write(dir.join("certs/ca.pem"), b"CA").unwrap();
-        let spec = BrokerSpec {
+    /// The folder of the test-only TLS files: `ca.pem`, `client.pem` and `client.key`.
+    fn tls_testdata() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/tls")
+    }
+
+    fn tls_spec(ca: Option<&str>, cert: Option<&str>, key: Option<&str>) -> BrokerSpec {
+        BrokerSpec {
             tls: Some(TlsSpec {
-                ca_file: Some(PathBuf::from("certs/ca.pem")),
-                ..TlsSpec::default()
+                ca_file: ca.map(PathBuf::from),
+                client_cert: cert.map(PathBuf::from),
+                client_key: key.map(PathBuf::from),
             }),
             ..BrokerSpec::default()
-        };
-        let broker = resolve_broker(&spec, &dir, &no_env).unwrap();
-        assert_eq!(
-            broker.tls,
-            Some(TlsConfig {
-                ca: Some(b"CA".to_vec()),
-                client_auth: None
-            })
-        );
-        std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn tls_files_are_read_relative_to_base_dir() {
+        let spec = tls_spec(Some("ca.pem"), Some("client.pem"), Some("client.key"));
+        let tls = resolve_broker(&spec, &tls_testdata(), &no_env)
+            .unwrap()
+            .tls
+            .unwrap();
+        let ca = std::fs::read(tls_testdata().join("ca.pem")).unwrap();
+        assert_eq!(tls.ca, Some(ca));
+        assert!(tls.client_auth.is_some());
+        assert!(tls.client.client_auth_cert_resolver.has_certs());
     }
 
     #[test]
     fn tls_without_ca_file_uses_system_roots() {
-        let spec = BrokerSpec {
-            tls: Some(TlsSpec::default()),
-            ..BrokerSpec::default()
+        let broker = resolve_broker(&tls_spec(None, None, None), Path::new("."), &no_env).unwrap();
+        let tls = broker.tls.unwrap();
+        assert_eq!((tls.ca, tls.client_auth), (None, None));
+    }
+
+    #[test]
+    fn the_tls_setup_is_built_once_for_every_instance() {
+        // Without a CA file it is built once per process; validation runs on every edit.
+        let first = resolve_broker(&tls_spec(None, None, None), Path::new("."), &no_env).unwrap();
+        let again = resolve_broker(&tls_spec(None, None, None), Path::new("."), &no_env).unwrap();
+        assert!(Arc::ptr_eq(
+            &first.tls.unwrap().client,
+            &again.tls.unwrap().client
+        ));
+    }
+
+    #[test]
+    fn tls_files_that_are_not_pem_are_problems_at_validation() {
+        let dir = std::env::temp_dir().join(format!("senzor-tls-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["ca.pem", "client.pem", "client.key"] {
+            std::fs::copy(tls_testdata().join(name), dir.join(name)).unwrap();
+        }
+        std::fs::write(dir.join("bad.pem"), "not a certificate").unwrap();
+        let problems = |spec: BrokerSpec| {
+            let errors = resolve_broker(&spec, &dir, &no_env).unwrap_err();
+            (fields(errors.clone()), messages(errors))
         };
-        let broker = resolve_broker(&spec, Path::new("."), &no_env).unwrap();
         assert_eq!(
-            broker.tls,
-            Some(TlsConfig {
-                ca: None,
-                client_auth: None
-            })
+            problems(tls_spec(Some("bad.pem"), None, None)),
+            (
+                some(&["tls.ca_file"]),
+                vec!["tls.ca_file `bad.pem` holds no PEM certificate".to_string()]
+            )
         );
+        assert_eq!(
+            problems(tls_spec(
+                Some("ca.pem"),
+                Some("bad.pem"),
+                Some("client.key")
+            )),
+            (
+                some(&["tls.client_cert"]),
+                vec!["tls.client_cert `bad.pem` holds no PEM certificate".to_string()]
+            )
+        );
+        assert_eq!(
+            problems(tls_spec(
+                Some("ca.pem"),
+                Some("client.pem"),
+                Some("bad.pem")
+            )),
+            (
+                some(&["tls.client_key"]),
+                vec!["tls.client_key `bad.pem` holds no PEM private key".to_string()]
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

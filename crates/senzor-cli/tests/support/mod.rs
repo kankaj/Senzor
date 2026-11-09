@@ -3,6 +3,10 @@
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
+/// The binary under test, as Cargo names it.
+#[allow(dead_code)] // Not every test binary runs it by name.
+pub const BIN: &str = "senzor-cli";
+
 /// A project file in a folder of its own under the system temp dir. The folder is removed when
 /// the value is dropped, also when the test fails.
 pub struct TempProject {

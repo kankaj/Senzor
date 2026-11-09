@@ -378,6 +378,37 @@ template = "t"
     }
 
     #[test]
+    fn a_list_or_table_as_a_value_says_which_values_are_allowed() {
+        for value in ["[1, 2]", "{ a = 1 }"] {
+            let src = format!(
+                "[[devices]]\nid = \"d\"\ntemplate = \"co2\"\nparams = {{ room = {value} }}\n"
+            );
+            let errors = ProjectFile::parse(&src).unwrap_err();
+            let message = errors[0].to_string();
+            assert!(
+                message.contains("expected a number, a boolean or a string"),
+                "{value}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sine_without_a_phase_is_written_without_one() {
+        let src = r#"
+[[templates]]
+id = "t"
+messages = [{ topic = "a", payload = "b" }]
+fields.flat = { generator = "sine", center = 20, amplitude = 2, period = "1h" }
+fields.late = { generator = "sine", center = 20, amplitude = 2, period = "1h", phase = "15m" }
+"#;
+        let file = ProjectFile::parse(src).unwrap();
+        let written = file.to_toml_string();
+        assert_eq!(written.matches("phase").count(), 1, "{written}");
+        assert!(written.contains("phase = \"15m\""), "{written}");
+        assert_eq!(ProjectFile::parse(&written).unwrap(), file);
+    }
+
+    #[test]
     fn field_unit_and_name_round_trip_and_are_omitted_when_unset() {
         let src = r#"
 [[templates]]

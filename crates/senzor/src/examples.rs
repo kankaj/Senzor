@@ -56,6 +56,28 @@ mod tests {
 
     use super::*;
 
+    /// The documentation's screenshots show these devices and the 11 instances they make: the
+    /// `window` shot's tree and status bar, `device-editor`'s "office ×5".
+    #[test]
+    fn the_showcase_has_the_devices_the_screenshots_show() {
+        let showcase = EXAMPLES.iter().find(|e| e.name == "Showcase").unwrap();
+        let devices: Vec<(String, u32)> = showcase
+            .project()
+            .devices
+            .iter()
+            .map(|d| (d.id.clone(), d.count))
+            .collect();
+        assert_eq!(
+            devices,
+            [
+                ("office".to_string(), 5),
+                ("meeting".to_string(), 2),
+                ("front-door".to_string(), 1),
+                ("lab".to_string(), 3),
+            ]
+        );
+    }
+
     #[test]
     fn every_example_is_a_valid_project() {
         for example in &EXAMPLES {

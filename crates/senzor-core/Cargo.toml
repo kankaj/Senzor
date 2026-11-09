@@ -16,11 +16,13 @@ humantime-serde.workspace = true
 minijinja.workspace = true
 rand.workspace = true
 rumqttc.workspace = true
+rustls-native-certs.workspace = true
 schemars = { workspace = true, optional = true }
 serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 toml.workspace = true
 tracing.workspace = true
 

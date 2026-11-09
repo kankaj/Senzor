@@ -60,7 +60,10 @@ A param must also not have the same name as a field of its template.
 
 - A number whose value is whole renders without a decimal point: `3`, not `3.0`. Other numbers render
   in full, e.g. `22.6789`.
-- Booleans render as `true` and `false`, so they can go into JSON as they are.
+- Booleans render as `true` and `false`, so they can go into JSON as they are. The same holds for
+  `string`, `join`, `format` and `tojson`: `{{ open | string }}` renders `true`. The `~` operator
+  is the exception: `{{ 'door ' ~ open }}` renders `door True`, so write
+  `{{ 'door ' ~ (open | string) }}`.
 - Strings render as they are. Nothing is escaped or quoted. In JSON, put a string between quotes
   yourself (`"{{ state }}"`), or use `tojson`, which adds the quotes and escapes the content.
 

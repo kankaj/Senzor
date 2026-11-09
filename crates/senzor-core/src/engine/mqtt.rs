@@ -186,16 +186,9 @@ fn v5_options(
     options
 }
 
+/// The TLS setup built at validation, shared by every instance.
 fn transport(tls: &TlsConfig) -> Transport {
-    let configuration = match &tls.ca {
-        Some(ca) => TlsConfiguration::Simple {
-            ca: ca.clone(),
-            alpn: None,
-            client_auth: tls.client_auth.clone(),
-        },
-        None => TlsConfiguration::default(),
-    };
-    Transport::Tls(configuration)
+    Transport::Tls(TlsConfiguration::Rustls(tls.client.clone()))
 }
 
 impl Client {
@@ -479,22 +472,26 @@ mod tests {
     }
 
     #[test]
-    fn tls_with_ca_uses_simple_configuration_on_both_versions() {
-        let tls = TlsConfig {
-            ca: Some(b"CA".to_vec()),
-            client_auth: None,
-        };
-        let is_simple = |transport: Transport| {
+    fn every_connection_uses_the_tls_setup_built_at_validation() {
+        let testdata = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/tls");
+        let validated =
+            crate::project::ProjectFile::parse("[broker]\ntls = { ca_file = \"ca.pem\" }\n")
+                .unwrap()
+                .validate(&testdata);
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let tls = validated.project.broker.tls.unwrap();
+        let built = tls.client.clone();
+        let uses_it = |transport: Transport| {
             matches!(
                 transport,
-                Transport::Tls(TlsConfiguration::Simple { ca, client_auth: None, .. }) if ca == b"CA".to_vec()
+                Transport::Tls(TlsConfiguration::Rustls(client)) if std::sync::Arc::ptr_eq(&client, &built)
             )
         };
         let mut config = broker(MqttVersion::V311);
         config.tls = Some(tls);
-        assert!(is_simple(v311_options(&config, "x", None).transport()));
+        assert!(uses_it(v311_options(&config, "x", None).transport()));
         config.mqtt_version = MqttVersion::V5;
-        assert!(is_simple(v5_options(&config, "x", None).transport()));
+        assert!(uses_it(v5_options(&config, "x", None).transport()));
     }
 
     #[test]

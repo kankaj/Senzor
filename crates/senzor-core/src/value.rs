@@ -1,17 +1,62 @@
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Integral numbers below this magnitude are treated as integers: a round bound just under 2^53,
 /// up to which `f64` represents every integer exactly (and far inside the `i64` range).
 const MAX_EXACT_INTEGER: f64 = 9.0e15;
 
 /// A field or param value as written in the project file and produced by generators.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
+}
+
+/// By hand rather than `untagged`, so a list or a table is refused with what is allowed instead
+/// of "did not match any variant".
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ValueVisitor;
+
+        impl Visitor<'_> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a number, a boolean or a string")
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
+                Ok(Value::Bool(v))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
+                Ok(Value::Number(v as f64))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
+                Ok(Value::Number(v as f64))
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
+                Ok(Value::Number(v))
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
+                Ok(Value::String(v.to_string()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Value, E> {
+                Ok(Value::String(v))
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor)
+    }
 }
 
 impl Value {

@@ -59,7 +59,7 @@ These come from the TOML parser and carry a line and column. The most common one
 | `` unknown variant `4`, expected `5` or `3.1.1` `` | `mqtt_version` is not `"5"` or `"3.1.1"`. |
 | `wanted string or table` | Often `mqtt_version = 5` without quotes. Write `mqtt_version = "5"`. |
 | `` missing field `generator` `` | A field table without a `generator` key. |
-| `data did not match any variant of untagged enum Value` | A param or value that is not a string, number or boolean, such as an array. |
+| `invalid type: sequence, expected a number, a boolean or a string` | A param or value that is a list, such as `[1, 2]`. A table gives the same message with `map`. |
 | `` unclosed table, expected `]` `` | A TOML syntax error. |
 
 See [Project file reference](/docs/reference/project-file) for every key and its type.
@@ -80,6 +80,10 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `` cannot read tls.<key> `<path>`: <reason> `` | A TLS file (`ca_file`, `client_cert` or `client_key`) cannot be read. Relative paths start at the folder of the project file. |
 | `tls.client_cert and tls.client_key must be set together` | Set both, or neither. |
 | `tls.client_cert requires tls.ca_file` | Add `ca_file` when you use a client certificate. |
+| `` tls.ca_file `<path>` holds no PEM certificate `` | The CA file is not a PEM certificate (`-----BEGIN CERTIFICATE-----`). The same message names `tls.client_cert` for the client certificate. |
+| `` tls.client_key `<path>` holds no PEM private key `` | The client key file is not a PEM private key. |
+| `tls.client_key: <reason>` | The client certificate and key cannot be used together, for example because the key does not belong to the certificate. |
+| `no trusted certificates found on this system; set tls.ca_file` | TLS without `ca_file` uses the system's trusted certificates, and none were found. |
 | `session_expiry must be whole seconds, got <duration>` | Write `session_expiry` in whole seconds, such as `"60s"`. |
 | `session_expiry needs MQTT 5; the broker settings use MQTT 3.1.1` | Set `session_expiry` to `"0s"` (or remove it), or switch `mqtt_version` to `"5"`. |
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use minijinja::value::ValueKind;
+use minijinja::value::{Rest, StringInput, ValueKind, ValueOrKwargs};
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 
 use crate::project::file::{AvailabilitySpec, MessageSpec};
@@ -115,7 +115,53 @@ fn strict_environment() -> Environment<'static> {
             minijinja::escape_formatter(out, state, value)
         }
     });
+    // The same for the filters that turn values into text; `~` cannot be changed this way.
+    env.add_filter("string", string_filter);
+    env.add_filter("join", join_filter);
+    env.add_filter("format", format_filter);
     env
+}
+
+/// `value`, or `true`/`false` as text when it is a boolean.
+fn lowercase_bool(value: minijinja::Value) -> minijinja::Value {
+    if value.kind() == ValueKind::Bool {
+        minijinja::Value::from(if value.is_true() { "true" } else { "false" })
+    } else {
+        value
+    }
+}
+
+fn string_filter(
+    state: &minijinja::State,
+    value: &minijinja::Value,
+) -> Result<minijinja::Value, minijinja::Error> {
+    minijinja::filters::string(state, &lowercase_bool(value.clone()))
+}
+
+fn join_filter(
+    state: &mut minijinja::State,
+    value: &minijinja::Value,
+    joiner: Option<StringInput<'_>>,
+) -> Result<minijinja::Value, minijinja::Error> {
+    let value = match (value.kind(), value.try_iter()) {
+        (ValueKind::Seq, Ok(items)) => {
+            minijinja::Value::from(items.map(lowercase_bool).collect::<Vec<_>>())
+        }
+        _ => value.clone(),
+    };
+    minijinja::filters::join(state, &value, joiner)
+}
+
+fn format_filter(
+    state: &mut minijinja::State,
+    format: &minijinja::Value,
+    Rest(args): Rest<ValueOrKwargs>,
+) -> Result<minijinja::Value, minijinja::Error> {
+    let args = args
+        .into_iter()
+        .map(|arg| ValueOrKwargs::from(lowercase_bool(arg.into_value())))
+        .collect();
+    minijinja::filters::format(state, format, Rest(args))
 }
 
 fn topic_name(index: usize) -> String {
@@ -479,6 +525,26 @@ mod tests {
             templates.render_messages(&ctx).remove(0).unwrap().payload,
             r#"{"open": true}"#
         );
+    }
+
+    #[test]
+    fn booleans_render_lowercase_through_filters_and_concatenation() {
+        let values = BTreeMap::from([("open".to_string(), Value::Bool(true))]);
+        let ctx = tick_ctx(&values);
+        for (source, expected) in [
+            ("{{ open | string }}", "true"),
+            ("{{ 'door ' ~ (open | string) }}", "door true"),
+            ("{{ '%s' | format(open) }}", "true"),
+            ("{{ open | tojson }}", "true"),
+            ("{{ [open, false] | join(',') }}", "true,false"),
+        ] {
+            let templates = InstanceTemplates::compile(&[message("t", source)], None).unwrap();
+            assert_eq!(
+                templates.render_messages(&ctx).remove(0).unwrap().payload,
+                expected,
+                "{source}"
+            );
+        }
     }
 
     #[test]

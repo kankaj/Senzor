@@ -4,7 +4,8 @@
 // it exits non-zero on a problem.
 //
 // Not covered: JSX expression attributes (`href={...}`), external links, and the content of
-// `<include>`d .md/.mdx files (the current includes are TOML code).
+// `<include>`d .md/.mdx files (the current includes are TOML code). A protocol-relative link
+// (`//host/...`) is reported: write external links with `https://`.
 //
 // This is the "Validate links" setup from the Fumadocs docs (next-validate-link). The usual
 // guide reads pages through the `source` object, which needs a runtime MDX loader outside the
@@ -106,15 +107,28 @@ const rawImageSource = (node) => {
   const src = node.attributes.find(
     (attr) => attr.type === 'mdxJsxAttribute' && attr.name === 'src',
   )?.value;
-  return typeof src === 'string' && src.startsWith('/') ? src : undefined;
+  return typeof src === 'string' && src.startsWith('/') && !src.startsWith('//')
+    ? src
+    : undefined;
+};
+
+// `//host/path` is an external link without a scheme; the validator would take it for a page.
+const isProtocolRelative = (href) => href.startsWith('//');
+
+// The validator parses the whole file as MDX, but front matter is YAML: blank it out, keeping
+// its lines so that reported line numbers still match the file.
+const withoutFrontmatter = (content) => {
+  const body = frontmatter(content).content;
+  const head = content.slice(0, content.length - body.length);
+  return '\n'.repeat(head.split('\n').length - 1) + body;
 };
 
 // Each page is validated on its own so that a same-page link (`#anchor`), which the library
 // skips because it has no path, can be rewritten to the page's own URL.
 const validatePage = async (page) => {
-  const rawImages = [];
+  const extra = [];
   const [result] = await validateFiles(
-    [{ path: page.absolutePath, content: page.content, url: page.url }],
+    [{ path: page.absolutePath, content: withoutFrontmatter(page.content), url: page.url }],
     {
       scanned,
       whitelist: publicFileExists,
@@ -124,7 +138,7 @@ const validatePage = async (page) => {
         onNode: (node) => {
           const src = rawImageSource(node);
           if (src !== undefined) {
-            rawImages.push({
+            extra.push({
               url: src,
               line: node.position.start.line,
               column: node.position.start.column,
@@ -134,16 +148,26 @@ const validatePage = async (page) => {
             });
           }
           const links = linksOf(node);
+          for (const href of links?.hrefs.filter(isProtocolRelative) ?? []) {
+            extra.push({
+              url: href,
+              line: node.position.start.line,
+              column: node.position.start.column,
+              reason: new Error('protocol-relative link, write it with https://'),
+            });
+          }
           return (
             links && {
-              hrefs: links.hrefs.map((href) => (href.startsWith('#') ? page.url + href : href)),
+              hrefs: links.hrefs
+                .filter((href) => !isProtocolRelative(href))
+                .map((href) => (href.startsWith('#') ? page.url + href : href)),
             }
           );
         },
       },
     },
   );
-  const errors = [...(result?.errors ?? []), ...rawImages].sort(
+  const errors = [...(result?.errors ?? []), ...extra].sort(
     (a, b) => a.line - b.line || a.column - b.column,
   );
   return errors.length > 0 ? { file: page.absolutePath, errors, detected: [] } : undefined;

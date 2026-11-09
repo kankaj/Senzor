@@ -1,8 +1,12 @@
 //! Every project file the documentation shows lives in `examples/` and must stay valid.
 
+#[allow(dead_code)] // Only `BIN` is used here.
+mod support;
+
 use std::path::PathBuf;
 
 use assert_cmd::Command;
+use support::BIN;
 
 fn example_files() -> Vec<PathBuf> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
@@ -49,7 +53,7 @@ fn every_example_project_is_valid() {
     for file in files {
         let text = std::fs::read_to_string(&file)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        let mut command = Command::cargo_bin("senzor-cli").unwrap();
+        let mut command = Command::cargo_bin(BIN).unwrap();
         command.arg("validate").arg(&file);
         // An example that reads its password from the environment gets a dummy one.
         for name in password_env_names(&text) {

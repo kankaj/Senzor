@@ -4,6 +4,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio_rustls::rustls::ClientConfig;
+
 use super::error::ProjectError;
 use super::field::FieldSpec;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
@@ -151,13 +153,22 @@ impl fmt::Debug for Credentials {
     }
 }
 
-/// TLS material read from disk at validation time.
-#[derive(Clone, PartialEq)]
+/// TLS material read from disk at validation time, and the TLS setup built from it once, which
+/// every instance connects with.
+#[derive(Clone)]
 pub struct TlsConfig {
     /// PEM CA certificate; `None` means system roots.
     pub ca: Option<Vec<u8>>,
     /// PEM client certificate and key (mTLS).
     pub client_auth: Option<(Vec<u8>, Vec<u8>)>,
+    /// Built from `ca` and `client_auth`, so it takes no part in the comparison.
+    pub client: Arc<ClientConfig>,
+}
+
+impl PartialEq for TlsConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.ca == other.ca && self.client_auth == other.client_auth
+    }
 }
 
 impl fmt::Debug for TlsConfig {
