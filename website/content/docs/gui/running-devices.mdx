@@ -26,7 +26,7 @@ To find devices and instances, type into the box with the magnifying glass above
 A device or instance can carry a note:
 
 - `office ×5 (has errors)`: the device cannot start, because it, its template or the broker settings have problems. The Problems tab says why. While it has errors, its instances are not listed, except those still running as orphans.
-- **restart to apply** next to an instance: the instance runs with settings that differ from the current project. Restart it to apply your edits.
+- **restart to apply** next to an instance: the broker settings or the template's availability changed, and the instance still runs with the settings it connected with. Restart it to apply your edits.
 - **device has errors** or **removed** next to an instance: the instance is an orphan (see [Orphans](#orphans)).
 
 Devices with more than 50 instances start collapsed, because laying out thousands of rows makes the window slow. Click the arrow next to the device to expand it.
@@ -60,7 +60,7 @@ The [instance view](/docs/gui/instance-view) has the same actions as buttons.
 
 ## Editing while devices run
 
-Edits do not change instances that are already running. An instance keeps the settings it started with and shows **restart to apply** until you restart it; this includes changes to the broker settings. See [Editing while running](/docs/concepts/editing-while-running).
+Most edits reach running instances at once, and the instances stay connected. A change to the broker settings or to a template's availability needs a new connection: the instances it affects keep the settings they connected with and show **restart to apply** until you restart them. See [Editing while running](/docs/concepts/editing-while-running).
 
 ## Orphans
 

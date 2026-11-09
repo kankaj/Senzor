@@ -68,6 +68,12 @@ pub fn show(
                 {
                     actions.push(Action::SaveAs);
                 }
+                if icon_button(ui, icons::FILE_CODE, "TOML")
+                    .on_hover_text("Edit the project file as text")
+                    .clicked()
+                {
+                    actions.push(Action::Select(Some(crate::selection::Selection::Source)));
+                }
                 undo_redo(ui, doc, actions);
                 ui.separator();
                 if icon_button(ui, icons::PLAY, "Start all")

@@ -84,11 +84,15 @@ steps is read whole, and then reads the file. A missing or empty file counts as 
 If the new content is valid, `run` compares each instance it runs with the same instance in the new
 content, and carries out the difference:
 
-- An instance whose settings changed restarts: it stops gracefully and starts again with the new
-  settings, such as its template, params, field overrides, interval or the project's seed.
+- An instance whose settings changed, but not how it connects, is updated: it takes the new
+  settings at once and stays connected. That covers its template, messages, fields, params, field
+  overrides, interval, QoS, retain, Home Assistant discovery and the project's seed. See
+  [Edits that apply at once](/docs/concepts/editing-while-running#edits-that-apply-at-once).
+- An instance whose template's availability changed restarts: it stops gracefully and starts again
+  with the new settings, since its Last Will is fixed for the connection.
 - An instance that is new starts, for example when a device is added or its `count` goes up.
 - An instance that is gone stops, for example when a device is removed or its `count` goes down.
-- An instance whose settings are the same keeps running untouched, without reconnecting.
+- An instance whose settings are the same keeps running untouched.
 - If anything in `[broker]` changed, every instance that keeps running restarts, since each one
   connects with those settings.
 
@@ -98,13 +102,13 @@ The devices to run are chosen as at the start: the `--only` devices, or every de
 once a later save adds it back.
 
 Each applied save logs one `INFO` line, `reloaded <PROJECT>: <changes>`. `<changes>` lists what
-happened, separated by `; `: `broker changed` when `[broker]` changed, then `restarted`, `started`
-and `stopped`, each with a list of IDs. A device ID stands for all of the device's instances; when
-only some of them change, their instance IDs are listed instead. If nothing that runs changed, it
-says `no running device changed`.
+happened, separated by `; `: `broker changed` when `[broker]` changed, then `restarted`, `updated`,
+`started` and `stopped`, each with a list of IDs. A device ID stands for all of the device's
+instances; when only some of them change, or they change in different ways, their instance IDs are
+listed instead. If nothing that runs changed, it says `no running device changed`.
 
 ```text
-2026-11-07T10:15:02.120417Z  INFO senzor_cli: reloaded project.toml: restarted office; started lab, kitchen-2; stopped door
+2026-11-07T10:15:02.120417Z  INFO senzor_cli: reloaded project.toml: restarted office; updated hall; started lab, kitchen-2; stopped door
 ```
 
 If the new content has problems, `run` keeps running as before. It logs the `WARN` line

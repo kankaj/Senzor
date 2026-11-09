@@ -59,6 +59,9 @@ const ACTIONS: &[NamedAction] = &[
     ("Add device", || Action::AddDevice),
     ("Add template", || Action::AddTemplate),
     ("Project settings", || Action::OpenBroker),
+    ("Edit the project file as text", || {
+        Action::Select(Some(crate::selection::Selection::Source))
+    }),
     ("Test the broker connection", || Action::TestConnection),
     ("Clear retained messages…", || Action::AskClearRetained),
     ("Find in the message log", || Action::FindInLog),

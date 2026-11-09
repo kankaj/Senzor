@@ -50,7 +50,8 @@ pub struct DeviceConfig {
     pub instances: Vec<InstanceConfig>,
 }
 
-/// Everything one instance needs to run. Compared to detect `needs_restart`.
+/// Everything one instance needs to run. Compared to tell whether a running instance takes an
+/// edit in place or needs a restart (`engine::Apply`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstanceConfig {
     /// The instance ID; exposed to templates as `device_id`.

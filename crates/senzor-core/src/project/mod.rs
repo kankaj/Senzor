@@ -5,6 +5,7 @@ pub mod edit;
 pub mod error;
 mod field;
 pub mod file;
+mod format;
 pub mod model;
 mod resolve;
 

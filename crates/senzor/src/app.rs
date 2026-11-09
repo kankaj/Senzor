@@ -411,6 +411,7 @@ impl SenzorApp {
             Selection::Device(_) | Selection::Instance(_) | Selection::Instances(_) => {
                 ui::LeftTab::Devices
             }
+            Selection::Source => self.ui.left_tab,
         };
         self.select(Some(selection));
     }
@@ -656,7 +657,7 @@ impl SenzorApp {
                 self.select(next);
             }
             // Applied to the document above.
-            Action::Edit(_) | Action::Rename(_) | Action::Remove(_) => {}
+            Action::Edit(_) | Action::Rename(_) | Action::Remove(_) | Action::ApplyText(_) => {}
             Action::AddDevice => {
                 let index = self.edit(edits::add_device);
                 self.reveal(Selection::Device(index));
@@ -998,6 +999,9 @@ impl eframe::App for SenzorApp {
                         &mut self.ui,
                         &mut actions,
                     ),
+                    Some(Selection::Source) => {
+                        ui::source::show(ui, &self.doc, &mut self.ui, &mut actions)
+                    }
                     None if ui::welcome::applies(&self.doc) => {
                         ui::welcome::show(ui, &self.settings.recent, &mut actions)
                     }

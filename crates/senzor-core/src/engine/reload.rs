@@ -1,10 +1,10 @@
-//! What to restart, start and stop when a running project is replaced by an edited one.
+//! What to restart, update, start and stop when a running project is replaced by an edited one.
 
 use std::collections::HashMap;
 
 use crate::project::{InstanceConfig, Project};
 
-use super::{Command, Target};
+use super::{Apply, Command, Target};
 
 /// The instance changes that bring a run of one project in line with an edited one. Instances
 /// whose configuration is the same in both keep running untouched.
@@ -12,8 +12,12 @@ use super::{Command, Target};
 pub struct Reload {
     /// The `[broker]` section changed: every instance that keeps running restarts.
     pub broker_changed: bool,
-    /// Running instances to stop and start again with their new configuration.
+    /// Running instances to stop and start again with their new configuration, which needs a new
+    /// connection ([`Apply::Restart`]).
     pub restart: Vec<String>,
+    /// Running instances that take their new configuration while they stay connected
+    /// ([`Apply::InPlace`]). The engine applies it when the project is replaced.
+    pub update: Vec<String>,
     /// Instances that did not run and now should.
     pub start: Vec<String>,
     /// Running instances that should no longer run.
@@ -25,13 +29,17 @@ pub struct Reload {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ReloadSummary {
     pub restarted: Vec<String>,
+    pub updated: Vec<String>,
     pub started: Vec<String>,
     pub stopped: Vec<String>,
 }
 
 impl ReloadSummary {
     pub fn is_empty(&self) -> bool {
-        self.restarted.is_empty() && self.started.is_empty() && self.stopped.is_empty()
+        self.restarted.is_empty()
+            && self.updated.is_empty()
+            && self.started.is_empty()
+            && self.stopped.is_empty()
     }
 }
 
@@ -53,12 +61,14 @@ impl Reload {
             ..Self::default()
         };
         for config in selected(new, new_devices) {
-            match running.get(config.id.as_str()) {
-                None => plan.start.push(config.id.clone()),
-                Some(old) if broker_changed || *old != config => {
-                    plan.restart.push(config.id.clone())
-                }
-                Some(_) => {}
+            let Some(running) = running.get(config.id.as_str()) else {
+                plan.start.push(config.id.clone());
+                continue;
+            };
+            match Apply::between(&old.broker, running, &new.broker, config) {
+                Apply::Unchanged => {}
+                Apply::InPlace => plan.update.push(config.id.clone()),
+                Apply::Restart => plan.restart.push(config.id.clone()),
             }
         }
         let wanted: Vec<&str> = selected(new, new_devices).map(|i| i.id.as_str()).collect();
@@ -70,10 +80,14 @@ impl Reload {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.restart.is_empty() && self.start.is_empty() && self.stop.is_empty()
+        self.restart.is_empty()
+            && self.update.is_empty()
+            && self.start.is_empty()
+            && self.stop.is_empty()
     }
 
-    /// The engine commands that carry out this reload, beginning with swapping in `new`.
+    /// The engine commands that carry out this reload, beginning with swapping in `new`, which
+    /// also updates the instances in [`Reload::update`].
     pub fn commands(&self, new: Project) -> Vec<Command> {
         let instance = |id: &String| Target::Instance(id.clone());
         let mut commands = vec![Command::ReplaceProject(new)];
@@ -84,8 +98,8 @@ impl Reload {
     }
 
     /// This reload by device; `old` and `new` are the projects given to [`Reload::plan`].
-    /// A device whose instances all start, restart or stop is named as a whole; otherwise the
-    /// instances that change are named and the rest keep running.
+    /// A device whose instances all start, restart, update or stop is named as a whole; otherwise
+    /// the instances that change are named and the rest keep running.
     pub fn summary(&self, old: &Project, new: &Project, new_devices: &[String]) -> ReloadSummary {
         let has = |list: &[String], id: &str| list.iter().any(|x| x == id);
         let stopped_of = |device: &str| -> Vec<String> {
@@ -108,24 +122,33 @@ impl Reload {
                 .map(|d| d.instances.iter().collect())
                 .unwrap_or_default();
             let restarted: Vec<String> = ids_in(&running, &self.restart);
+            let updated: Vec<String> = ids_in(&running, &self.update);
             let started: Vec<String> = ids_in(&running, &self.start);
             let stopped = stopped_of(device);
-            let kept = running.len() - restarted.len() - started.len();
-            if restarted.is_empty() && started.is_empty() && stopped.is_empty() {
+            if restarted.is_empty()
+                && updated.is_empty()
+                && started.is_empty()
+                && stopped.is_empty()
+            {
                 continue;
             }
+            let untouched = running.len() - restarted.len() - updated.len() - started.len();
             let whole = device.to_string();
-            match (kept, running.is_empty()) {
-                (_, true) => summary.stopped.push(whole),
-                (0, false) if restarted.is_empty() && stopped.is_empty() => {
-                    summary.started.push(whole)
+            if running.is_empty() {
+                summary.stopped.push(whole);
+            } else if untouched == 0 && updated.is_empty() {
+                if restarted.is_empty() && stopped.is_empty() {
+                    summary.started.push(whole);
+                } else {
+                    summary.restarted.push(whole);
                 }
-                (0, false) => summary.restarted.push(whole),
-                _ => {
-                    summary.restarted.extend(restarted);
-                    summary.started.extend(started);
-                    summary.stopped.extend(stopped);
-                }
+            } else if updated.len() == running.len() && stopped.is_empty() {
+                summary.updated.push(whole);
+            } else {
+                summary.restarted.extend(restarted);
+                summary.updated.extend(updated);
+                summary.started.extend(started);
+                summary.stopped.extend(stopped);
             }
         }
         summary
@@ -175,8 +198,15 @@ fields.v = {{ generator = "constant", value = 1 }}
 [[templates]]
 id = "water"
 interval = "100ms"
+availability = {{ topic = "rl/{{{{ device_id }}}}/status", online = "on", offline = "off" }}
 messages = [{{ topic = "rl/{{{{ device_id }}}}", payload = "{{{{ v }}}}" }}]
 fields.v = {{ generator = "constant", value = 2 }}
+
+[[templates]]
+id = "soil"
+interval = "1s"
+messages = [{{ topic = "rl/{{{{ device_id }}}}/soil", payload = "{{{{ v }}}}" }}]
+fields.v = {{ generator = "constant", value = 3 }}
 
 {devices}
 "#
@@ -212,27 +242,51 @@ fields.v = {{ generator = "constant", value = 2 }}
     }
 
     #[test]
-    fn a_changed_device_restarts_and_the_others_keep_running() {
+    fn a_changed_device_is_updated_and_the_others_keep_running() {
         let old = project("", &(device("a", "count = 2") + &device("b", "")));
         let new = project(
             "",
             &(device("a", "count = 2\nfields.v = { value = 5 }") + &device("b", "")),
         );
         let (plan, summary) = reload(&old, &new);
-        assert_eq!(strings(&plan.restart), ["a-0", "a-1"]);
-        assert!(plan.start.is_empty() && plan.stop.is_empty());
+        assert_eq!(strings(&plan.update), ["a-0", "a-1"]);
+        assert!(plan.restart.is_empty() && plan.start.is_empty() && plan.stop.is_empty());
         assert!(!plan.broker_changed);
-        assert_eq!(strings(&summary.restarted), ["a"]);
+        assert_eq!(strings(&summary.updated), ["a"]);
+        assert!(summary.restarted.is_empty());
         assert!(summary.started.is_empty() && summary.stopped.is_empty());
     }
 
     #[test]
-    fn a_new_template_restarts_the_device() {
+    fn a_new_template_with_another_last_will_restarts_the_device() {
         let old = project("", &device("a", ""));
         let new = project("", &device("a", "").replace("\"air\"", "\"water\""));
         let (plan, summary) = reload(&old, &new);
         assert_eq!(strings(&plan.restart), ["a"]);
+        assert!(plan.update.is_empty());
         assert_eq!(strings(&summary.restarted), ["a"]);
+    }
+
+    #[test]
+    fn a_new_template_with_the_same_connection_updates_the_device() {
+        let old = project("", &device("a", ""));
+        let new = project("", &device("a", "").replace("\"air\"", "\"soil\""));
+        let (plan, summary) = reload(&old, &new);
+        assert_eq!(strings(&plan.update), ["a"]);
+        assert!(plan.restart.is_empty());
+        assert_eq!(strings(&summary.updated), ["a"]);
+    }
+
+    #[test]
+    fn instances_of_one_device_that_change_differently_are_named() {
+        let old = project("", &device("a", "count = 2"));
+        let new = project("", &device("a", "count = 3\nfields.v = { value = 5 }"));
+        let (plan, summary) = reload(&old, &new);
+        assert_eq!(strings(&plan.update), ["a-0", "a-1"]);
+        assert_eq!(strings(&plan.start), ["a-2"]);
+        assert_eq!(strings(&summary.updated), ["a-0", "a-1"]);
+        assert_eq!(strings(&summary.started), ["a-2"]);
+        assert!(summary.restarted.is_empty() && summary.stopped.is_empty());
     }
 
     #[test]
@@ -311,13 +365,13 @@ fields.v = {{ generator = "constant", value = 2 }}
         );
         // a runs and changed; b did not run and now should; c ran and now should not.
         let plan = Reload::plan(&old, &ids(&["a", "c"]), &new, &ids(&["a", "b"]));
-        assert_eq!(strings(&plan.restart), ["a"]);
+        assert_eq!(strings(&plan.update), ["a"]);
         assert_eq!(strings(&plan.start), ["b"]);
         assert_eq!(strings(&plan.stop), ["c"]);
         let summary = plan.summary(&old, &new, &ids(&["a", "b"]));
         assert_eq!(
             (
-                strings(&summary.restarted),
+                strings(&summary.updated),
                 strings(&summary.started),
                 strings(&summary.stopped)
             ),
@@ -335,24 +389,27 @@ fields.v = {{ generator = "constant", value = 2 }}
     }
 
     /// A rename that keeps the instance IDs moves the running instance to the renamed device; it
-    /// restarts once, under the new name.
+    /// keeps running, updated, under the new name.
     #[test]
-    fn a_rename_that_keeps_the_instance_ids_restarts_under_the_new_name() {
+    fn a_rename_that_keeps_the_instance_ids_updates_under_the_new_name() {
         let old = project("", &device("a", "instance_id = \"room\""));
         let new = project("", &device("z", "instance_id = \"room\""));
         let (plan, summary) = reload(&old, &new);
-        assert_eq!(strings(&plan.restart), ["room"]);
-        assert!(plan.start.is_empty() && plan.stop.is_empty());
-        assert_eq!(strings(&summary.restarted), ["z"]);
+        assert_eq!(strings(&plan.update), ["room"]);
+        assert!(plan.restart.is_empty() && plan.start.is_empty() && plan.stop.is_empty());
+        assert_eq!(strings(&summary.updated), ["z"]);
+        assert!(summary.restarted.is_empty());
         assert!(summary.started.is_empty() && summary.stopped.is_empty());
     }
 
+    /// The engine updates instances itself when the project is replaced.
     #[test]
     fn commands_swap_the_project_first_then_act_on_instances() {
         let new = project("", &device("a", ""));
         let plan = Reload {
             broker_changed: false,
             restart: ids(&["r"]),
+            update: ids(&["u"]),
             start: ids(&["s"]),
             stop: ids(&["x"]),
         };

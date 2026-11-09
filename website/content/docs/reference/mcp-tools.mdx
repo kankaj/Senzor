@@ -39,7 +39,7 @@ description: Every tool and resource of the Senzor MCP server, with arguments, r
 | `errors` | Messages that could not be rendered or published, and failed availability `online` messages, counted the same way as `published`. |
 | `last_publish` | Time of the last published message, or `null`. |
 | `pinned` | Fields forced to a value with `pin`. |
-| `needs_restart` | Running with older settings than the project's; `restart` applies them. |
+| `needs_restart` | Running with older broker settings or availability than the project's, which need a new connection; `restart` applies them. |
 | `orphaned` | Running, but no longer in the project; it disappears once stopped. |
 
 ### Edit result
@@ -51,10 +51,10 @@ The tools that change the project return:
 | `changed` | Whether the project changed. Replacing something with an identical copy changes nothing. |
 | `problems` | Every [validation problem](/docs/reference/validation-errors) of the project now, each with `location` (e.g. `` device `office` ``) and `message`. |
 | `blocked` | Devices that cannot start because of problems. |
-| `needs_restart` | Running instances that now need a restart to use the project's settings. |
+| `needs_restart` | Running instances that now need a restart to use the project's broker settings or availability. |
 | `orphaned` | Running instances that are no longer in the project. |
 
-Edits never start, stop or restart an instance, and they do not write the file: use `save_project`.
+Edits never start, stop or restart an instance, and they do not write the file: use `save_project`. A running instance takes an edit at once and stays connected, unless the edit changes its broker settings or availability; then it is listed in `needs_restart`. See [Editing while running](/docs/concepts/editing-while-running).
 
 ## Observing
 

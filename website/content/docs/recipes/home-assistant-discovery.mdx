@@ -28,7 +28,7 @@ Within a few seconds, **Settings → Devices & services → MQTT** lists two new
 
 ## What Senzor publishes
 
-When an instance connects, it publishes one config message per field, QoS 1 and retained, before its `online` status. It publishes them again after every reconnect. The topic is `homeassistant/<component>/<instance ID>/<field>/config`, where `<component>` is `binary_sensor` for a boolean field and `sensor` for the others. Characters other than letters, digits, `_` and `-` in the instance ID and the field name become `_`, since Home Assistant does not allow them there.
+When an instance connects, it publishes one config message per field, QoS 1 and retained, before its `online` status. It publishes them again after every reconnect, and when an edit changes them while it runs ([Editing while running](/docs/concepts/editing-while-running)). The topic is `homeassistant/<component>/<instance ID>/<field>/config`, where `<component>` is `binary_sensor` for a boolean field and `sensor` for the others. Characters other than letters, digits, `_` and `-` in the instance ID and the field name become `_`, since Home Assistant does not allow them there.
 
 The CO2 field of `living_room` is announced on `homeassistant/sensor/living_room/co2/config` with:
 
@@ -74,5 +74,7 @@ The first message that holds the field in one of these ways is the one Home Assi
 ## Remove the devices from Home Assistant
 
 The config messages are retained, so the devices stay in Home Assistant after Senzor stops; they show as unavailable when the template has availability. To remove them, stop the devices and clear the retained messages: **Clear retained messages…** in the [broker settings](/docs/gui/broker-settings#clear-retained-messages), or [`senzor-cli clear-retained`](/docs/reference/cli#clear-retained). With `home_assistant = true`, the topics it clears include the config topics, and Home Assistant removes an entity when its config is cleared. Clear them before you turn `home_assistant` off: once it is off, Senzor no longer lists those topics.
+
+You can also turn `home_assistant` off while the devices run. Each running instance then clears its config messages itself, and Home Assistant removes its entities. The same happens to one entity when you remove its field from the template while the instance runs.
 
 [Home Assistant MQTT Statestream](/docs/recipes/home-assistant-statestream) is the opposite direction: it simulates what Home Assistant publishes about its own entities.

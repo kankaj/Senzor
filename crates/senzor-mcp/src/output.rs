@@ -68,7 +68,8 @@ pub struct InstanceSummary {
     pub last_publish: Option<String>,
     /// Fields forced to a value with `pin`.
     pub pinned: Vec<String>,
-    /// Running with an older configuration than the project's: `restart` applies the new one.
+    /// Running with older broker settings or availability than the project's, which take a new
+    /// connection: `restart` applies them. Other edits reach a running instance at once.
     pub needs_restart: bool,
     /// Running, but no longer in the project: it disappears once stopped.
     pub orphaned: bool,
@@ -214,7 +215,8 @@ pub struct EditOut {
     pub problems: Vec<Problem>,
     /// Devices that cannot start because of problems.
     pub blocked: Vec<String>,
-    /// Running instances whose configuration differs from the project now: `restart` them.
+    /// Running instances whose broker settings or availability differ from the project now, which
+    /// take a new connection: `restart` them. Running instances take other edits at once.
     pub needs_restart: Vec<String>,
     /// Running instances that are no longer in the project.
     pub orphaned: Vec<String>,

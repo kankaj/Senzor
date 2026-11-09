@@ -43,6 +43,9 @@ pub(crate) enum InstanceCmd {
     Kill,
     Pin(String, Value),
     Unpin(String),
+    /// Run with this configuration from now on, without reconnecting. Only for a configuration
+    /// that [`Apply::between`](super::Apply::between) finds can change in place.
+    Update(Box<InstanceConfig>),
     #[cfg(test)]
     Panic,
 }
@@ -99,15 +102,78 @@ impl Availability {
     }
 }
 
-/// Publishes one discovery message, retained with QoS 1 like the availability messages.
-fn announce(client: &Client, announcement: &Announcement) -> Result<(), String> {
-    client.try_publish(
-        &announcement.topic,
-        1,
-        true,
-        &announcement.payload,
-        &MessageProperties::default(),
-    )
+/// The Home Assistant discovery messages of a run.
+struct Discovery {
+    announced: Vec<Announcement>,
+    /// Topics announced earlier in the run but not any more, which the broker may still hold.
+    withdrawn: Vec<String>,
+}
+
+impl Discovery {
+    fn new(announced: Vec<Announcement>) -> Self {
+        Self {
+            announced,
+            withdrawn: Vec::new(),
+        }
+    }
+
+    /// Clears the withdrawn topics and publishes every announcement: on each connect.
+    fn publish_all(&mut self, client: &Client, shared: &Shared, id: &str) {
+        let clear = self.withdrawn.drain(..).map(|topic| (topic, String::new()));
+        let announce_all = self
+            .announced
+            .iter()
+            .map(|a| (a.topic.clone(), a.payload.clone()));
+        publish_announcements(client, shared, id, clear.chain(announce_all));
+    }
+
+    /// Takes the announcements of an updated configuration. While `online`, it publishes the ones
+    /// that changed and clears the ones that are gone at once; otherwise the next connect does.
+    fn update(
+        &mut self,
+        fresh: Vec<Announcement>,
+        client: &Client,
+        online: bool,
+        shared: &Shared,
+        id: &str,
+    ) {
+        let gone = self
+            .announced
+            .iter()
+            .filter(|old| !fresh.iter().any(|new| new.topic == old.topic))
+            .map(|old| old.topic.clone());
+        self.withdrawn.extend(gone);
+        self.withdrawn
+            .retain(|topic| !fresh.iter().any(|new| new.topic == *topic));
+        let changed: Vec<(String, String)> = fresh
+            .iter()
+            .filter(|new| !self.announced.contains(new))
+            .map(|a| (a.topic.clone(), a.payload.clone()))
+            .collect();
+        self.announced = fresh;
+        if online {
+            let clear = self.withdrawn.drain(..).map(|topic| (topic, String::new()));
+            publish_announcements(client, shared, id, clear.chain(changed));
+        }
+    }
+}
+
+/// Publishes `(topic, payload)` discovery messages, retained with QoS 1 like the availability
+/// messages; a failure counts as an error of `id`. An empty payload clears the retained message,
+/// and Home Assistant drops the entity.
+fn publish_announcements(
+    client: &Client,
+    shared: &Shared,
+    id: &str,
+    messages: impl Iterator<Item = (String, String)>,
+) {
+    for (topic, payload) in messages {
+        let published =
+            client.try_publish(&topic, 1, true, &payload, &MessageProperties::default());
+        if let Err(e) = published {
+            shared.record_error(id, &format!("announce to Home Assistant: {e}"));
+        }
+    }
 }
 
 async fn run(
@@ -129,9 +195,9 @@ async fn run(
             will_delay: spec.will_delay.map(mqtt_seconds),
         });
     let will = availability.as_ref().map(Availability::last_will);
-    let announcements = discovery::announcements(config, &base);
+    let mut discovery = Discovery::new(discovery::announcements(config, &base));
     let (client, mut connection) = connect(broker, id, will, REQUEST_QUEUE_CAPACITY);
-    let mut ticker = Ticker::new(config, base);
+    let mut ticker = Ticker::new(config.clone(), base);
     let mut timer = ticker.timer();
 
     shared.set_status(id, InstanceStatus::Connecting);
@@ -150,11 +216,7 @@ async fn run(
                     ticker.broker_max_packet_size = max_packet_size;
                     shared.set_status(id, InstanceStatus::Online);
                     // Before `online`, so Home Assistant knows the entities the status is for.
-                    for announcement in &announcements {
-                        if let Err(e) = announce(&client, announcement) {
-                            shared.record_error(id, &format!("announce to Home Assistant: {e}"));
-                        }
-                    }
+                    discovery.publish_all(&client, shared, id);
                     if let Some(a) = &availability
                         && let Err(e) = a.publish_online(&client)
                     {
@@ -203,6 +265,13 @@ async fn run(
                 Some(InstanceCmd::Kill) => return Ok(()),
                 Some(InstanceCmd::Pin(field, value)) => ticker.pin(shared, field, value),
                 Some(InstanceCmd::Unpin(field)) => ticker.unpin(shared, field),
+                Some(InstanceCmd::Update(config)) => {
+                    if ticker.update(*config, shared) {
+                        timer = ticker.next_timer();
+                    }
+                    let fresh = discovery::announcements(&ticker.config, &ticker.base);
+                    discovery.update(fresh, &client, online, shared, id);
+                }
                 #[cfg(test)]
                 Some(InstanceCmd::Panic) => panic!("test panic"),
             },
@@ -211,8 +280,8 @@ async fn run(
 }
 
 /// Per-run state that produces and publishes one tick.
-struct Ticker<'a> {
-    config: &'a InstanceConfig,
+struct Ticker {
+    config: InstanceConfig,
     base: Context,
     sources: BTreeMap<String, Box<dyn ValueSource>>,
     pins: BTreeMap<String, Value>,
@@ -223,11 +292,9 @@ struct Ticker<'a> {
     broker_max_packet_size: Option<u32>,
 }
 
-impl<'a> Ticker<'a> {
-    fn new(config: &'a InstanceConfig, base: Context) -> Self {
+impl Ticker {
+    fn new(config: InstanceConfig, base: Context) -> Self {
         Self {
-            config,
-            base,
             sources: config
                 .fields
                 .iter()
@@ -235,6 +302,8 @@ impl<'a> Ticker<'a> {
                 .collect(),
             pins: BTreeMap::new(),
             rng: instance_rng(config.seed, &config.id),
+            config,
+            base,
             started: Instant::now(),
             seq: 0,
             broker_max_packet_size: None,
@@ -251,6 +320,58 @@ impl<'a> Ticker<'a> {
         let mut timer = tokio::time::interval_at(self.started + offset, self.config.interval);
         timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         timer
+    }
+
+    /// A tick timer for a changed interval: its first tick comes one interval from now.
+    fn next_timer(&self) -> Interval {
+        let interval = self.config.interval;
+        let mut timer = tokio::time::interval_at(Instant::now() + interval, interval);
+        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        timer
+    }
+
+    /// Runs with `config` from the next tick on; returns whether the interval changed. A field
+    /// whose generator is the same keeps its value source, so a random walk carries on where it
+    /// is; a changed or added field starts afresh. A removed field loses its value and its pin.
+    /// `seq` and the run's start time carry on; a changed seed reseeds the instance RNG.
+    fn update(&mut self, config: InstanceConfig, shared: &Shared) -> bool {
+        let old = std::mem::replace(&mut self.config, config);
+        let config = &self.config;
+        self.base = base_context(
+            &config.id,
+            config.index,
+            &config.template_id,
+            &config.params,
+        );
+        if config.seed != old.seed {
+            self.rng = instance_rng(config.seed, &config.id);
+        }
+        let mut sources = std::mem::take(&mut self.sources);
+        self.sources = config
+            .fields
+            .iter()
+            .map(|(name, field)| {
+                let same = old
+                    .fields
+                    .get(name)
+                    .is_some_and(|f| f.generator == field.generator);
+                let source = sources
+                    .remove(name)
+                    .filter(|_| same)
+                    .unwrap_or_else(|| field.generator.build());
+                (name.clone(), source)
+            })
+            .collect();
+        self.pins.retain(|name, _| config.fields.contains_key(name));
+        shared.update_instance(&config.id, |instance| {
+            instance
+                .values
+                .retain(|name, _| config.fields.contains_key(name));
+            instance
+                .pinned
+                .retain(|name| config.fields.contains_key(name));
+        });
+        old.interval != config.interval
     }
 
     /// Publishes `value` for `field` instead of generating it; unknown fields are ignored.
@@ -273,9 +394,9 @@ impl<'a> Ticker<'a> {
     }
 
     fn tick(&mut self, client: &Client, shared: &Shared) {
-        let id = self.config.id.as_str();
         let now = SystemTime::now();
         let values = self.next_values(now);
+        let id = self.config.id.as_str();
         let render_ctx = tick_context(&self.base, &values, now, self.seq);
         shared.update_instance(id, |instance| instance.values = values);
         self.seq += 1;
@@ -390,8 +511,8 @@ mod tests {
     use crate::project::{MqttVersion, Project};
     use rumqttc::ConnectReturnCode;
     use senzor_testkit::{
-        BrokerPorts, Protocol, Subscriber, closing_broker, free_port, refusing_broker, slow_broker,
-        start_broker_ports,
+        BrokerPorts, Protocol, Received, Subscriber, closing_broker, free_port, refusing_broker,
+        slow_broker, start_broker_ports,
     };
 
     fn protocol(version: MqttVersion) -> Protocol {
@@ -730,6 +851,294 @@ template = "big"
         assert_eq!(status(&running.shared, "d"), InstanceStatus::Stopped);
     }
 
+    /// A project for device `d` of template `t`, whose keys besides its ID, interval and
+    /// availability are `template`.
+    fn live_project(port: u16, version: MqttVersion, template: &str) -> Project {
+        let version = version.label();
+        valid_project(&format!(
+            r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+mqtt_version = "{version}"
+
+[[templates]]
+id = "t"
+interval = "100ms"
+availability = {{ topic = "lv/{{{{ device_id }}}}/status", online = "online", offline = "offline" }}
+{template}
+
+[[devices]]
+id = "d"
+template = "t"
+"#
+        ))
+    }
+
+    /// Hands `d`'s configuration in `project` to the running instance.
+    fn update(running: &Running, project: &Project) {
+        let config = project.instance("d").unwrap().clone();
+        running
+            .commands
+            .send(InstanceCmd::Update(Box::new(config)))
+            .unwrap();
+    }
+
+    /// Adds messages to `seen` until one in it satisfies `done`, and returns the first such;
+    /// fails after [`WAIT`].
+    async fn record_until(
+        sub: &mut Subscriber,
+        seen: &mut Vec<Received>,
+        done: impl Fn(&Received) -> bool,
+    ) -> Received {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if let Some(found) = seen.iter().find(|m| done(m)) {
+                return found.clone();
+            }
+            assert!(Instant::now() < deadline, "timed out: {seen:#?}");
+            seen.extend(sub.collect(Duration::from_millis(50)).await);
+        }
+    }
+
+    fn on<'a>(seen: &'a [Received], topic: &str) -> Vec<&'a str> {
+        seen.iter()
+            .filter(|m| m.topic == topic)
+            .map(|m| m.payload.as_str())
+            .collect()
+    }
+
+    async fn an_update_changes_what_is_published_without_reconnecting(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let old = live_project(
+            port,
+            version,
+            r#"messages = [{ topic = "lv/{{ device_id }}/state", payload = "{{ v }}" }]
+fields.v = { generator = "constant", value = 1 }"#,
+        );
+        let running = spawn(&old, "d");
+        let mut before = Vec::new();
+        record_until(&mut sub, &mut before, |m| m.topic == "lv/d/state").await;
+        before.extend(sub.collect(Duration::from_millis(350)).await);
+        assert_eq!(on(&before, "lv/d/status"), ["online"]);
+
+        let new = live_project(
+            port,
+            version,
+            r#"qos = 1
+retain = true
+messages = [{ topic = "lv/{{ device_id }}/data", payload = "{{ v }}/{{ seq }}" }]
+fields.v = { generator = "constant", value = 2 }"#,
+        );
+        update(&running, &new);
+        let mut after = Vec::new();
+        let first = record_until(&mut sub, &mut after, |m| m.topic == "lv/d/data").await;
+        let (value, seq) = first.payload.split_once('/').unwrap();
+        assert_eq!(value, "2");
+        assert!(seq.parse::<u64>().unwrap() >= 3, "seq continues: {seq}");
+        after.extend(sub.collect(Duration::from_millis(300)).await);
+        assert_eq!(
+            on(&after, "lv/d/status"),
+            Vec::<&str>::new(),
+            "no offline, Last Will or online: the connection stays"
+        );
+        let state = running.shared.snapshot();
+        assert_eq!(state.instances["d"].status, InstanceStatus::Online);
+        let logged = state.log.back().unwrap();
+        assert_eq!((logged.qos, logged.retain), (1, true));
+    }
+
+    async fn an_update_keeps_the_state_of_unchanged_generators(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/d/state").await;
+        let numbers: Vec<String> = (1..=200).map(|n| n.to_string()).collect();
+        let numbers = numbers.join(", ");
+        let template = |payload: &str, more: &str| {
+            format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = \"{payload}\" }}]\n\
+                 fields.n = {{ generator = \"sequence\", values = [{numbers}], loop = false }}\n{more}"
+            )
+        };
+        let old = live_project(
+            port,
+            version,
+            &template(
+                "{{ n }} {{ c }}",
+                "fields.c = { generator = \"constant\", value = \"a\" }",
+            ),
+        );
+        let running = spawn(&old, "d");
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |m| m.payload == "4 a").await;
+
+        let new = live_project(
+            port,
+            version,
+            &template(
+                "{{ n }} {{ c }} {{ m }}",
+                &format!(
+                    "fields.c = {{ generator = \"constant\", value = \"b\" }}\n\
+                     fields.m = {{ generator = \"sequence\", values = [{numbers}], loop = false }}"
+                ),
+            ),
+        );
+        update(&running, &new);
+        let first = record_until(&mut sub, &mut seen, |m| m.payload.contains(" b ")).await;
+        let parts: Vec<u32> = first
+            .payload
+            .split(" b ")
+            .map(|n| n.parse().unwrap())
+            .collect();
+        assert!(parts[0] > 4, "n carries on: {}", first.payload);
+        assert_eq!(
+            parts[1], 1,
+            "the added field starts afresh: {}",
+            first.payload
+        );
+    }
+
+    async fn an_update_drops_the_pin_of_a_removed_field(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/d/state").await;
+        let old = live_project(
+            port,
+            version,
+            r#"messages = [{ topic = "lv/{{ device_id }}/state", payload = "{{ a }} {{ b }}" }]
+fields.a = { generator = "constant", value = 1 }
+fields.b = { generator = "constant", value = 1 }"#,
+        );
+        let running = spawn(&old, "d");
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |m| m.payload == "1 1").await;
+        for field in ["a", "b"] {
+            running
+                .commands
+                .send(InstanceCmd::Pin(field.into(), Value::Number(5.0)))
+                .unwrap();
+        }
+        record_until(&mut sub, &mut seen, |m| m.payload == "5 5").await;
+
+        let new = live_project(
+            port,
+            version,
+            r#"messages = [{ topic = "lv/{{ device_id }}/state", payload = "a={{ a }}" }]
+fields.a = { generator = "constant", value = 1 }"#,
+        );
+        update(&running, &new);
+        record_until(&mut sub, &mut seen, |m| m.payload == "a=5").await;
+        let instance = running.shared.snapshot().instances["d"].clone();
+        assert_eq!(
+            instance.pinned.iter().collect::<Vec<_>>(),
+            ["a"],
+            "the pin of the kept field stays"
+        );
+        assert_eq!(
+            instance.values.keys().collect::<Vec<_>>(),
+            ["a"],
+            "the removed field has no value"
+        );
+        running
+            .commands
+            .send(InstanceCmd::Pin("b".into(), Value::Number(7.0)))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !running.shared.snapshot().instances["d"]
+                .pinned
+                .contains("b")
+        );
+    }
+
+    async fn an_interval_change_takes_effect_from_the_next_tick(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/d/state").await;
+        let body = r#"messages = [{ topic = "lv/{{ device_id }}/state", payload = "{{ v }}" }]
+fields.v = { generator = "constant", value = 1 }"#;
+        let running = spawn(&live_project(port, version, body), "d");
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |_| true).await;
+
+        let slow = live_project(port, version, body);
+        let mut slow_config = slow.instance("d").unwrap().clone();
+        slow_config.interval = Duration::from_secs(10);
+        running
+            .commands
+            .send(InstanceCmd::Update(Box::new(slow_config)))
+            .unwrap();
+        // A tick already on its way may still arrive.
+        sub.collect(Duration::from_millis(150)).await;
+        let later = sub.collect(Duration::from_millis(700)).await;
+        assert!(later.is_empty(), "{later:#?}");
+    }
+
+    async fn an_update_announces_changed_entities_and_clears_dropped_ones(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "#").await;
+        let ha = |payload: &str, fields: &str| {
+            live_project(
+                port,
+                version,
+                &format!(
+                    "home_assistant = true\n\
+                     messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = '{payload}' }}]\n\
+                     {fields}"
+                ),
+            )
+        };
+        const CO2: &str = "homeassistant/sensor/d/co2/config";
+        const TEMP: &str = "homeassistant/sensor/d/temp/config";
+        let old = ha(
+            r#"{"co2": {{ co2 }}}"#,
+            r#"fields.co2 = { generator = "constant", value = 600, unit = "ppm" }"#,
+        );
+        let running = spawn(&old, "d");
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |m| m.topic == "lv/d/state").await;
+        assert_eq!(on(&seen, CO2).len(), 1, "{seen:#?}");
+
+        let more = ha(
+            r#"{"co2": {{ co2 }}, "temp": {{ temp }}}"#,
+            "fields.co2 = { generator = \"constant\", value = 600, unit = \"PPM\" }\n\
+             fields.temp = { generator = \"constant\", value = 21 }",
+        );
+        update(&running, &more);
+        let mut after = Vec::new();
+        record_until(&mut sub, &mut after, |m| m.topic == TEMP).await;
+        let co2 = record_until(&mut sub, &mut after, |m| m.topic == CO2).await;
+        let co2: serde_json::Value = serde_json::from_str(&co2.payload).unwrap();
+        assert_eq!(co2["unit_of_measurement"], "PPM");
+
+        let off = live_project(
+            port,
+            version,
+            r#"messages = [{ topic = "lv/{{ device_id }}/state", payload = '{"co2": {{ co2 }}}' }]
+fields.co2 = { generator = "constant", value = 600 }"#,
+        );
+        update(&running, &off);
+        record_until(&mut sub, &mut after, |m| {
+            m.topic == TEMP && m.payload.is_empty()
+        })
+        .await;
+        record_until(&mut sub, &mut after, |m| {
+            m.topic == CO2 && m.payload.is_empty()
+        })
+        .await;
+        assert_eq!(
+            on(&after, "lv/d/status"),
+            Vec::<&str>::new(),
+            "no reconnect"
+        );
+        let retained = Subscriber::connect(ports.v5, "homeassistant/#")
+            .await
+            .collect(Duration::from_millis(300))
+            .await;
+        assert!(
+            retained.is_empty(),
+            "Home Assistant forgets them: {retained:#?}"
+        );
+    }
+
     /// Runs each listed test once per MQTT version, as `mqtt311::<name>` and `mqtt5::<name>`.
     macro_rules! on_both_versions {
         ($($test:ident),* $(,)?) => {
@@ -763,7 +1172,12 @@ template = "big"
         payload_over_ten_kib_is_delivered_without_reconnecting,
         oversized_payload_is_counted_as_an_error_not_a_reconnect,
         connect_slower_than_the_interval_still_completes,
-        unreachable_broker_reconnects_and_stop_returns_promptly
+        unreachable_broker_reconnects_and_stop_returns_promptly,
+        an_update_changes_what_is_published_without_reconnecting,
+        an_update_keeps_the_state_of_unchanged_generators,
+        an_update_drops_the_pin_of_a_removed_field,
+        an_interval_change_takes_effect_from_the_next_tick,
+        an_update_announces_changed_entities_and_clears_dropped_ones
     );
 
     #[tokio::test(flavor = "multi_thread")]

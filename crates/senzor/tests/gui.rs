@@ -401,18 +401,47 @@ fn needs_restart(harness: &App, id: &str) -> bool {
 }
 
 #[test]
+fn an_edit_that_keeps_the_connection_needs_no_restart() {
+    let port = start_broker();
+    let path = write_project("live-edit", &project(port, true));
+    let mut app = app(Some(path), FakeDialogs::default());
+    wait_online(&mut app, "office-0");
+
+    click(&mut app, "office ×2");
+    click(&mut app, "Add param");
+    let until = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < until {
+        app.step();
+        assert!(!needs_restart(&app, "office-0"), "applied while running");
+        std::thread::sleep(FRAME_PAUSE);
+    }
+    assert!(app.query_by_label("restart to apply").is_none());
+    let instance = &app.state().engine_state().instances["office-0"];
+    assert_eq!(
+        (&instance.status, instance.runs),
+        (&InstanceStatus::Online, 1)
+    );
+}
+
+#[test]
 fn restart_applies_project_changes_to_a_running_instance() {
     let port = start_broker();
     let path = write_project("restart", &project(port, true));
     let mut app = app(Some(path), FakeDialogs::default());
     wait_online(&mut app, "office-0");
 
-    click(&mut app, "office ×2");
-    click(&mut app, "Add param");
+    // The online payload is part of the Last Will, which is fixed at connect.
+    click(&mut app, "Templates");
+    click(&mut app, "air");
+    let online = app.get_by_label("  Online payload");
+    online.focus();
+    online.type_text("!");
+    app.run();
     wait_until(&mut app, "office-0 needs a restart", |a| {
         needs_restart(a, "office-0")
     });
-
+    click(&mut app, "Devices");
+    assert_eq!(app.query_all_by_label("restart to apply").count(), 2);
     click(&mut app, "office-0");
     click(&mut app, "Restart");
     wait_until(&mut app, "office-0 online with the new settings", |a| {

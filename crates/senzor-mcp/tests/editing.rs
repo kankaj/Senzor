@@ -120,16 +120,46 @@ async fn devices_are_added_replaced_renamed_and_removed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn edits_flag_running_instances_instead_of_restarting_them() {
+async fn edits_reach_running_instances_or_flag_those_that_need_a_new_connection() {
     let agent = Agent::with_project("needs-restart").await;
+    let mut sub = Subscriber::connect(agent.port, "t/lab/#").await;
     agent.ok("start", json!({"instances": ["lab"]})).await;
+    sub.wait_for(Duration::from_secs(5), |m| m.payload == "1/2")
+        .await
+        .unwrap();
     let out = agent
         .ok(
             "put_device",
-            json!({"id": "lab", "template": "air", "autostart": false, "interval": "200ms"}),
+            json!({"id": "lab", "template": "air", "autostart": false, "interval": "200ms",
+                   "fields": {"v": {"value": 7}}}),
         )
         .await;
-    assert_eq!(names(&out["needs_restart"]), ["lab"]);
+    assert_eq!(names(&out["needs_restart"]), Vec::<&str>::new());
+    let seen = sub
+        .wait_for(Duration::from_secs(5), |m| m.payload == "7/2")
+        .await;
+    assert!(
+        seen.is_some(),
+        "the running instance publishes the new value"
+    );
+    assert_eq!(state(&agent.status_of("lab").await), "online");
+
+    let air = json!({
+        "id": "air",
+        "interval": "100ms",
+        "availability": {"topic": "t/{{ device_id }}/status", "online": "up", "offline": "offline"},
+        "messages": [{"topic": "t/{{ device_id }}/state", "payload": "{{ v }}/{{ w }}"}],
+        "fields": {
+            "v": {"generator": "constant", "value": 1},
+            "w": {"generator": "constant", "value": 2}
+        }
+    });
+    let out = agent.ok("put_template", air).await;
+    assert_eq!(
+        names(&out["needs_restart"]),
+        ["lab"],
+        "the Last Will changed"
+    );
     assert_eq!(state(&agent.status_of("lab").await), "online");
 
     let out = agent.ok("remove_device", json!({"id": "lab"})).await;

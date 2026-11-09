@@ -11,6 +11,8 @@ pub enum Selection {
     Instances(Vec<String>),
     Template(usize),
     Builtin(String),
+    /// The project file as text, in the project-file editor.
+    Source,
 }
 
 /// How an instance in the tree was clicked.

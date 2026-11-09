@@ -34,12 +34,13 @@ The first release.
 - A seed makes every run of a project draw the same values.
 - Username and password (the password can come from an environment variable), TLS and client certificates.
 - Validation collects every problem in the project with its location; only what a problem affects is blocked.
+- Saving changes only what was edited in the file: comments, the layout and how values are written stay as you wrote them.
 
 #### Running
 
 - Start, Stop, Restart and Kill for the whole project, a device or one instance. Kill drops the connection, so the broker publishes the Last Will.
 - Pin a field of a running instance to a value until you unpin it.
-- Edits to a running project mark the instances that need a restart; nothing restarts by itself.
+- Edits to a running project reach running instances at once, without a reconnect. Only a change to the broker settings or a template's availability marks the instances that need a restart; nothing restarts by itself.
 - Clear the retained messages a project leaves on the broker, in the window or with `senzor-cli clear-retained`.
 - Home Assistant MQTT Discovery: with `home_assistant = true` on a template, each instance announces itself when it connects, as a device with one entity per field. Senzor finds each field in the payload itself; the template editor names the fields it cannot find.
 
@@ -56,6 +57,7 @@ The first release.
 - The instance view shows each field's name and unit, such as `CO2` and `611.77 ppm`.
 - Field overrides in the device editor use the same boxes as the template editor, with a checkbox per setting to override it.
 - New, Open, Save, recent projects, example projects, drag and drop to open, and a question when the file changes on disk.
+- The TOML button shows the project file as text to edit by hand; Apply takes it as one undoable edit, and its comments are saved with it.
 - Undo and redo, duplicate devices and templates, keyboard shortcuts, and a test of the broker connection with presets for common brokers.
 - Settings for the theme, zoom and MCP, remembered between launches with the window's size and panels.
 - A desktop notification when instances fail while the window is in the background, for example when the broker refuses the credentials; it can be turned off in the settings.
@@ -65,7 +67,7 @@ The first release.
 
 - `senzor-cli schema` prints the project file's JSON Schema, which the docs site also publishes for editors; a `#:schema` line at the top of a project file is kept when Senzor saves it.
 - `senzor-cli validate` checks a project, `senzor-cli run` runs it (with `--only` and `--duration`), and `senzor-cli clear-retained` clears its retained messages. Exit codes tell CI what happened.
-- `senzor-cli run --watch` applies each save of the project file: it restarts only the devices that changed, starts added ones and stops removed ones.
+- `senzor-cli run --watch` applies each save of the project file: it updates the devices that changed, restarts only those whose connection changed, starts added ones and stops removed ones.
 
 #### AI agents
 

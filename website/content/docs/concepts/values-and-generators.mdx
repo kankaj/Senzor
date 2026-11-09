@@ -52,6 +52,10 @@ A pin lasts until you unpin the field or the instance's run ends. `senzor-cli ru
 
 Generator state belongs to the run, not to the connection. When an instance loses its connection and reconnects, its generators, pins and `seq` continue where they were: a random walk does not jump back to `start`. While it is reconnecting, the instance does not tick, and missed ticks are not made up: if any tick fell due during the outage, the instance ticks once right after it is back online and keeps its interval from that moment. A sine, which follows the clock, is further along its wave when the instance is back.
 
+## Edits keep the state
+
+An edit that a running instance takes at once does not begin a new run either. Fields whose generator you did not change, the pins on fields that remain, and `seq` continue where they were; a field you add or whose generator you change starts afresh. See [Editing while running](/docs/concepts/editing-while-running#edits-that-apply-at-once).
+
 ## Start begins a new run
 
 **Stop** and **Kill** end an instance's run. **Start** begins a new one with the project's current settings:

@@ -3,9 +3,9 @@ title: Editing while running
 description: What happens to running devices when you change the project in the GUI.
 ---
 
-In the GUI you can edit a project while its devices run. An edit never changes a running instance by itself: each instance keeps the settings it started with until you restart it. The GUI marks the instances that run with outdated settings and blocks the devices that cannot start.
+In the GUI you can edit a project while its devices run. Most edits reach running instances at once, and the instances stay connected. An edit that changes how an instance connects waits until you restart the instance: the GUI marks those instances. It also blocks the devices that cannot start.
 
-This page describes the GUI. Edits an AI agent makes over MCP, in the GUI or in `senzor-cli mcp`, affect running devices the same way. `senzor-cli run` reads the project once when it starts; to apply changes, stop it and run it again, or start it with `--watch`, which applies each save and restarts only the instances whose settings changed (see [Apply saves while it runs](/docs/headless#apply-saves-while-it-runs)).
+This page describes the GUI. Edits an AI agent makes over MCP, in the GUI or in `senzor-cli mcp`, affect running devices the same way. `senzor-cli run` reads the project once when it starts; to apply changes, stop it and run it again, or start it with `--watch`, which applies each save the same way and restarts only the instances whose connection changed (see [Apply saves while it runs](/docs/headless#apply-saves-while-it-runs)).
 
 ## Validation on every edit
 
@@ -20,11 +20,32 @@ A device with problems cannot start until you fix them. In the **Devices** tab i
 - a template with problems blocks every device that uses it;
 - a broker problem, such as a `password_env` variable that is not set or a TLS file that cannot be read, blocks every device.
 
-If the device was running when the problem appeared, its running instances keep running with their last valid settings. They carry the badge **device has errors**, and the instance view says: "Its device has problems (see the Problems tab); it keeps running with its last valid settings." You can stop or kill them, but not restart them, since there are no valid settings to restart with. Once you fix the problem, they belong to their device again, marked **restart to apply** if their settings changed.
+If the device was running when the problem appeared, its running instances keep running with their last valid settings. They carry the badge **device has errors**, and the instance view says: "Its device has problems (see the Problems tab); it keeps running with its last valid settings." You can stop or kill them, but not restart them, since there are no valid settings to restart with. Once you fix the problem, they belong to their device again and take its current settings, as described below.
 
-## Changed settings: restart to apply
+## Edits that apply at once
 
-When an edit changes the settings of a running instance, such as its template, params, field overrides, interval or the broker settings, the instance carries on with the settings it started with. It gets the badge **restart to apply**, and its instance view says: "The project changed; restart this instance to apply it."
+When an edit changes the settings of a running instance but not how it connects, the instance takes the new settings at once. It stays connected, so your consumers see no `offline` or `online`. This covers:
+
+- its messages: topics, payloads and MQTT 5 properties;
+- its fields: generators, units and names;
+- the interval, QoS and retain;
+- params and field overrides;
+- the template the device uses;
+- the seed;
+- Home Assistant discovery.
+
+The run carries on with the new settings:
+
+- A field whose generator you did not change keeps its state: a random walk carries on from its current value. A field you add, or whose generator you change, starts afresh.
+- A field you remove disappears from the instance, and so does its pin. Pins on the other fields stay.
+- A new interval applies at once: the next tick comes one new interval after the edit.
+- `seq` and the time a sine follows carry on.
+- A new seed applies from the next tick. To repeat a seeded run from its start, restart the instance (see [Reproducible runs](/docs/concepts/reproducible-runs)).
+- With [Home Assistant discovery](/docs/recipes/home-assistant-discovery), the instance publishes the config messages that changed. When you remove a field or turn `home_assistant` off, it clears the config messages it no longer sends, and Home Assistant removes those entities. An instance that is reconnecting publishes them once it is back.
+
+## Connection changes: restart to apply
+
+An instance connects with the broker settings and, when its template has [availability](/docs/concepts/availability), with a Last Will made of the availability topic and its `offline` payload. Both are fixed for as long as the connection lasts. So when an edit changes the broker settings or the template's availability (its topic, `online` or `offline` payload, or will delay), running instances carry on with the settings they connected with. That includes a param that the availability topic uses. None of the edit applies, not even the parts that could apply at once. Each such instance gets the badge **restart to apply**, and its instance view says: "The project changed; restart this instance to apply it."
 
 **Restart** stops the instance cleanly and starts it again with the current settings. It is in the instance view and in the right-click menu of the instance. The right-click menu of a device has a **Restart** that restarts all of the device's running instances. A restart begins a new run: generators start afresh and pins are cleared (see [Values and generators](/docs/concepts/values-and-generators#start-begins-a-new-run)).
 

@@ -307,8 +307,7 @@ To use it, put this line at the very top of the project file:
 
 [Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml)
 in Visual Studio Code, and other editors built on [Taplo](https://taplo.tamasfe.dev/), read that
-line. Senzor keeps it as the first line when it saves the project, although it does not keep
-other comments. The schema checks the shape of the file only: references between templates and
+line. Senzor keeps it as the first line when it saves the project, like your other comments. The schema checks the shape of the file only: references between templates and
 devices, and the other problems in the [validation errors reference](/docs/reference/validation-errors),
 are found by Senzor. Without network access, write the schema to a file with
 [`senzor-cli schema`](/docs/reference/cli#schema) and point the line at that file's path.

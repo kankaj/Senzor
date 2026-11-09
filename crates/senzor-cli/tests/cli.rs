@@ -531,7 +531,8 @@ fn the_published_schema_is_up_to_date() {
 }
 
 /// A project for the `--watch` tests: one device per `(id, value)`, each publishing `value` on
-/// `w/<id>/state`, with `online`/`offline` on `w/<id>/status`.
+/// `w/<id>/state`, with `online`/`offline` on `w/<id>/status`. Template `w-up` is the same, but
+/// publishes `up` for online.
 fn watch_toml(port: u16, devices: &[(&str, i32)]) -> String {
     let mut toml = format!(
         r#"
@@ -543,6 +544,13 @@ port = {port}
 id = "w"
 interval = "200ms"
 availability = {{ topic = "w/{{{{ device_id }}}}/status", online = "online", offline = "offline" }}
+messages = [{{ topic = "w/{{{{ device_id }}}}/state", payload = "{{{{ v }}}}" }}]
+fields.v = {{ generator = "constant", value = 0 }}
+
+[[templates]]
+id = "w-up"
+interval = "200ms"
+availability = {{ topic = "w/{{{{ device_id }}}}/status", online = "up", offline = "offline" }}
 messages = [{{ topic = "w/{{{{ device_id }}}}/state", payload = "{{{{ v }}}}" }}]
 fields.v = {{ generator = "constant", value = 0 }}
 "#
@@ -656,31 +664,38 @@ fn save(path: &Path, content: &str) {
 
 /// Ends with `--duration`, so it also shows that `--watch` keeps to it.
 #[tokio::test(flavor = "multi_thread")]
-async fn watch_restarts_changed_devices_starts_added_ones_and_stops_removed_ones() {
+async fn watch_updates_and_restarts_changed_devices_starts_added_ones_and_stops_removed_ones() {
     let port = start_broker();
     let mut sub = Subscriber::connect(port, "w/#").await;
-    let path = write_project(
-        "watch",
-        &watch_toml(port, &[("keep", 1), ("change", 1), ("gone", 1)]),
-    );
+    let devices = [("keep", 1), ("change", 1), ("moved", 1), ("gone", 1)];
+    let path = write_project("watch", &watch_toml(port, &devices));
     let run = Watching::start(&path, &["--duration", "6s"]);
     let mut seen = Vec::new();
     record_until(&mut sub, &mut seen, "all online", |s| {
-        ["keep", "change", "gone"]
+        devices
             .iter()
-            .all(|id| has(s, &format!("w/{id}/status"), "online"))
+            .all(|(id, _)| has(s, &format!("w/{id}/status"), "online"))
     })
     .await;
 
+    // `change` gets a new value, which it takes while connected; `moved` a template with
+    // another online payload, which needs a new connection.
     save(
         &path,
-        &watch_toml(port, &[("keep", 1), ("change", 2), ("lab", 1)]),
+        &watch_toml(
+            port,
+            &[("keep", 1), ("change", 2), ("moved", 1), ("lab", 1)],
+        )
+        .replace(
+            "id = \"moved\"\ntemplate = \"w\"",
+            "id = \"moved\"\ntemplate = \"w-up\"",
+        ),
     );
     let mut after = Vec::new();
     record_until(&mut sub, &mut after, "the reload", |s| {
-        has(s, "w/change/status", "offline")
-            && has(s, "w/change/status", "online")
-            && has(s, "w/change/state", "2")
+        has(s, "w/change/state", "2")
+            && has(s, "w/moved/status", "offline")
+            && has(s, "w/moved/status", "up")
             && has(s, "w/lab/status", "online")
             && has(s, "w/gone/status", "offline")
     })
@@ -688,16 +703,18 @@ async fn watch_restarts_changed_devices_starts_added_ones_and_stops_removed_ones
     let stderr = run.wait_for_stderr("reloaded").await;
     assert!(
         stderr.contains(&format!(
-            "reloaded {}: restarted change; started lab; stopped gone",
+            "reloaded {}: restarted moved; updated change; started lab; stopped gone",
             path.display()
         )),
         "{stderr}"
     );
     after.extend(sub.collect(Duration::from_millis(500)).await);
-    assert!(
-        !after.iter().any(|m| m.topic == "w/keep/status"),
-        "keep is left alone: {after:#?}"
-    );
+    for id in ["keep", "change"] {
+        assert!(
+            !after.iter().any(|m| m.topic == format!("w/{id}/status")),
+            "{id} stays connected: {after:#?}"
+        );
+    }
     let gone_offline = after
         .iter()
         .position(|m| m.topic == "w/gone/status")

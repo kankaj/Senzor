@@ -44,8 +44,10 @@ with a count; each instance is one simulated sensor with its own MQTT connection
 published value made by a generator; a pin forces a field of a running instance to a value.
 Typical loop: get_status, start, get_messages (keep last_seq and pass it as after_seq to see only \
 new messages, wait_seconds to wait for one), pin, kill (the broker publishes the Last Will), restart.
-Edits change the project in memory and never restart running instances: their results list the \
-instances that need a restart. save_project writes the file. Broker passwords are shown as \
+Edits change the project in memory and never restart running instances. A running instance takes \
+an edit at once, without reconnecting, unless the edit changes its connection (the broker settings \
+or its template's availability); edit results list those instances, which need a restart. \
+save_project writes the file. Broker passwords are shown as \
 <redacted>; sending <redacted> back keeps the password.
 The project-file reference is available as resources (senzor://reference/...).";
 

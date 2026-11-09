@@ -37,7 +37,7 @@ An example opens as an **untitled** project, the way **Open** opens a file: Senz
 
 About once a second, Senzor checks whether another program, such as your text editor, changed the project's file. When the file now holds a different project, the window asks: **project.toml changed on disk** (with your file's name). Changes that leave the project as it was, such as a new comment or other formatting, and a file that is not valid TOML yet do not ask: Senzor waits until the file reads as a project.
 
-- **Reload** takes the file's version. Devices that are running keep running and show **restart to apply** where their settings changed, or **removed** when they are gone from the file; see [Editing while running](/docs/concepts/editing-while-running). **Undo** brings back the version you had. If you had unsaved changes, the question says that **Reload** replaces them.
+- **Reload** takes the file's version. Devices that are running keep running: they take the file's settings at once, show **restart to apply** where their broker settings or availability changed, or show **removed** when they are gone from the file; see [Editing while running](/docs/concepts/editing-while-running). **Undo** brings back the version you had. If you had unsaved changes, the question says that **Reload** replaces them.
 - **Keep my version** leaves the window as it is. Your version then counts as unsaved changes, so the title shows `*`, and **Save** writes it over the file. Escape or a click outside the question does the same.
 
 While another question is open, Senzor waits with this one until you answer it.
@@ -52,16 +52,23 @@ The save dialog checks for an existing file only under the name you typed. If th
 
 After **Save as**, the project's file is the new one, and relative TLS paths in the [broker settings](/docs/gui/broker-settings#tls) are resolved against its folder.
 
-<Callout type="warn">
-Senzor writes the whole file from the project, so comments and your own formatting in the file are not kept. Keep notes you want to keep outside the project file.
-</Callout>
-
 ## How Senzor saves
 
+- **Your file stays as you wrote it.** Senzor changes only what you edited: comments, blank lines, the order of keys and tables, inline tables, and how unchanged values are written, such as `600` or `"60s"`, stay as they are. A key you left out because its default suits you stays out until you change it. A new device or template is added at the end of the file, with every key written out. A device or template you delete takes the comments inside it along; the others keep theirs. If Senzor cannot apply an edit to the file's text this way, it writes the whole file in its own layout instead, which drops comments; a `#:schema` line at the top is kept even then.
+- **Changes made in your editor count.** When another program changes only comments or formatting in the file, the next save in Senzor keeps those changes.
 - **No half-written files.** Senzor writes the project to a temporary file next to the original and then swaps it in, so a crash while saving leaves either the old file or the new one. Two cases are rewritten in place instead: a file with other hard links (so every name sees the change), and a file in a folder where Senzor cannot create the temporary file.
 - **Permissions are kept.** The saved file gets the old file's permissions, so a file you keep private because it holds a broker password stays private.
 - **Symlinks stay links.** Saving through a symbolic link writes the file it points to and keeps the link.
 - **Read-only files are not overwritten.** Saving to a read-only file fails, and Senzor shows **Something went wrong** with a message such as `cannot write /path/to/project.toml: the file is read-only`. The project keeps its unsaved changes.
+
+## Edit the file as text
+
+**TOML** in the top bar, or **Edit the project file as text** in the [command palette](/docs/gui/window#command-palette), shows the project file in the middle of the window, as **Save** would write it, comments included. Type into the box, then click **Apply**, or press Ctrl+Enter, to make your text the project:
+
+- **Apply** is one edit: Ctrl+Z takes it back, also when you changed only comments.
+- Text that is not a valid project file is not applied. The reason shows in red above the box, such as `line 3, column 1: ...`, and your text stays so you can fix it. Problems such as an unknown template are not in the way: they show in the **Problems** tab as for any other edit.
+- **Not applied yet** next to the buttons means the box holds text you have not applied. **Revert** puts the project's text back. Edits you make elsewhere in the window show in the box until you start typing in it.
+- What you applied, comments included, is what the next **Save** writes. Until you save, the window counts it as an unsaved change, even when you changed only a comment.
 
 ## Unsaved changes
 

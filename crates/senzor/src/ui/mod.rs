@@ -11,6 +11,7 @@ pub mod modals;
 pub mod palette;
 pub mod settings;
 pub mod shortcuts;
+pub mod source;
 pub mod status_bar;
 pub mod switch;
 pub mod template;
@@ -108,6 +109,8 @@ pub enum Action {
     OpenPalette,
     /// Save the messages the log shows as a CSV file.
     ExportLog,
+    /// Replace the project with the one this text holds, from the project-file editor.
+    ApplyText(String),
     /// Empty the message log, as its Clear button does.
     ClearLog,
     /// Open a project from the Recent menu.
@@ -159,6 +162,8 @@ pub fn apply_to_document(
             let _ = rename.apply(f);
         })),
         Action::Remove(removal) => Ok(doc.edit(|f| removal.apply(f))),
+        // The editor parsed the text before it asked; a failure here changes nothing.
+        Action::ApplyText(text) => Ok(doc.edit_text(&text).unwrap_or(false)),
         other => Err(Box::new(other)),
     }
 }
@@ -290,6 +295,8 @@ pub struct UiState {
     pub tree_filter: crate::tree::TreeFilter,
     /// The log filter takes the keyboard when it is next drawn.
     pub focus_log_filter: bool,
+    /// The project-file editor's text while it is in use.
+    pub source: Option<source::SourceBuffer>,
     /// A frozen copy of the log while it is paused.
     pub log_frozen: Option<VecDeque<LogEntry>>,
     pub broker_open: bool,

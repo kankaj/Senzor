@@ -1,5 +1,6 @@
 //! Runs instances on a tokio runtime and exposes their state.
 
+mod apply;
 mod discovery;
 mod instance;
 mod mqtt;
@@ -22,6 +23,7 @@ use crate::value::Value;
 use instance::{InstanceCmd, STOP_TIMEOUT, run_instance};
 use state::Shared;
 
+pub use apply::Apply;
 pub use discovery::{DISCOVERY_PREFIX, unannounced_fields};
 pub use probe::{CONNECTION_TEST_TIMEOUT, test_connection};
 pub use reload::{Reload, ReloadSummary};
@@ -69,7 +71,9 @@ pub enum Command {
         instance: String,
         field: String,
     },
-    /// Swaps the project. Running instances keep their configuration until restarted.
+    /// Swaps the project. A running instance whose new configuration keeps its connection takes
+    /// it at once ([`Apply::InPlace`]); one whose connection would change keeps its configuration
+    /// and is flagged `needs_restart` until restarted.
     ReplaceProject(Project),
     #[cfg(test)]
     PanicInstance(String),
@@ -238,12 +242,31 @@ impl Supervisor {
             }
             Command::ReplaceProject(project) => {
                 self.project = project;
+                self.update_running();
                 let (project, running) = (&self.project, &self.running);
                 self.shared
                     .update(|state| sync_instances(state, project, running));
             }
             #[cfg(test)]
             Command::PanicInstance(id) => self.send_to(&id, InstanceCmd::Panic),
+        }
+    }
+
+    /// Hands each running instance whose configuration in the current project can change in
+    /// place ([`Apply::InPlace`]) its new configuration. The others keep theirs.
+    fn update_running(&mut self) {
+        let project = &self.project;
+        for (id, running) in &mut self.running {
+            let Some(config) = project.instance(id) else {
+                continue;
+            };
+            let apply = Apply::between(&running.broker, &running.config, &project.broker, config);
+            if apply == Apply::InPlace {
+                running.config = config.clone();
+                let _ = running
+                    .commands
+                    .send(InstanceCmd::Update(Box::new(config.clone())));
+            }
         }
     }
 
@@ -385,8 +408,8 @@ fn panic_message(error: JoinError) -> String {
 }
 
 /// Aligns the instance list with `project`: adds new instances as `Stopped`, flags running ones
-/// whose configuration changed (`needs_restart`) or that left the project (`orphaned`), and drops
-/// stopped instances that left the project.
+/// whose configuration differs (`needs_restart`; those that changed in place no longer do) or
+/// that left the project (`orphaned`), and drops stopped instances that left the project.
 fn sync_instances(state: &mut EngineState, project: &Project, running: &HashMap<String, Running>) {
     let mut current = BTreeSet::new();
     for config in project.instances() {
@@ -442,6 +465,11 @@ mod tests {
     use tokio::time::Instant;
 
     fn project(port: u16, devices: &str) -> Project {
+        project_online(port, "online", devices)
+    }
+
+    /// [`project`] with `online` as the availability's online payload.
+    fn project_online(port: u16, online: &str, devices: &str) -> Project {
         let src = format!(
             r#"
 [broker]
@@ -451,7 +479,7 @@ port = {port}
 [[templates]]
 id = "air"
 interval = "100ms"
-availability = {{ topic = "sv/{{{{ device_id }}}}/status", online = "online", offline = "offline" }}
+availability = {{ topic = "sv/{{{{ device_id }}}}/status", online = "{online}", offline = "offline" }}
 messages = [{{ topic = "sv/{{{{ device_id }}}}/state", payload = "{{{{ v }}}}" }}]
 fields.v = {{ generator = "constant", value = 1 }}
 
@@ -582,9 +610,11 @@ template = "air"
         })
         .await;
 
-        // a: count 2 -> 1 (a-1 orphaned) and a new param (a-0 needs restart); b unchanged; c new.
-        let changed = project(
+        // A new online payload, which needs a new connection: a-0 and b need a restart. a: count
+        // 2 -> 1 (a-1 orphaned); c new.
+        let changed = project_online(
             port,
+            "up",
             r#"
 [[devices]]
 id = "a"
@@ -608,8 +638,8 @@ template = "air"
         })
         .await;
         let state = engine.snapshot();
-        assert!(state.instances["a-0"].needs_restart);
-        assert!(!state.instances["b"].needs_restart);
+        assert!(state.instances["a-0"].needs_restart, "{state:#?}");
+        assert!(state.instances["b"].needs_restart);
         assert_eq!(state.instances["c"].status, InstanceStatus::Stopped);
 
         engine.send(Command::Stop(Target::Instance("a-1".into())));
@@ -688,8 +718,9 @@ template = "air"
         engine.send(Command::Start(Target::Instance("b".into())));
         sub.wait_for(WAIT, |m| m.payload == "1").await.unwrap();
 
-        let changed = project(
+        let changed = project_online(
             port,
+            "up",
             r#"
 [[devices]]
 id = "a"
@@ -719,6 +750,62 @@ fields.v = { value = 2 }
             InstanceStatus::Stopped,
             "instances outside the target are left alone"
         );
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_edit_that_keeps_the_connection_reaches_running_instances_at_once() {
+        let port = start_broker();
+        let mut sub = Subscriber::connect(port, "sv/b/#").await;
+        let engine = spawn(project(port, TWO_DEVICES));
+        engine.send(Command::Start(Target::Instance("b".into())));
+        sub.wait_for(WAIT, |m| m.payload == "1").await.unwrap();
+
+        let changed = project(
+            port,
+            &TWO_DEVICES.replace(
+                "id = \"b\"\ntemplate = \"air\"\n",
+                "id = \"b\"\ntemplate = \"air\"\nfields.v = { value = 2 }\n",
+            ),
+        );
+        engine.send(Command::ReplaceProject(changed));
+        let seen = sub.collect(Duration::from_millis(500)).await;
+        assert!(
+            seen.iter()
+                .any(|m| m.topic == "sv/b/state" && m.payload == "2"),
+            "{seen:#?}"
+        );
+        assert!(
+            !seen.iter().any(|m| m.topic == "sv/b/status"),
+            "no offline or online: {seen:#?}"
+        );
+        let b = &engine.snapshot().instances["b"];
+        assert_eq!((b.needs_restart, b.runs), (false, 1));
+        assert_eq!(b.status, InstanceStatus::Online);
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_edit_that_needs_a_new_connection_changes_nothing_until_a_restart() {
+        let port = start_broker();
+        let mut sub = Subscriber::connect(port, "sv/b/state").await;
+        let engine = spawn(project(port, TWO_DEVICES));
+        engine.send(Command::Start(Target::Instance("b".into())));
+        sub.wait_for(WAIT, |m| m.payload == "1").await.unwrap();
+
+        // A new value too: nothing of the edit applies while the online payload waits.
+        let changed = project_online(
+            port,
+            "up",
+            &TWO_DEVICES.replace(
+                "id = \"b\"\ntemplate = \"air\"\n",
+                "id = \"b\"\ntemplate = \"air\"\nfields.v = { value = 2 }\n",
+            ),
+        );
+        engine.send(Command::ReplaceProject(changed));
+        wait_until(&engine, "b flagged", |s| s.instances["b"].needs_restart).await;
+        let seen = sub.collect(Duration::from_millis(500)).await;
+        assert!(seen.iter().all(|m| m.payload == "1"), "{seen:#?}");
         engine.shutdown().await;
     }
 
@@ -785,7 +872,7 @@ count = 2
         wait_until(&engine, "room-* moved to z", |s| {
             s.instances
                 .values()
-                .all(|i| i.device == "z" && i.needs_restart)
+                .all(|i| i.device == "z" && !i.needs_restart && i.runs == 1)
         })
         .await;
 

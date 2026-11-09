@@ -122,10 +122,12 @@ senzor-cli run examples/quick-start.toml --watch
 Edit the file in any editor and save it. Within about a second, `run` compares the saved project
 with what runs:
 
-- a device whose settings changed restarts: its instances stop and start again with the new
-  settings;
+- a device whose settings changed is updated: its instances take the new settings at once and stay
+  connected;
+- a device whose template's availability changed restarts: its instances stop and start again
+  with the new settings, since the Last Will is fixed for the connection;
 - a device you added starts, and a device you removed stops;
-- a device you did not change keeps running and stays connected;
+- a device you did not change keeps running untouched;
 - a change in `[broker]` restarts every device, since each one connects with those settings.
 
 When you change a device's `count`, only the instances that come or go start or stop. Which devices
@@ -133,7 +135,7 @@ run follows the same rule as at the start: the devices in `--only`, or those wit
 `autostart = true`. Each save logs one line that says what happened:
 
 ```text
-2026-11-07T10:15:02.120417Z  INFO senzor_cli: reloaded examples/quick-start.toml: restarted office; started lab
+2026-11-07T10:15:02.120417Z  INFO senzor_cli: reloaded examples/quick-start.toml: updated office; started lab
 ```
 
 If the saved file has a problem, nothing changes: the devices keep running with the last valid

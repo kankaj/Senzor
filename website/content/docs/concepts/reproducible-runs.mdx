@@ -10,13 +10,13 @@ Without a seed, every run draws fresh random numbers, so random walks wander dif
 seed = 42
 ```
 
-The seed lives in the project file, in `[simulation]`. In the GUI, click the broker button in the top bar to open **Project settings**, and type it under **Simulation** → **Seed**; empty means no seed. Running instances use a new seed once they restart, and show **restart to apply** until then.
+The seed lives in the project file, in `[simulation]`. In the GUI, click the broker button in the top bar to open **Project settings**, and type it under **Simulation** → **Seed**; empty means no seed. Running instances use a new seed from their next tick. Only a new run repeats a seeded run from its start, so restart them when you need that.
 
 Use a seed when a test depends on the data: the random parts of the values come out the same on every run, so a failure can be repeated.
 
 ## What the seed fixes
 
-Each instance has its own random number generator. Senzor creates it at the start of every run from the seed and the instance's ID. With the same project and the same seed:
+Each instance has its own random number generator. Senzor creates it at the start of every run from the seed and the instance's ID, and again when a running instance takes a new seed. With the same project and the same seed:
 
 - each instance produces the same `random_walk`, `uniform` and `noise` values, in the same order, on every run;
 - each instance waits the same time before its first tick (see [Spread-out first ticks](#spread-out-first-ticks));

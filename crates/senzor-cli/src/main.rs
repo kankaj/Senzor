@@ -374,7 +374,8 @@ impl Watch {
     }
 }
 
-/// `broker changed; restarted a, b; started c; stopped d`, or that nothing running changed.
+/// `broker changed; restarted a, b; updated e; started c; stopped d`, or that nothing running
+/// changed.
 fn describe(reload: &Reload, summary: &ReloadSummary) -> String {
     let mut parts = Vec::new();
     if reload.broker_changed {
@@ -382,6 +383,7 @@ fn describe(reload: &Reload, summary: &ReloadSummary) -> String {
     }
     for (verb, ids) in [
         ("restarted", &summary.restarted),
+        ("updated", &summary.updated),
         ("started", &summary.started),
         ("stopped", &summary.stopped),
     ] {
@@ -523,13 +525,14 @@ mod tests {
         let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let summary = ReloadSummary {
             restarted: ids(&["office", "kitchen"]),
+            updated: ids(&["hall", "attic-2"]),
             started: ids(&["lab"]),
             stopped: ids(&["door-1"]),
         };
         let mut reload = Reload::default();
         assert_eq!(
             describe(&reload, &summary),
-            "restarted office, kitchen; started lab; stopped door-1"
+            "restarted office, kitchen; updated hall, attic-2; started lab; stopped door-1"
         );
         reload.broker_changed = true;
         let restarted = ReloadSummary {

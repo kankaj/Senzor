@@ -56,9 +56,7 @@ The GUI opens a project with such problems, lists them in the **Problems** tab a
 
 The GUI keeps the project in memory and validates it again after every edit, so the **Problems** tab always matches what you see. While there are unsaved changes, the file name in the top bar and in the window title ends with `*`. **Save** writes the file. [Files](/docs/gui/files) covers **New**, **Open**, **Save** and **Save as**, and [Editing while running](/docs/concepts/editing-while-running) what edits do to running devices.
 
-<Callout type="warn" title="Saving rewrites the whole file">
-The GUI saves the project in a canonical TOML layout. Comments are dropped, the layout can change, and keys you left at their defaults, such as `count = 1`, are written out. If the comments in a file matter to you, edit that file in a text editor and use the GUI only to run it.
-</Callout>
+Saving changes only what you edited in the file: comments, the layout and keys you left at their defaults, such as `count = 1` left out, stay as they are. [How Senzor saves](/docs/gui/files#how-senzor-saves) has the details.
 
 ## Relative paths
 

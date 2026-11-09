@@ -2,7 +2,9 @@ use std::fmt;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use super::format::update_text;
 use super::{ProjectError, ProjectFile, Validated};
 
 /// Why a project file could not be opened.
@@ -37,18 +39,46 @@ pub struct Document {
     saved: ProjectFile,
     validated: Validated,
     /// The model before each undo step, the latest last; at most [`HISTORY`].
-    undo: Vec<ProjectFile>,
+    undo: Vec<Step>,
     /// The models undone, the latest last; a new edit clears them.
-    redo: Vec<ProjectFile>,
+    redo: Vec<Step>,
     /// The group of the latest step while more edits in it may join it.
     open_group: Option<u64>,
     /// The file's modification time and size when last looked at.
     disk: Option<DiskStamp>,
-    /// Another project found in the file and not yet taken or kept.
-    on_disk: Option<ProjectFile>,
+    /// Another project found in the file and not yet taken or kept, with the file's text.
+    on_disk: Option<(ProjectFile, String)>,
+    /// The file's text as last read or written, and the project it holds. Saving changes only
+    /// what was edited in it, so comments and formatting stay.
+    source: Option<Arc<Source>>,
+    /// The text known to be in the file; a `source` text that differs from it, such as a new
+    /// comment, is an unsaved change.
+    on_file: Option<String>,
+    /// Counts the changes to the project and to the text saving builds on.
+    revision: u64,
     /// A `#:schema` line the file started with, which editors read to check and complete it.
-    /// Saving keeps it as the first line; other comments are not kept.
+    /// Saving keeps it as the first line even when the file is written in the plain form.
     schema_line: Option<String>,
+}
+
+/// A file's text and the project it holds.
+#[derive(Debug, PartialEq)]
+struct Source {
+    text: String,
+    file: ProjectFile,
+}
+
+impl Source {
+    fn new(text: String, file: ProjectFile) -> Option<Arc<Self>> {
+        Some(Arc::new(Self { text, file }))
+    }
+}
+
+/// One undo or redo step: the project and the text saving builds on.
+#[derive(Debug, Clone)]
+struct Step {
+    file: ProjectFile,
+    source: Option<Arc<Source>>,
 }
 
 /// What tells that a file changed without reading it.
@@ -85,8 +115,10 @@ impl Document {
         let text = std::fs::read_to_string(path)
             .map_err(|e| OpenError::Read(format!("cannot read {}: {e}", path.display())))?;
         let file = ProjectFile::parse(&text).map_err(OpenError::Parse)?;
-        let mut doc = Self::from_file(Some(path.to_path_buf()), file);
+        let mut doc = Self::from_file(Some(path.to_path_buf()), file.clone());
         doc.schema_line = schema_line(&text);
+        doc.on_file = Some(text.clone());
+        doc.source = Source::new(text, file);
         Ok(doc)
     }
 
@@ -103,6 +135,9 @@ impl Document {
             open_group: None,
             disk,
             on_disk: None,
+            source: None,
+            on_file: None,
+            revision: 0,
             schema_line: None,
         }
     }
@@ -119,9 +154,14 @@ impl Document {
         &self.validated
     }
 
-    /// True when the model differs from what was last opened or saved (undoing an edit clears it).
+    /// True when the model differs from what was last opened or saved (undoing an edit clears it),
+    /// or when the text to save differs from the file's only in comments or layout.
     pub fn is_dirty(&self) -> bool {
         self.file != self.saved
+            || self
+                .source
+                .as_ref()
+                .is_some_and(|source| self.on_file.as_ref() != Some(&source.text))
     }
 
     /// The name of the project's file, once it has one.
@@ -157,12 +197,9 @@ impl Document {
         }
         let joins = group.is_some() && group == self.open_group;
         if !joins {
-            self.undo.push(before);
-            if self.undo.len() > HISTORY {
-                self.undo.remove(0);
-            }
+            self.push_undo(before);
             self.open_group = group;
-        } else if self.undo.last() == Some(&self.file) {
+        } else if self.undo.last().map(|step| &step.file) == Some(&self.file) {
             // Typed and taken back: the step would undo nothing.
             self.undo.pop();
             self.open_group = None;
@@ -170,6 +207,25 @@ impl Document {
         self.redo.clear();
         self.revalidate();
         true
+    }
+
+    /// Makes `before` and the current source an undo step.
+    fn push_undo(&mut self, before: ProjectFile) {
+        self.undo.push(Step {
+            file: before,
+            source: self.source.clone(),
+        });
+        if self.undo.len() > HISTORY {
+            self.undo.remove(0);
+        }
+    }
+
+    /// The current project and source as a step, replaced by `step`'s.
+    fn swap(&mut self, step: Step) -> Step {
+        Step {
+            file: std::mem::replace(&mut self.file, step.file),
+            source: std::mem::replace(&mut self.source, step.source),
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -185,7 +241,8 @@ impl Document {
         let Some(before) = self.undo.pop() else {
             return false;
         };
-        self.redo.push(std::mem::replace(&mut self.file, before));
+        let current = self.swap(before);
+        self.redo.push(current);
         self.open_group = None;
         self.revalidate();
         true
@@ -196,7 +253,8 @@ impl Document {
         let Some(after) = self.redo.pop() else {
             return false;
         };
-        self.undo.push(std::mem::replace(&mut self.file, after));
+        let current = self.swap(after);
+        self.undo.push(current);
         self.open_group = None;
         self.revalidate();
         true
@@ -204,10 +262,18 @@ impl Document {
 
     fn revalidate(&mut self) {
         self.validated = validate_in_folder(&self.file, self.path.as_deref());
+        self.revision += 1;
+    }
+
+    /// A number that changes whenever the project or [`Document::text_to_save`] may have; views
+    /// that show a costly rendering of the document keep it until this changes.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Whether the file now holds another valid project than the one last opened or saved, not
-    /// yet reported. Reads the file only when its modification time or size changed; a file
+    /// yet reported. A file that holds the same project, written differently, becomes the text
+    /// the next save builds on. Reads the file only when its modification time or size changed; a file
     /// that does not parse is left for the next check.
     pub fn check_disk(&mut self) -> bool {
         let Some(path) = self.path.as_deref() else {
@@ -217,25 +283,32 @@ impl Document {
         if stamp.is_none() || stamp == self.disk {
             return false;
         }
-        let Some(found) = std::fs::read_to_string(path)
+        let Some((found, text)) = std::fs::read_to_string(path)
             .ok()
-            .and_then(|text| ProjectFile::parse(&text).ok())
+            .and_then(|text| Some((ProjectFile::parse(&text).ok()?, text)))
         else {
             return false;
         };
         self.disk = stamp;
         if found == self.saved {
+            // The same project written differently, such as a changed comment: the next save
+            // builds on this text.
+            self.on_file = Some(text.clone());
+            self.source = Source::new(text, found);
+            self.revision += 1;
             return false;
         }
-        self.on_disk = Some(found);
+        self.on_disk = Some((found, text));
         true
     }
 
     /// Takes the project [`Document::check_disk`] found as an edit (Undo returns to the one
     /// before) and as what is saved.
     pub fn reload(&mut self) {
-        if let Some(found) = self.on_disk.take() {
+        if let Some((found, text)) = self.on_disk.take() {
             self.edit(|file| *file = found.clone());
+            self.on_file = Some(text.clone());
+            self.source = Source::new(text, found.clone());
             self.saved = found;
         }
     }
@@ -243,8 +316,11 @@ impl Document {
     /// Keeps the current project over the one [`Document::check_disk`] found, which becomes
     /// what is saved: the current one now counts as unsaved changes.
     pub fn keep_mine(&mut self) {
-        if let Some(found) = self.on_disk.take() {
+        if let Some((found, text)) = self.on_disk.take() {
+            self.on_file = Some(text.clone());
+            self.source = Source::new(text, found.clone());
             self.saved = found;
+            self.revision += 1;
         }
     }
 
@@ -264,14 +340,44 @@ impl Document {
         Ok(())
     }
 
-    fn write(&mut self, path: &Path) -> Result<(), String> {
-        let toml = self.file.to_toml_string();
-        let content = match &self.schema_line {
-            Some(line) => format!("{line}\n{toml}"),
-            None => toml,
+    /// Replaces the project with the one `text` holds, as one undo step, also when only comments
+    /// or layout differ; saving then writes `text` as it is. Returns whether anything changed.
+    /// Text that does not parse as a project changes nothing.
+    pub fn edit_text(&mut self, text: &str) -> Result<bool, Vec<ProjectError>> {
+        let file = ProjectFile::parse(text)?;
+        if file == self.file && text == self.text_to_save() {
+            return Ok(false);
+        }
+        // One step, also when only comments or layout changed.
+        let before = std::mem::replace(&mut self.file, file.clone());
+        self.push_undo(before);
+        self.redo.clear();
+        self.open_group = None;
+        self.source = Source::new(text.to_string(), file);
+        self.revalidate();
+        Ok(true)
+    }
+
+    /// What saving writes: the file's text with the edits made since it was read or written, or
+    /// the plain form for a project that has no text yet.
+    pub fn text_to_save(&self) -> String {
+        let toml = match &self.source {
+            Some(source) => update_text(&source.text, &source.file, &self.file),
+            None => self.file.to_toml_string(),
         };
+        match &self.schema_line {
+            Some(line) if !toml.starts_with(line.as_str()) => format!("{line}\n{toml}"),
+            _ => toml,
+        }
+    }
+
+    fn write(&mut self, path: &Path) -> Result<(), String> {
+        let content = self.text_to_save();
         write_replacing(path, &content)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        self.on_file = Some(content.clone());
+        self.source = Source::new(content, self.file.clone());
+        self.revision += 1;
         self.saved = self.file.clone();
         self.disk = DiskStamp::of(path);
         self.on_disk = None;
@@ -709,10 +815,7 @@ count = 2
         doc.save().unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.starts_with(&format!("{directive}\n")), "{saved}");
-        assert!(
-            !saved.contains("# a comment"),
-            "other comments are not kept"
-        );
+        assert!(saved.contains("# a comment"), "other comments are kept too");
 
         let other = dir.join("other.toml");
         doc.save_as(other.clone()).unwrap();
@@ -913,6 +1016,81 @@ count = 2
         doc.undo();
         assert_eq!(ids(&doc), ["a"]);
         assert!(doc.is_dirty(), "the file holds two devices now");
+    }
+
+    #[test]
+    fn comments_survive_saves_and_a_reload_from_disk() {
+        let commented =
+            "# Office sensors.\n[[devices]]\nid = \"a\"  # the first desk\ntemplate = \"co2\"\n";
+        let (path, mut doc) = opened("disk-comments", commented);
+        doc.edit(|f| f.devices[0].count = 3);
+        doc.save().unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, format!("{commented}count = 3\n"));
+
+        // Someone changes only a comment: the same project, nothing to reload, but Senzor's
+        // next save keeps their comment.
+        let theirs = saved.replace("# Office sensors.", "# Office sensors, second floor.");
+        std::fs::write(&path, &theirs).unwrap();
+        assert!(!doc.check_disk(), "the same project: nothing to reload");
+        doc.edit(|f| f.devices[0].count = 4);
+        doc.save().unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.starts_with("# Office sensors, second floor.\n"),
+            "{saved}"
+        );
+
+        // Then they change the project too; Senzor reloads it and saves an edit over it.
+        std::fs::write(&path, saved.replace("count = 4", "count = 6  # more desks")).unwrap();
+        assert!(doc.check_disk());
+        doc.reload();
+        doc.edit(|f| f.devices[0].autostart = false);
+        doc.save().unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("# the first desk\n"), "{saved}");
+        assert!(saved.contains("count = 6  # more desks\n"), "{saved}");
+        assert!(saved.contains("autostart = false\n"), "{saved}");
+    }
+
+    #[test]
+    fn a_whole_text_is_one_edit_and_saved_as_written() {
+        let (path, mut doc) = opened("edit-text", ONE);
+        let text = "# Hand-written.\n[[devices]]\nid = \"z\"   # renamed\ntemplate = \"co2\"\n";
+        doc.edit_text(text).unwrap();
+        assert_eq!(ids(&doc), ["z"]);
+        assert!(doc.is_dirty());
+        assert_eq!(doc.text_to_save(), text);
+        doc.save().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+        doc.undo();
+        assert_eq!(ids(&doc), ["a"], "one undo step");
+        let errors = doc.edit_text("[[devices]\n").unwrap_err();
+        assert!(errors[0].to_string().starts_with("line 1"), "{errors:?}");
+        assert_eq!(ids(&doc), ["a"], "text that does not parse changes nothing");
+    }
+
+    #[test]
+    fn a_changed_comment_is_an_unsaved_change() {
+        let (_path, mut doc) = opened("edit-comment", ONE);
+        let text = format!("# A note.\n{}", doc.text_to_save());
+        assert!(doc.edit_text(&text).unwrap());
+        assert!(
+            doc.is_dirty(),
+            "the same project, but the file would change"
+        );
+        assert_eq!(doc.text_to_save(), text);
+        doc.undo();
+        assert!(!doc.is_dirty(), "undo takes the comment back");
+        assert!(!doc.text_to_save().contains("# A note."));
+        doc.redo();
+        doc.save().unwrap();
+        assert!(!doc.is_dirty());
+        assert!(
+            !doc.edit_text(&text).unwrap(),
+            "the same text again changes nothing"
+        );
     }
 
     #[test]
