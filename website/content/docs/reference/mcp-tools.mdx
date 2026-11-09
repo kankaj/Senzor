@@ -36,7 +36,8 @@ description: Every tool, resource and prompt of the Senzor MCP server, with argu
 | `device` | The `[[devices]]` entry it belongs to. |
 | `status` | See [Status values](#status-values). |
 | `published` | Messages published since the project was opened or the instance was added. Stopping and restarting do not reset it. |
-| `errors` | Messages that could not be rendered or published, and failed availability `online` messages, counted the same way as `published`. |
+| `received` | Messages received on the instance's [subscriptions](/docs/concepts/scripts#subscriptions), counted the same way as `published`. |
+| `errors` | Messages that could not be rendered or published, failed availability `online` messages and failed [scripts](/docs/concepts/scripts#limits-and-errors), counted the same way as `published`. |
 | `last_publish` | Time of the last published message, or `null`. |
 | `pinned` | Fields forced to a value with `pin`. |
 | `needs_restart` | Running with older broker settings or availability than the project's, which need a new connection; `restart` applies them. |
@@ -295,7 +296,7 @@ Running instances of the device become orphans: they keep running until stopped.
 
 ### `put_template`
 
-Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `availability`, `messages` and `fields`. Messages can set the MQTT 5 keys `message_expiry`, `content_type` and `user_properties`, and `availability` can set `will_delay`, as in the [project file](/docs/reference/project-file#messages). Each field is its generator table and can add a `unit` and a `name`, as in the [project file](/docs/reference/project-file#fields).
+Adds a template to the project, or replaces the project template with the same `id`. The arguments are the keys of a `[[templates]]` table: `id`, `interval`, `qos`, `retain`, `home_assistant`, `availability`, `messages`, `fields` and `subscriptions`. Messages can set the MQTT 5 keys `message_expiry`, `content_type` and `user_properties`, and `availability` can set `will_delay`, as in the [project file](/docs/reference/project-file#messages). Each field is its generator table and can add a `unit` and a `name`, as in the [project file](/docs/reference/project-file#fields); a field can run a [script](/docs/concepts/scripts). Each subscription is an object with `topic`, `qos` and `script`, as in the [project file](/docs/reference/project-file#subscriptions).
 
 ```json
 {
@@ -434,6 +435,7 @@ These read-only references never change, so an agent can write templates without
 | `senzor://reference/project-file` | The [project file reference](/docs/reference/project-file). |
 | `senzor://reference/generators` | The [generators reference](/docs/reference/generators). |
 | `senzor://reference/template-variables` | The [template variables reference](/docs/reference/template-variables). |
+| `senzor://reference/scripts` | [Scripts and commands](/docs/concepts/scripts): field scripts, subscriptions, `state` and the functions scripts can call. |
 | `senzor://reference/builtin-templates` | The built-in templates `co2`, `temperature` and `humidity` as TOML. |
 
 An agent can subscribe to a resource instead of polling. Clients of MCP versions before 2026-07-28 send `resources/subscribe` and `resources/unsubscribe`. Newer clients list the URIs in a `subscriptions/listen` request and cancel it to stop. Senzor then sends `notifications/resources/updated` with the URI after each change, and the agent reads the resource or calls a tool to see what changed:

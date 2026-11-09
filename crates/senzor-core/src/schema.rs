@@ -104,7 +104,7 @@ mod tests {
     fn every_generator_takes_a_unit_and_a_name() {
         let schema = schema_for!(FieldSpec).to_value();
         let variants = schema["oneOf"].as_array().unwrap();
-        assert_eq!(variants.len(), 5);
+        assert_eq!(variants.len(), 6);
         for variant in variants {
             assert_eq!(variant["additionalProperties"], false, "{variant}");
             for key in ["unit", "name"] {

@@ -23,14 +23,14 @@ pub fn show(
         ui.label("This instance is no longer part of the project.");
         return;
     };
-    show_status(ui, doc, instance);
+    show_status(ui, id, doc, instance);
     show_controls(ui, id, instance, actions);
     ui.separator();
     show_fields(ui, id, doc, instance, ui_state, actions);
 }
 
 /// The instance's status, counters and the warnings that apply to it.
-fn show_status(ui: &mut egui::Ui, doc: &Document, instance: &InstanceState) {
+fn show_status(ui: &mut egui::Ui, id: &str, doc: &Document, instance: &InstanceState) {
     let (word, detail) = format::status(&instance.status);
     ui.horizontal(|ui| {
         status_dot(ui, &instance.status);
@@ -43,6 +43,17 @@ fn show_status(ui: &mut egui::Ui, doc: &Document, instance: &InstanceState) {
     ui.horizontal(|ui| {
         ui.label(format!("Published: {}", instance.published));
         ui.separator();
+        // Only an instance that subscribes receives anything.
+        let subscribes = doc
+            .validated()
+            .project
+            .instance(id)
+            .is_some_and(|config| !config.subscriptions.is_empty());
+        if subscribes {
+            ui.label(format!("Received: {}", instance.received))
+                .on_hover_text("Messages that arrived on the template's subscriptions");
+            ui.separator();
+        }
         ui.label(format!("Errors: {}", instance.errors));
         ui.separator();
         let last = instance.last_publish.map_or_else(
@@ -258,6 +269,24 @@ template = "air"
         let h = harness(SRC, "old-0", orphan("old"));
         assert!(h.query_by_label(REMOVED).is_some());
         assert!(h.query_by_label(DEVICE_HAS_ERRORS).is_none());
+    }
+
+    #[test]
+    fn an_instance_with_subscriptions_shows_what_it_received() {
+        let mut instance = running("office");
+        instance.received = 3;
+        let h = harness(SRC, "office", instance.clone());
+        assert!(
+            h.query_by_label("Received: 3").is_none(),
+            "no subscriptions"
+        );
+        let with = SRC.replace(
+            "fields.co2 = { generator = \"constant\", value = 600 }",
+            "fields.co2 = { generator = \"constant\", value = 600 }\n\
+             subscriptions = [{ topic = \"cmd/#\", script = \"state.x = 1;\" }]",
+        );
+        let h = harness(&with, "office", instance);
+        assert!(h.query_by_label("Received: 3").is_some(), "{with}");
     }
 
     #[test]

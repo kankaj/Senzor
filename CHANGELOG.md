@@ -16,7 +16,8 @@ The first release.
 - Simulate MQTT sensors from templates: one template gives as many devices and instances as you need, each with its own connection.
 - A desktop window to edit a project, start and stop devices, pin values and watch every message, and `senzor-cli` to run the same project in a terminal, in Docker or in CI.
 - MQTT 5 by default, with message expiry, content type, user properties and a delayed Last Will; MQTT 3.1.1 can be chosen per project.
-- Built-in templates and six example projects to start from.
+- Built-in templates and seven example projects to start from.
+- Scripts in Rhai compute field values, and subscriptions let simulated devices take commands: change their state, pin a field or answer.
 - Simulated devices can appear in Home Assistant by themselves, through MQTT Discovery.
 - Problems are shown next to the box they are about, and a device with problems does not start.
 - AI agents such as Claude Code can drive Senzor over MCP, headless or in the window.
@@ -28,6 +29,8 @@ The first release.
 - One TOML project file holds the broker settings, templates and devices. A template defines topics, payloads, fields and the interval; a device runs it `count` times.
 - Topics and payloads are Jinja templates, so payloads can be JSON, plain numbers or any text format.
 - Field generators: `constant`, `random_walk`, `sine`, `uniform` and `sequence`, with optional noise, and per-device field overrides.
+- The `script` generator computes a field's value with a Rhai script, from its previous value, the time, the params, the other fields and a `state` shared by the instance's scripts. Scripts are compiled when the project is checked and limited in how long they run and how much they build.
+- Subscriptions (`[[templates.subscriptions]]`): each instance subscribes to topic filters, with `+` and `#`, and runs a script for every message that arrives. The script sees the topic, the payload and the payload read as JSON, and can change `state`, pin and unpin fields, and publish replies. The `thermostat` example takes a setpoint and a mode this way.
 - A field can have a unit and a readable name, such as `ppm` and `CO2`; the built-in templates set both.
 - Built-in templates `co2`, `temperature` and `humidity`.
 - Availability: an online and offline topic per instance, with a Last Will the broker publishes when an instance drops off.
@@ -41,6 +44,7 @@ The first release.
 
 - Start, Stop, Restart and Kill for the whole project, a device or one instance. Kill drops the connection, so the broker publishes the Last Will.
 - Pin a field of a running instance to a value until you unpin it.
+- Each instance counts the messages it receives on its subscriptions, next to the ones it publishes; a script that fails counts as an error, and the instance keeps running.
 - Edits to a running project reach running instances at once, without a reconnect. Only a change to the broker settings or a template's availability marks the instances that need a restart; nothing restarts by itself.
 - Clear the retained messages a project leaves on the broker, in the window or with `senzor-cli clear-retained`.
 - Home Assistant MQTT Discovery: with `home_assistant = true` on a template, each instance announces itself when it connects, as a device with one entity per field. Senzor finds each field in the payload itself; the template editor names the fields it cannot find.

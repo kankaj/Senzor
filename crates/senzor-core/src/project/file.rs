@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{Location, ProjectError, line_column};
 use super::field::FieldSpec;
+use crate::script::Script;
 use crate::value::Value;
 
 /// The project file as written on disk. The GUI edits this; `validate` turns it into a `Project`.
@@ -178,6 +179,24 @@ pub struct TemplateSpec {
     pub availability: Option<AvailabilitySpec>,
     pub messages: Vec<MessageSpec>,
     pub fields: BTreeMap<String, FieldSpec>,
+    /// Topic filters each instance subscribes to, each with a script that runs for every
+    /// message that arrives on it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscriptions: Vec<SubscriptionSpec>,
+}
+
+/// One `[[templates.subscriptions]]` entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionSpec {
+    /// The topic filter, a template with the variables of the availability topic; it may
+    /// contain the MQTT wildcards `+` and `#`.
+    pub topic: String,
+    #[serde(default)]
+    pub qos: u8,
+    /// Runs for every message that arrives on the topic.
+    pub script: Script,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -499,7 +518,7 @@ fields.v = { generator = "constant", value = 1 }
             (
                 at(28),
                 "unknown variant `foo`, expected one of `constant`, `random_walk`, `sine`, \
-                 `uniform`, `sequence`"
+                 `uniform`, `sequence`, `script`"
                     .into()
             )
         );
@@ -569,5 +588,85 @@ fields.v = { generator = "constant", value = 1 }
         let written = file.to_toml_string();
         assert_eq!(ProjectFile::parse(&written).unwrap(), file);
         assert_eq!(written.matches("message_expiry").count(), 1, "{written}");
+    }
+
+    const SCRIPTED: &str = r#"
+[[templates]]
+id = "thermostat"
+messages = [{ topic = "t/{{ device_id }}", payload = "{{ temp }}" }]
+
+[templates.fields.temp]
+generator = "script"
+start = 20.0
+script = '''
+if state.heating == true { value + 0.2 } else { value - 0.1 }
+'''
+
+[[templates.subscriptions]]
+topic = "cmd/{{ device_id }}/heating"
+qos = 1
+script = '''
+state.heating = payload == "ON";
+'''
+
+[[templates.subscriptions]]
+topic = "cmd/all"
+script = "1"
+"#;
+
+    #[test]
+    fn scripts_and_subscriptions_round_trip() {
+        let file = ProjectFile::parse(SCRIPTED).unwrap();
+        let template = &file.templates[0];
+        assert_eq!(template.subscriptions.len(), 2);
+        let first = &template.subscriptions[0];
+        assert_eq!(first.topic, "cmd/{{ device_id }}/heating");
+        assert_eq!(first.qos, 1);
+        assert_eq!(
+            first.script.source(),
+            "state.heating = payload == \"ON\";\n"
+        );
+        assert_eq!(template.subscriptions[1].qos, 0, "qos defaults to 0");
+        assert!(matches!(
+            &template.fields["temp"].generator,
+            GeneratorSpec::Script {
+                start: Value::Number(20.0),
+                ..
+            }
+        ));
+        let written = file.to_toml_string();
+        assert_eq!(ProjectFile::parse(&written).unwrap(), file, "{written}");
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ProjectFile>(json).unwrap(),
+            file,
+            "JSON, as the MCP server reads and writes it"
+        );
+    }
+
+    #[test]
+    fn a_template_without_subscriptions_writes_none() {
+        let file = ProjectFile::parse(EXAMPLE).unwrap();
+        assert!(file.templates[0].subscriptions.is_empty());
+        assert!(!file.to_toml_string().contains("subscriptions"));
+    }
+
+    #[test]
+    fn a_subscription_needs_a_topic_and_a_script_and_knows_no_other_keys() {
+        for (table, message) in [
+            ("script = \"1\"", "missing field `topic`"),
+            ("topic = \"a\"", "missing field `script`"),
+            (
+                "topic = \"a\"\nscript = \"1\"\nretain = true",
+                "unknown field `retain`",
+            ),
+        ] {
+            let src = format!(
+                "[[templates]]\nid = \"t\"\nmessages = []\nfields = {{}}\n\
+                 [[templates.subscriptions]]\n{table}\n"
+            );
+            let errors = ProjectFile::parse(&src).unwrap_err();
+            assert!(errors[0].message.contains(message), "{errors:?}");
+        }
     }
 }

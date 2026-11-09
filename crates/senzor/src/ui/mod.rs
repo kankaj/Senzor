@@ -478,6 +478,41 @@ pub fn sequence_edit(
     )
 }
 
+/// Names a text box for screen readers and tests when its visible label, such as `start`, is
+/// shared by several boxes.
+pub fn name_text_box(response: &egui::Response, name: &str, text: &str) {
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::text_edit(response.enabled(), text, text, "");
+        info.label = Some(name.to_string());
+        info
+    });
+}
+
+/// A Rhai script, in a code box as wide as the panel; `name` names it for screen readers when
+/// no label does.
+pub fn script_edit(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    script: &mut senzor_core::script::Script,
+    name: Option<&str>,
+) -> egui::Response {
+    let mut text = script.source().to_string();
+    let response = ui.add(
+        TextEdit::multiline(&mut text)
+            .id_salt(id_salt)
+            .code_editor()
+            .desired_rows(3)
+            .desired_width(f32::INFINITY),
+    );
+    if response.changed() {
+        *script = senzor_core::script::Script::new(text.clone());
+    }
+    if let Some(name) = name {
+        name_text_box(&response, name, &text);
+    }
+    response
+}
+
 /// A param or `constant` value: a type selector and a box read as that type, so typing never
 /// changes the type. Invalid text stays in the box with a hint and leaves `value` unchanged.
 /// Another type can only be chosen when the box's text reads as it; choosing it stores that

@@ -10,6 +10,7 @@ use super::error::ProjectError;
 use super::field::FieldSpec;
 use super::file::{AvailabilitySpec, MessageSpec, MqttVersion, Transport};
 use crate::render::{InstanceTemplates, TemplateError};
+use crate::script::Script;
 use crate::value::Value;
 
 /// The result of `ProjectFile::validate`: what can run, what is wrong, and which devices are blocked.
@@ -75,6 +76,18 @@ pub struct InstanceConfig {
     pub fields: BTreeMap<String, FieldSpec>,
     pub params: BTreeMap<String, Value>,
     pub seed: Option<u64>,
+    /// The template's subscriptions with their topic filters rendered for this instance.
+    pub subscriptions: Vec<Subscription>,
+}
+
+/// A subscription of one instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subscription {
+    /// The rendered topic filter.
+    pub filter: String,
+    pub qos: u8,
+    /// Compiled at validation, and shared by every instance of the template.
+    pub script: Script,
 }
 
 /// A template's messages and availability topic, compiled once and shared by every instance of

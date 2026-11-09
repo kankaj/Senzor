@@ -13,9 +13,12 @@ use super::mqtt::{
 };
 use super::state::{InstanceStatus, LogEntry, Shared};
 use crate::generator::{TickContext, ValueSource};
+use crate::project::Subscription;
 use crate::project::{BrokerConfig, InstanceConfig, MqttVersion, mqtt_seconds};
 use crate::render::{Context, MessageProperties, RenderedMessage, base_context, tick_context};
 use crate::rng::instance_rng;
+use crate::script::{Action, Message, Runtime};
+use crate::topic::matches;
 use crate::value::Value;
 
 /// How long a graceful stop may take before the connection is dropped.
@@ -215,6 +218,9 @@ async fn run(
                     attempt = 0;
                     ticker.broker_max_packet_size = max_packet_size;
                     shared.set_status(id, InstanceStatus::Online);
+                    // Before `online`, so a command sent once `online` arrives finds the
+                    // subscription in place.
+                    subscribe(&client, shared, id, &ticker.config.subscriptions);
                     // Before `online`, so Home Assistant knows the entities the status is for.
                     discovery.publish_all(&client, shared, id);
                     if let Some(a) = &availability
@@ -223,7 +229,13 @@ async fn run(
                         shared.record_error(id, &format!("publish online: {e}"));
                     }
                 }
-                Ok(ConnEvent::PubAck { .. } | ConnEvent::Other) => {}
+                Ok(ConnEvent::Publish { topic, payload }) => {
+                    ticker.receive(&client, shared, &topic, &payload);
+                }
+                Ok(ConnEvent::SubAck { refused: Some(reason) }) => {
+                    shared.record_error(id, &format!("subscribe: the broker refused: {reason}"));
+                }
+                Ok(ConnEvent::PubAck { .. } | ConnEvent::SubAck { refused: None } | ConnEvent::Other) => {}
                 Err(ConnError::Refused(reason)) => {
                     return Err(format!("broker refused the connection: {reason}"));
                 }
@@ -266,8 +278,12 @@ async fn run(
                 Some(InstanceCmd::Pin(field, value)) => ticker.pin(shared, field, value),
                 Some(InstanceCmd::Unpin(field)) => ticker.unpin(shared, field),
                 Some(InstanceCmd::Update(config)) => {
+                    let subscribed = std::mem::take(&mut ticker.config.subscriptions);
                     if ticker.update(*config, shared) {
                         timer = ticker.next_timer();
+                    }
+                    if online {
+                        resubscribe(&client, shared, id, &subscribed, &ticker.config.subscriptions);
                     }
                     let fresh = discovery::announcements(&ticker.config, &ticker.base);
                     discovery.update(fresh, &client, online, shared, id);
@@ -279,17 +295,64 @@ async fn run(
     }
 }
 
+/// Subscribes to `subscriptions`; a failure counts as an error of `id`.
+fn subscribe(client: &Client, shared: &Shared, id: &str, subscriptions: &[Subscription]) {
+    for subscription in subscriptions {
+        if let Err(e) = client.try_subscribe(&subscription.filter, subscription.qos) {
+            shared.record_error(id, &format!("subscribe to `{}`: {e}", subscription.filter));
+        }
+    }
+}
+
+/// Moves a connected instance from the `old` subscriptions to the `new` ones: unsubscribes from
+/// the filters that are gone and subscribes to the filters that are new or have a new QoS.
+fn resubscribe(
+    client: &Client,
+    shared: &Shared,
+    id: &str,
+    old: &[Subscription],
+    new: &[Subscription],
+) {
+    for gone in old
+        .iter()
+        .filter(|o| !new.iter().any(|n| n.filter == o.filter))
+    {
+        if let Err(e) = client.try_unsubscribe(&gone.filter) {
+            shared.record_error(id, &format!("unsubscribe from `{}`: {e}", gone.filter));
+        }
+    }
+    let added: Vec<Subscription> = new
+        .iter()
+        .filter(|n| !old.iter().any(|o| o.filter == n.filter && o.qos == n.qos))
+        .cloned()
+        .collect();
+    subscribe(client, shared, id, &added);
+}
+
 /// Per-run state that produces and publishes one tick.
 struct Ticker {
     config: InstanceConfig,
     base: Context,
     sources: BTreeMap<String, Box<dyn ValueSource>>,
     pins: BTreeMap<String, Value>,
+    /// The latest value of every field: the last tick's, or the value it starts from.
+    values: BTreeMap<String, Value>,
+    /// Runs the field and subscription scripts, and keeps their `state` for the whole run.
+    scripts: Runtime,
     rng: ChaCha8Rng,
     started: Instant,
     seq: u64,
     /// The largest packet the broker accepts, from its MQTT 5 CONNACK.
     broker_max_packet_size: Option<u32>,
+}
+
+/// The value each field starts from, before its first tick.
+fn initial_values(config: &InstanceConfig) -> BTreeMap<String, Value> {
+    config
+        .fields
+        .iter()
+        .map(|(name, field)| (name.clone(), field.generator.initial_value()))
+        .collect()
 }
 
 impl Ticker {
@@ -301,6 +364,8 @@ impl Ticker {
                 .map(|(name, field)| (name.clone(), field.generator.build()))
                 .collect(),
             pins: BTreeMap::new(),
+            values: initial_values(&config),
+            scripts: Runtime::new(&config.id, &config.params),
             rng: instance_rng(config.seed, &config.id),
             config,
             base,
@@ -333,7 +398,8 @@ impl Ticker {
     /// Runs with `config` from the next tick on; returns whether the interval changed. A field
     /// whose generator is the same keeps its value source, so a random walk carries on where it
     /// is; a changed or added field starts afresh. A removed field loses its value and its pin.
-    /// `seq` and the run's start time carry on; a changed seed reseeds the instance RNG.
+    /// `seq`, the run's start time and the scripts' `state` carry on; a changed seed reseeds the
+    /// instance RNG.
     fn update(&mut self, config: InstanceConfig, shared: &Shared) -> bool {
         let old = std::mem::replace(&mut self.config, config);
         let config = &self.config;
@@ -343,6 +409,7 @@ impl Ticker {
             &config.template_id,
             &config.params,
         );
+        self.scripts.set_device(&config.id, &config.params);
         if config.seed != old.seed {
             self.rng = instance_rng(config.seed, &config.id);
         }
@@ -363,6 +430,15 @@ impl Ticker {
             })
             .collect();
         self.pins.retain(|name, _| config.fields.contains_key(name));
+        // A field that stays keeps its latest value, which scripts see in `fields` until the
+        // next tick; an added field has its starting value.
+        let mut values = initial_values(config);
+        for (name, value) in &mut values {
+            if let Some(latest) = self.values.remove(name) {
+                *value = latest;
+            }
+        }
+        self.values = values;
         shared.update_instance(&config.id, |instance| {
             instance
                 .values
@@ -393,11 +469,63 @@ impl Ticker {
         self.pins.remove(&field);
     }
 
+    /// Runs the script of every subscription whose filter matches `topic`, and does what each
+    /// asks for. A failure counts as an error; what a script did before it failed stands.
+    fn receive(&mut self, client: &Client, shared: &Shared, topic: &str, payload: &[u8]) {
+        let id = self.config.id.clone();
+        shared.record_received(&id);
+        let now = SystemTime::now();
+        let subscriptions = self.config.subscriptions.clone();
+        for (i, subscription) in subscriptions.iter().enumerate() {
+            if !matches(&subscription.filter, topic) {
+                continue;
+            }
+            let failed = |e: &str| {
+                shared.record_error(&id, &format!("script of subscription {}: {e}", i + 1));
+            };
+            // Validation compiled it; a script that does not compile blocks its device.
+            let script = match subscription.script.compiled() {
+                Ok(script) => script,
+                Err(e) => {
+                    failed(&format!("script {e}"));
+                    continue;
+                }
+            };
+            let message = Message {
+                topic,
+                payload,
+                fields: &self.values,
+            };
+            let (actions, result) = self.scripts.on_message(&script, message, &mut self.rng);
+            for action in actions {
+                match action {
+                    Action::Publish { topic, payload } => {
+                        let message = RenderedMessage {
+                            topic,
+                            payload,
+                            properties: MessageProperties::default(),
+                        };
+                        match self.publish(client, message, now) {
+                            Ok(entry) => shared.record_publish(entry),
+                            Err(e) => failed(&e),
+                        }
+                    }
+                    Action::Pin(field, value) => self.pin(shared, field, value),
+                    Action::Unpin(field) => self.unpin(shared, field),
+                }
+            }
+            if let Err(e) = result {
+                failed(&e);
+            }
+        }
+    }
+
     fn tick(&mut self, client: &Client, shared: &Shared) {
         let now = SystemTime::now();
-        let values = self.next_values(now);
+        let values = self.next_values(now, shared);
         let id = self.config.id.as_str();
         let render_ctx = tick_context(&self.base, &values, now, self.seq);
+        self.values.clone_from(&values);
         shared.update_instance(id, |instance| instance.values = values);
         self.seq += 1;
 
@@ -412,20 +540,27 @@ impl Ticker {
         }
     }
 
-    /// This tick's field values: pinned ones as pinned, the others from their generators.
-    fn next_values(&mut self, now: SystemTime) -> BTreeMap<String, Value> {
+    /// This tick's field values: pinned ones as pinned, the others from their generators. A
+    /// field whose script fails keeps its latest value, and the failure counts as an error.
+    fn next_values(&mut self, now: SystemTime, shared: &Shared) -> BTreeMap<String, Value> {
         let mut ctx = TickContext {
             now,
             elapsed: self.started.elapsed(),
             seq: self.seq,
             rng: &mut self.rng,
+            scripts: &mut self.scripts,
+            fields: &self.values,
         };
+        let id = self.config.id.as_str();
         self.sources
             .iter_mut()
             .map(|(name, source)| {
                 let value = match self.pins.get(name) {
                     Some(pinned) => pinned.clone(),
-                    None => source.next(&mut ctx),
+                    None => source.next(&mut ctx).unwrap_or_else(|e| {
+                        shared.record_error(id, &format!("script of field {name}: {e}"));
+                        ctx.fields[name].clone()
+                    }),
                 };
                 (name.clone(), value)
             })
@@ -1139,6 +1274,193 @@ fields.co2 = { generator = "constant", value = 600 }"#,
         );
     }
 
+    /// A subscription of template `t` to `cmd/<device_id>/<leaf>` with `script`.
+    fn subscription(leaf: &str, script: &str) -> String {
+        format!(
+            "\n[[templates.subscriptions]]\ntopic = \"cmd/{{{{ device_id }}}}/{leaf}\"\nqos = 1\n\
+             script = '''\n{script}\n'''\n"
+        )
+    }
+
+    /// Spawns `d` of `project` and waits until it is online, by which time it has subscribed.
+    async fn spawn_online(project: &Project, sub: &mut Subscriber) -> Running {
+        let running = spawn(project, "d");
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/status" && m.payload == "online")
+            .await
+            .expect("online");
+        running
+    }
+
+    async fn a_command_changes_state_and_the_field_script_follows(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let project = live_project(
+            port,
+            version,
+            &format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/temp\", payload = \"{{{{ temp }}}}\" }}]\n\
+                 fields.temp = {{ generator = \"script\", start = 20, script = 'if state.heating == true {{ 30 }} else {{ 20 }}' }}\n{}",
+                subscription("heating", "state.heating = payload == \"ON\";")
+            ),
+        );
+        let running = spawn_online(&project, &mut sub).await;
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/temp" && m.payload == "20")
+            .await
+            .unwrap();
+
+        sub.publish("cmd/d/heating", "ON").await;
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/temp" && m.payload == "30")
+            .await
+            .expect("the field script sees the state the command set");
+        let state = running.shared.snapshot();
+        assert_eq!(state.instances["d"].received, 1);
+        assert_eq!(state.instances["d"].errors, 0);
+    }
+
+    async fn a_subscription_script_replies_like_any_message(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let project = live_project(
+            port,
+            version,
+            &format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = \"{{{{ v }}}}\" }}]\n\
+                 fields.v = {{ generator = \"constant\", value = 1 }}\n{}",
+                subscription(
+                    "+",
+                    "publish(\"lv/\" + device_id + \"/ack\", topic + \"=\" + payload + \" v=\" + fields.v);"
+                )
+            ),
+        );
+        let running = spawn_online(&project, &mut sub).await;
+
+        sub.publish("cmd/d/power", "ON").await;
+        let reply = sub.wait_for(WAIT, |m| m.topic == "lv/d/ack").await.unwrap();
+        assert_eq!(reply.payload, "cmd/d/power=ON v=1.0");
+        let state = running.shared.snapshot();
+        let logged = state.log.iter().find(|e| e.topic == "lv/d/ack").unwrap();
+        assert_eq!(
+            (logged.qos, logged.payload.as_str()),
+            (0, reply.payload.as_str())
+        );
+        let logged = state.log.iter().filter(|e| e.instance == "d").count();
+        assert_eq!(
+            state.instances["d"].published as usize, logged,
+            "counted as published"
+        );
+    }
+
+    async fn a_subscription_script_pins_and_unpins(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let project = live_project(
+            port,
+            version,
+            &format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = \"{{{{ v }}}}\" }}]\n\
+                 fields.v = {{ generator = \"constant\", value = 1 }}\n{}",
+                subscription(
+                    "pin",
+                    "if payload == \"off\" { unpin(\"v\") } else { pin(\"v\", parse_float(payload)) }"
+                )
+            ),
+        );
+        let running = spawn_online(&project, &mut sub).await;
+
+        sub.publish("cmd/d/pin", "5").await;
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/state" && m.payload == "5")
+            .await
+            .unwrap();
+        assert!(
+            running.shared.snapshot().instances["d"]
+                .pinned
+                .contains("v")
+        );
+
+        sub.publish("cmd/d/pin", "off").await;
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/state" && m.payload == "1")
+            .await
+            .unwrap();
+        assert!(running.shared.snapshot().instances["d"].pinned.is_empty());
+    }
+
+    async fn a_failing_script_counts_an_error_and_the_instance_stays_online(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let project = live_project(
+            port,
+            version,
+            &format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = \"{{{{ v }}}}\" }}]\n\
+                 fields.v = {{ generator = \"script\", script = 'if seq == 2 || seq == 3 {{ nope() }} else {{ seq + 1 }}' }}\n{}",
+                subscription("x", "nope();")
+            ),
+        );
+        let running = spawn_online(&project, &mut sub).await;
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |m| {
+            m.topic == "lv/d/state" && m.payload == "5"
+        })
+        .await;
+        assert_eq!(
+            on(&seen, "lv/d/state"),
+            ["1", "2", "2", "2", "5"],
+            "a failing field keeps its latest value"
+        );
+        assert_eq!(running.shared.snapshot().instances["d"].errors, 2);
+
+        sub.publish("cmd/d/x", "1").await;
+        eventually(
+            || "the subscription script's error is counted".into(),
+            || {
+                let instance = &running.shared.snapshot().instances["d"];
+                instance.received == 1 && instance.errors == 3
+            },
+        )
+        .await;
+        assert_eq!(status(&running.shared, "d"), InstanceStatus::Online);
+        let later = sub.collect(Duration::from_millis(300)).await;
+        assert_eq!(
+            on(&later, "lv/d/status"),
+            Vec::<&str>::new(),
+            "no reconnect"
+        );
+        assert!(!on(&later, "lv/d/state").is_empty(), "it keeps publishing");
+    }
+
+    async fn an_update_moves_a_subscription_and_keeps_the_state(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "lv/#").await;
+        let body = |leaf: &str, field_script: &str| {
+            format!(
+                "messages = [{{ topic = \"lv/{{{{ device_id }}}}/state\", payload = \"{{{{ n }}}}\" }}]\n\
+                 fields.n = {{ generator = \"script\", script = '{field_script}' }}\n{}",
+                subscription(leaf, "state.n = parse_int(payload);")
+            )
+        };
+        let old = live_project(port, version, &body("a", "state.n ?? 0"));
+        let running = spawn_online(&old, &mut sub).await;
+        sub.publish("cmd/d/a", "5").await;
+        sub.wait_for(WAIT, |m| m.topic == "lv/d/state" && m.payload == "5")
+            .await
+            .unwrap();
+
+        let new = live_project(port, version, &body("b", "(state.n ?? 0) + 100"));
+        update(&running, &new);
+        let mut seen = Vec::new();
+        record_until(&mut sub, &mut seen, |m| m.payload == "105").await;
+        sub.publish("cmd/d/b", "7").await;
+        record_until(&mut sub, &mut seen, |m| m.payload == "107").await;
+        sub.publish("cmd/d/a", "9").await;
+        seen.extend(sub.collect(Duration::from_millis(400)).await);
+        assert!(
+            !on(&seen, "lv/d/state").contains(&"109"),
+            "the old filter is gone: {seen:#?}"
+        );
+        assert_eq!(on(&seen, "lv/d/status"), Vec::<&str>::new(), "no reconnect");
+        assert_eq!(running.shared.snapshot().instances["d"].received, 2);
+    }
+
     /// Runs each listed test once per MQTT version, as `mqtt311::<name>` and `mqtt5::<name>`.
     macro_rules! on_both_versions {
         ($($test:ident),* $(,)?) => {
@@ -1177,7 +1499,12 @@ fields.co2 = { generator = "constant", value = 600 }"#,
         an_update_keeps_the_state_of_unchanged_generators,
         an_update_drops_the_pin_of_a_removed_field,
         an_interval_change_takes_effect_from_the_next_tick,
-        an_update_announces_changed_entities_and_clears_dropped_ones
+        an_update_announces_changed_entities_and_clears_dropped_ones,
+        a_command_changes_state_and_the_field_script_follows,
+        a_subscription_script_replies_like_any_message,
+        a_subscription_script_pins_and_unpins,
+        a_failing_script_counts_an_error_and_the_instance_stays_online,
+        an_update_moves_a_subscription_and_keeps_the_state
     );
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1222,6 +1549,56 @@ params = {{ room = "office" }}
             logged.properties.user_properties,
             [("room".into(), "office".into()), ("seq".into(), "0".into())]
         );
+    }
+
+    /// The documentation's thermostat example does what its comments say.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_thermostat_example_follows_its_commands() {
+        let (ports, port) = broker(MqttVersion::V5);
+        let src = include_str!("../../../../examples/thermostat.toml")
+            .replace("port = 1883", &format!("port = {port}"))
+            .replace("interval = \"5s\"", "interval = \"100ms\"");
+        let mut sub = Subscriber::connect(ports.v5, "senzor/#").await;
+        let running = spawn(&valid_project(&src), "living-room");
+        sub.wait_for(WAIT, |m| m.payload == "online").await.unwrap();
+        let state = |m: &Received| -> Option<serde_json::Value> {
+            (m.topic == "senzor/living-room/state")
+                .then(|| serde_json::from_str(&m.payload).unwrap())
+        };
+        let heats_to = |setpoint: f64| {
+            move |m: &Received| {
+                state(m).is_some_and(|s| s["setpoint"] == setpoint && s["heating"] == true)
+            }
+        };
+        sub.wait_for(WAIT, heats_to(21.5))
+            .await
+            .expect("heats to the target param");
+
+        let ack = |text: &'static str| {
+            move |m: &Received| m.topic == "senzor/living-room/ack" && m.payload == text
+        };
+        sub.publish("senzor/living-room/set/setpoint", r#"{"setpoint": 25}"#)
+            .await;
+        sub.wait_for(WAIT, ack("setpoint 25.0")).await.unwrap();
+        sub.wait_for(WAIT, heats_to(25.0)).await.unwrap();
+        sub.publish("senzor/living-room/set/setpoint", "40").await;
+        sub.wait_for(WAIT, ack("setpoint 30.0"))
+            .await
+            .expect("clamped");
+        sub.publish("senzor/living-room/set/setpoint", "warm").await;
+        sub.wait_for(WAIT, ack("setpoint must be a number"))
+            .await
+            .unwrap();
+
+        sub.publish("senzor/living-room/set/mode", "OFF").await;
+        sub.wait_for(WAIT, ack("mode off")).await.unwrap();
+        sub.wait_for(WAIT, |m| {
+            state(m).is_some_and(|s| s["mode"] == "off" && s["heating"] == false)
+        })
+        .await
+        .expect("stops heating");
+        let instance = &running.shared.snapshot().instances["living-room"];
+        assert_eq!((instance.received, instance.errors), (4, 0));
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -27,16 +27,19 @@ If the device was running when the problem appeared, its running instances keep 
 When an edit changes the settings of a running instance but not how it connects, the instance takes the new settings at once. It stays connected, so your consumers see no `offline` or `online`. This covers:
 
 - its messages: topics, payloads and MQTT 5 properties;
-- its fields: generators, units and names;
+- its fields: generators, scripts, units and names;
 - the interval, QoS and retain;
 - params and field overrides;
 - the template the device uses;
 - the seed;
-- Home Assistant discovery.
+- Home Assistant discovery;
+- [subscriptions](/docs/concepts/scripts#subscriptions): their topics, QoS and scripts.
 
 The run carries on with the new settings:
 
-- A field whose generator you did not change keeps its state: a random walk carries on from its current value. A field you add, or whose generator you change, starts afresh.
+- A field whose generator you did not change keeps its state: a random walk carries on from its current value. A field you add, or whose generator you change, starts afresh; for a field script, a changed script counts as a changed generator, so its `value` starts again from `start`.
+- The scripts' [`state`](/docs/concepts/scripts#state) stays as it is.
+- The instance unsubscribes from the topics of subscriptions you remove and subscribes to the topics you add or whose QoS you change, without reconnecting. An instance that is reconnecting subscribes to the current topics once it is back.
 - A field you remove disappears from the instance, and so does its pin. Pins on the other fields stay.
 - A new interval applies at once: the next tick comes one new interval after the edit.
 - `seq` and the time a sine follows carry on.

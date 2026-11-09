@@ -318,7 +318,7 @@ pub struct Received {
 /// An MQTT 5 client that records every message on its subscription until it is dropped.
 pub struct Subscriber {
     rx: mpsc::UnboundedReceiver<Received>,
-    _client: AsyncClient,
+    client: AsyncClient,
 }
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -375,10 +375,7 @@ impl Subscriber {
             .await
             .expect("subscription confirmed in time")
             .expect("subscriber task alive");
-        Subscriber {
-            rx,
-            _client: client,
-        }
+        Subscriber { rx, client }
     }
 
     /// The first message matching `pred` within `timeout`; earlier non-matching messages are dropped.
@@ -398,6 +395,14 @@ impl Subscriber {
         .await
         .ok()
         .flatten()
+    }
+
+    /// Publishes `payload` on `topic` with QoS 1, as any other client of the broker would.
+    pub async fn publish(&self, topic: &str, payload: &str) {
+        self.client
+            .publish(topic, QoS::AtLeastOnce, false, payload.to_string())
+            .await
+            .expect("queue publish");
     }
 
     /// Every message that arrives within `during`.

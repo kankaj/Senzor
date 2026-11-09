@@ -357,6 +357,43 @@
             "values"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A Rhai script whose result is the field's value; `start` is its `value` on the first tick.",
+          "properties": {
+            "generator": {
+              "const": "script",
+              "type": "string"
+            },
+            "name": {
+              "description": "A readable name, e.g. \"CO2\"; without one, the field's key is shown.",
+              "type": "string"
+            },
+            "noise": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "script": {
+              "$ref": "#/$defs/Script"
+            },
+            "start": {
+              "$ref": "#/$defs/Value",
+              "default": 0
+            },
+            "unit": {
+              "description": "Free text shown after the value, e.g. \"ppm\", \"°C\" or \"%\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "generator",
+            "script"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -405,6 +442,10 @@
       ],
       "type": "string"
     },
+    "Script": {
+      "description": "A Rhai script; see https://senzor.kankaj.cz/docs/concepts/scripts",
+      "type": "string"
+    },
     "SimulationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -417,6 +458,32 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "SubscriptionSpec": {
+      "additionalProperties": false,
+      "description": "One `[[templates.subscriptions]]` entry.",
+      "properties": {
+        "qos": {
+          "default": 0,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "script": {
+          "$ref": "#/$defs/Script",
+          "description": "Runs for every message that arrives on the topic."
+        },
+        "topic": {
+          "description": "The topic filter, a template with the variables of the availability topic; it may\ncontain the MQTT wildcards `+` and `#`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "script"
+      ],
       "type": "object"
     },
     "TemplateSpec": {
@@ -465,6 +532,13 @@
         "retain": {
           "default": false,
           "type": "boolean"
+        },
+        "subscriptions": {
+          "description": "Topic filters each instance subscribes to, each with a script that runs for every\nmessage that arrives on it.",
+          "items": {
+            "$ref": "#/$defs/SubscriptionSpec"
+          },
+          "type": "array"
         }
       },
       "required": [

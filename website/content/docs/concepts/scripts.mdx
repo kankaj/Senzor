@@ -1,0 +1,205 @@
+---
+title: Scripts and commands
+description: Compute field values with Rhai scripts, and let simulated devices take commands through subscriptions.
+---
+
+Generators cover values that follow a rule of their own. Some devices react to the world instead: a thermostat heats until the room reaches its setpoint, and the setpoint comes from a command. Senzor has two kinds of scripts for that, both written in [Rhai](https://rhai.rs/book/), a small scripting language with a syntax close to Rust and JavaScript:
+
+- a **field script**, the `script` generator, computes a field's value on every tick;
+- a **subscription** subscribes each instance to a topic and runs a script for every message that arrives on it. The script can change the instance's `state`, pin a field or publish an answer.
+
+All scripts of an instance share one [`state`](#state), so a command changes what the field scripts compute next.
+
+In the GUI, the [template editor](/docs/gui/editing-templates) has a **script** box for each script field and a **Subscriptions** section; a device can override a field's script in the [device editor](/docs/gui/editing-devices#field-overrides). You can also write them in the project file, or with the **TOML** button that shows the project as text.
+
+## Field scripts
+
+A field with `generator = "script"` runs its script on every tick. The value of the script's last expression is the field's new value:
+
+```toml
+[templates.fields.temperature]
+generator = "script"
+start = 19.0
+script = '''
+if state.heating == true { value + 0.15 } else { value - 0.05 }
+'''
+```
+
+`value` is the field's value from the previous tick, and `start` on the first tick (`0` when the field sets no `start`). The result must be a number, `true` or `false`, or a string. Anything else, such as `()`, an array, an object map or a number that is not finite, is an [error](#limits-and-errors). `noise` adds a random amount to a numeric result, as for the other generators, and `value` is the result without the noise.
+
+A field script sees these variables:
+
+| Variable | Value |
+| --- | --- |
+| `value` | The field's previous value, or `start` on the first tick. |
+| `t` | Seconds since the run started, as a decimal number. |
+| `seq` | The tick number of the run, from 0. A whole number. |
+| `now_ms` | The time of the tick, in milliseconds since 1970-01-01 UTC. A whole number. |
+| `device_id` | The instance ID. |
+| `params` | The device's params, as an object map: `params.room`. |
+| `fields` | Every field's value from the previous tick, as an object map: `fields.co2`. On the first tick, each field's starting value, such as a random walk's `start`. |
+| `state` | The instance's [state](#state). |
+
+`fields` holds the values of the previous tick, also for fields that come before this one: a field script never sees another field's value of the same tick. Fields run in the order of their names.
+
+Numbers from the project, which are `value`, `start`, `params` and `fields`, reach a script as decimal numbers, so `value / 2` of 5 is 2.5, and `"" + value` of 21 is `"21.0"`. Only `seq`, `now_ms` and whole numbers you write in the script itself are whole numbers. Payload templates format any number as usual: `{{ temperature | round(1) }}`.
+
+A pinned field does not run its script; after **Unpin**, it continues from the `value` it had before the pin. The other parameters are in [Generators](/docs/reference/generators#script).
+
+## Subscriptions
+
+A template's subscriptions are `[[templates.subscriptions]]` tables:
+
+```toml
+[[templates.subscriptions]]
+topic = "cmd/{{ device_id }}/heating"
+qos = 1
+script = '''
+state.heating = payload == "ON";
+publish("state/" + device_id + "/heating", payload);
+'''
+```
+
+`topic` is a topic filter. It is a template string with the variables of the availability topic: the params, `device_id`, `index` and `template_id`. It can contain the MQTT wildcards `+`, which stands for one level, and `#`, which stands for the rest of the topic. `qos` is the subscription's QoS, `0` by default. See [Subscriptions](/docs/reference/project-file#subscriptions) for the rules.
+
+Each instance subscribes to its rendered topics every time it connects, before it publishes its availability `online`. A command sent once `online` has arrived reaches the instance.
+
+For each message the instance receives, Senzor runs the script of every subscription whose filter matches the message's topic, in the order of the subscriptions. As in MQTT, a filter that starts with a wildcard does not match a topic that starts with `$`, such as `$SYS/...`. Every received message counts in the instance's `received` counter, which the [MCP tools](/docs/reference/mcp-tools#instance-summary) show.
+
+A subscription script sees these variables:
+
+| Variable | Value |
+| --- | --- |
+| `topic` | The topic the message arrived on. |
+| `payload` | The payload as text. Bytes that are not UTF-8 become `�`. |
+| `json` | The payload read as JSON: an object map, an array, a number, a string, `true` or `false`. `()` when the payload is not JSON or is `null`. JSON numbers are decimal numbers. |
+| `device_id` | The instance ID. |
+| `params` | The device's params, as an object map. |
+| `fields` | Every field's latest value, as an object map. |
+| `state` | The instance's [state](#state). |
+
+What the script returns is ignored. These functions act on the instance; they work only in subscription scripts:
+
+| Function | Effect |
+| --- | --- |
+| `publish(topic, payload)` | Publishes `payload` on `topic`, with the template's `qos` and `retain`. A payload that is not a string is written as Rhai writes it, such as `21.5` or `true`; for JSON, build an object map and call `to_json()` on it: `publish(t, #{on: true}.to_json())`. The topic must not be empty or contain `+` or `#`. The message goes through the same path as the messages of a tick: it appears in the message log, counts as published, and the same [size limit](/docs/reference/project-file#messages) applies. |
+| `pin(field, value)` | Pins `field` to `value`, a number, `true` or `false`, or a string, as **Pin** in the GUI or the MCP `pin` tool does. A field the template does not have is ignored. |
+| `unpin(field)` | Unpins `field`. |
+
+An instance receives its own messages too, when one of its filters matches them. A subscription script that publishes on a topic its own filter matches runs again for that message, without end.
+
+## State
+
+`state` is an object map that belongs to one instance and lasts for one run. All the instance's scripts, field scripts and subscription scripts alike, read and change the same map; other instances have their own. A script changes it by assigning to its keys:
+
+```rust
+state.setpoint = 22.5;
+state.count = (state.count ?? 0) + 1;
+```
+
+`state` starts empty when the instance starts, also after **Restart**. It stays through reconnects and through edits the instance takes while it runs (see [Editing while running](/docs/concepts/editing-while-running)).
+
+A key that was never set reads as `()`, Rhai's "nothing". `if` needs `true` or `false`, so `if state.heating { ... }` fails until a command has set `heating`. Write one of these instead:
+
+- `state.heating == true`, which is `false` while `heating` is not set;
+- `state.setpoint ?? 21.0`, which gives `21.0` while `setpoint` is not set;
+- `"heating" in state`, which tells whether the key is set.
+
+`state` must stay an object map: a script that assigns something else to it, such as `state = 5`, fails, and `state` starts again empty.
+
+## Functions
+
+Every script can use Rhai's standard functions, among them `abs`, `round`, `floor`, `ceiling`, `sqrt`, `sin`, `cos`, `min`, `max`, `parse_int`, `parse_float`, `to_string`, `type_of` and the functions on strings, arrays and object maps (see [the Rhai book](https://rhai.rs/book/)), and these functions of Senzor:
+
+| Function | Returns |
+| --- | --- |
+| `random()` | A random decimal number from 0 up to, not including, 1. |
+| `random_range(lo, hi)` | A random number from `lo` up to, not including, `hi`. Whole numbers give a whole number, as in `random_range(1, 7)` for a die; otherwise a decimal number. `lo` must be less than `hi`. |
+| `clamp(x, lo, hi)` | `x`, kept between `lo` and `hi`. Whole numbers give a whole number. |
+
+`random` and `random_range` draw from the instance's random number generator, the one its generators use. With a [seed](/docs/concepts/reproducible-runs), a run that receives no commands repeats its random values.
+
+Scripts cannot read or write files: `import` finds no modules, and `print` and `debug` print nothing.
+
+## Limits and errors
+
+So that a script cannot hang an instance or use up memory, each run of a script is limited:
+
+| Limit | Value |
+| --- | --- |
+| Operations per run | 100,000 |
+| Length of a string | 1 MiB (1,048,576 bytes) |
+| Items in an array or object map | 10,000 |
+| Nesting of function calls | 32 |
+
+A run that hits a limit fails, and so does a script with a runtime error, such as a function that does not exist or `if` on a value that is not `true` or `false`. A failure counts as an error of the instance, and the instance keeps running:
+
+- a field whose script fails keeps its latest value for that tick, and its script runs again on the next tick. The error reads `script of field <name>: <reason>`, for example `script of field temperature: Too many operations (line 2, position 5)`.
+- a subscription script that fails has done what it did before the error: its changes to `state`, its publishes and its pins stand. The error reads `script of subscription <n>: <reason>`, with subscriptions counted from 1.
+
+Senzor compiles every script when it checks the project. A script that does not compile, or is empty, is a [validation problem](/docs/reference/validation-errors), and the devices of its template cannot start.
+
+## Example: a thermostat
+
+The [thermostat example](https://github.com/kankaj/Senzor/blob/main/examples/thermostat.toml) (**Thermostat** under **Examples** in the GUI) heats a room towards a setpoint. Its fields are scripts that read `state` and each other's previous values; two subscriptions take a setpoint and a mode:
+
+```toml
+# The setpoint of the last command, or else the device's `target` param.
+[templates.fields.setpoint]
+generator = "script"
+start = 21
+script = "state.setpoint ?? params.target"
+
+[templates.fields.mode]
+generator = "script"
+start = "heat"
+script = 'state.mode ?? "heat"'
+
+# Heats while the mode is "heat" and the room is colder than the setpoint.
+[templates.fields.heating]
+generator = "script"
+start = false
+script = '''
+fields.mode == "heat" && fields.temperature < fields.setpoint
+'''
+
+[templates.fields.temperature]
+generator = "script"
+start = 19
+noise = 0.02
+script = '''
+if fields.heating == true { value + 0.15 } else { value - 0.05 }
+'''
+
+[[templates.subscriptions]]
+topic = "senzor/{{ device_id }}/set/setpoint"
+qos = 1
+script = '''
+let setpoint = if type_of(json) == "map" { json.setpoint } else { json };
+if type_of(setpoint) == "f64" {
+    state.setpoint = clamp(setpoint, 5.0, 30.0);
+    publish("senzor/" + device_id + "/ack", `setpoint ${state.setpoint}`);
+} else {
+    publish("senzor/" + device_id + "/ack", "setpoint must be a number");
+}
+'''
+
+[[templates.subscriptions]]
+topic = "senzor/{{ device_id }}/set/mode"
+qos = 1
+script = '''
+state.mode = if payload == "OFF" { "off" } else { "heat" };
+publish("senzor/" + device_id + "/ack", "mode " + state.mode);
+'''
+```
+
+Run it, then send it commands with any MQTT client, for example Mosquitto's:
+
+```bash
+mosquitto_pub -t senzor/living-room/set/setpoint -m 23.5
+mosquitto_pub -t senzor/living-room/set/setpoint -m '{"setpoint": 18}'
+mosquitto_pub -t senzor/living-room/set/mode -m OFF
+mosquitto_sub -t 'senzor/living-room/#' -v
+```
+
+The state messages show the new setpoint on the next tick, `heating` follows on the tick after, and the temperature turns.

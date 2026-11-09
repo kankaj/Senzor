@@ -16,7 +16,7 @@ impl Reference {
     }
 }
 
-pub(crate) const REFERENCES: [Reference; 4] = [
+pub(crate) const REFERENCES: [Reference; 5] = [
     Reference {
         uri: "senzor://reference/project-file",
         name: "project-file",
@@ -27,7 +27,7 @@ pub(crate) const REFERENCES: [Reference; 4] = [
     Reference {
         uri: "senzor://reference/generators",
         name: "generators",
-        description: "The field generators (constant, random_walk, sine, uniform, sequence) and noise",
+        description: "The field generators (constant, random_walk, sine, uniform, sequence, script) and noise",
         mime_type: "text/markdown",
         text: include_str!("../../../website/content/docs/reference/generators.mdx"),
     },
@@ -37,6 +37,13 @@ pub(crate) const REFERENCES: [Reference; 4] = [
         description: "Variables and filters available in topics and payloads",
         mime_type: "text/markdown",
         text: include_str!("../../../website/content/docs/reference/template-variables.mdx"),
+    },
+    Reference {
+        uri: "senzor://reference/scripts",
+        name: "scripts",
+        description: "Rhai scripts: field scripts, subscriptions to command topics, state, functions and limits",
+        mime_type: "text/markdown",
+        text: include_str!("../../../website/content/docs/concepts/scripts.mdx"),
     },
     Reference {
         uri: "senzor://reference/builtin-templates",

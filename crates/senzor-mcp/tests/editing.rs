@@ -584,6 +584,7 @@ async fn the_reference_pages_are_resources() {
             "senzor://reference/project-file",
             "senzor://reference/generators",
             "senzor://reference/template-variables",
+            "senzor://reference/scripts",
             "senzor://reference/builtin-templates"
         ]
     );

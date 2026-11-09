@@ -41,6 +41,18 @@ impl FieldSpec {
         problems
     }
 
+    /// What is wrong with the field's script, if it has one: `script is empty` or
+    /// `script does not compile: <reason>`. Checking it compiles the script once for every copy
+    /// of the field.
+    pub fn script_problem(&self) -> Option<String> {
+        match &self.generator {
+            GeneratorSpec::Script { script, .. } => {
+                script.compiled().err().map(|e| format!("script {e}"))
+            }
+            _ => None,
+        }
+    }
+
     /// What people call the field whose key is `key`: its `name`, or else the key.
     pub fn display_name<'a>(&'a self, key: &'a str) -> &'a str {
         self.name.as_deref().unwrap_or(key)

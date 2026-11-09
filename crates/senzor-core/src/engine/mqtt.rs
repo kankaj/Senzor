@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rumqttc::v5::mqttbytes::v5::{
     ConnectReturnCode as Reason, LastWill as LastWill5, LastWillProperties, PubAckReason,
-    PublishProperties,
+    PublishProperties, SubscribeReasonCode,
 };
 use rumqttc::{LastWill, MqttOptions, TlsConfiguration, Transport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -66,6 +66,15 @@ pub(crate) enum ConnEvent {
     /// The broker acknowledged a QoS 1 publish. On MQTT 5, `refused` is its reason when it did
     /// not accept the message, e.g. `NotAuthorized`; MQTT 3.1.1 has no way to say so.
     PubAck {
+        refused: Option<String>,
+    },
+    /// A message on a topic the instance subscribed to.
+    Publish {
+        topic: String,
+        payload: Vec<u8>,
+    },
+    /// The broker answered a SUBSCRIBE. `refused` is its reason when it refused the filter.
+    SubAck {
         refused: Option<String>,
     },
     Other,
@@ -239,6 +248,26 @@ impl Client {
         }
     }
 
+    /// Queues a SUBSCRIBE to `filter` without waiting; fails when the request queue is full.
+    pub(crate) fn try_subscribe(&self, filter: &str, qos: u8) -> Result<(), String> {
+        match self {
+            Client::V311(client) => client
+                .try_subscribe(filter, qos_v311(qos))
+                .map_err(|e| e.to_string()),
+            Client::V5(client) => client
+                .try_subscribe(filter, qos_v5(qos))
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Queues an UNSUBSCRIBE from `filter` without waiting; fails when the request queue is full.
+    pub(crate) fn try_unsubscribe(&self, filter: &str) -> Result<(), String> {
+        match self {
+            Client::V311(client) => client.try_unsubscribe(filter).map_err(|e| e.to_string()),
+            Client::V5(client) => client.try_unsubscribe(filter).map_err(|e| e.to_string()),
+        }
+    }
+
     /// Queues a DISCONNECT without waiting; the broker then discards the Last Will. A full queue
     /// is ignored: the caller drops the connection soon after anyway.
     pub(crate) fn try_disconnect(&self) {
@@ -275,6 +304,17 @@ impl Connection {
                 Ok(rumqttc::Event::Incoming(rumqttc::Packet::PubAck(_))) => {
                     Ok(ConnEvent::PubAck { refused: None })
                 }
+                Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
+                    Ok(ConnEvent::Publish {
+                        topic: publish.topic,
+                        payload: publish.payload.to_vec(),
+                    })
+                }
+                Ok(rumqttc::Event::Incoming(rumqttc::Packet::SubAck(ack))) => {
+                    Ok(ConnEvent::SubAck {
+                        refused: v311_suback_refusal(&ack.return_codes),
+                    })
+                }
                 Ok(_) => Ok(ConnEvent::Other),
                 Err(rumqttc::ConnectionError::ConnectionRefused(code)) => {
                     Err(ConnError::Refused(format!("{code:?}")))
@@ -291,6 +331,17 @@ impl Connection {
                     ack,
                 ))) => Ok(ConnEvent::PubAck {
                     refused: v5_puback_refusal(ack.reason),
+                }),
+                Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::Publish(
+                    publish,
+                ))) => Ok(ConnEvent::Publish {
+                    topic: String::from_utf8_lossy(&publish.topic).into_owned(),
+                    payload: publish.payload.to_vec(),
+                }),
+                Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::SubAck(
+                    ack,
+                ))) => Ok(ConnEvent::SubAck {
+                    refused: v5_suback_refusal(&ack.return_codes),
                 }),
                 Ok(_) => Ok(ConnEvent::Other),
                 Err(rumqttc::v5::ConnectionError::ConnectionRefused(reason)) => {
@@ -375,6 +426,22 @@ fn v5_puback_refusal(reason: PubAckReason) -> Option<String> {
         PubAckReason::Success | PubAckReason::NoMatchingSubscribers => None,
         other => Some(format!("{other:?}")),
     }
+}
+
+/// Why an MQTT 3.1.1 broker refused a subscription, or `None` when it accepted all of them.
+fn v311_suback_refusal(codes: &[rumqttc::SubscribeReasonCode]) -> Option<String> {
+    codes
+        .iter()
+        .find(|code| matches!(code, rumqttc::SubscribeReasonCode::Failure))
+        .map(|code| format!("{code:?}"))
+}
+
+/// Why an MQTT 5 broker refused a subscription, or `None` when it accepted all of them.
+fn v5_suback_refusal(codes: &[SubscribeReasonCode]) -> Option<String> {
+    codes
+        .iter()
+        .find(|code| !matches!(code, SubscribeReasonCode::Success(_)))
+        .map(|code| format!("{code:?}"))
 }
 
 fn qos_v311(level: u8) -> rumqttc::QoS {
@@ -612,6 +679,25 @@ mod tests {
         assert_eq!(v5_puback_refusal(PubAckReason::NoMatchingSubscribers), None);
         assert_eq!(
             v5_puback_refusal(PubAckReason::NotAuthorized),
+            Some("NotAuthorized".into())
+        );
+    }
+
+    #[test]
+    fn subacks_name_the_reason_only_when_the_broker_refused() {
+        use rumqttc::SubscribeReasonCode as V311;
+        assert_eq!(
+            v311_suback_refusal(&[V311::Success(rumqttc::QoS::AtLeastOnce)]),
+            None
+        );
+        assert_eq!(
+            v311_suback_refusal(&[V311::Failure]),
+            Some("Failure".into())
+        );
+        let granted = SubscribeReasonCode::Success(rumqttc::v5::mqttbytes::QoS::AtMostOnce);
+        assert_eq!(v5_suback_refusal(&[granted]), None);
+        assert_eq!(
+            v5_suback_refusal(&[granted, SubscribeReasonCode::NotAuthorized]),
             Some("NotAuthorized".into())
         );
     }

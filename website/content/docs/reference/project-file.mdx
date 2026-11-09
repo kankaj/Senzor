@@ -138,6 +138,7 @@ declared.
 | `availability` | table | none | Status topic and Last Will. See [Availability](#availability). |
 | `messages` | array of tables | required | What to publish on every tick. At least one. See [Messages](#messages). |
 | `fields` | table | required | The values to generate. At least one. See [Fields](#fields). |
+| `subscriptions` | array of tables | none | Topics each instance subscribes to, each with a script to run for every message. See [Subscriptions](#subscriptions). |
 
 ```toml
 [[templates]]
@@ -222,6 +223,45 @@ fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, st
 - A field name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
 - Any other key in a field table is an error, as a misspelt generator parameter is.
 
+A field with `generator = "script"` computes its value with a Rhai script, written in the `script`
+key, from a `start` value; see [`script`](/docs/reference/generators#script). A script of several
+lines reads best as a field section:
+
+```toml
+[templates.fields.temperature]
+generator = "script"
+start = 20.0
+script = '''
+if state.heating == true { value + 0.2 } else { value - 0.1 }
+'''
+```
+
+### Subscriptions
+
+Each `[[templates.subscriptions]]` entry subscribes every instance of the template to a topic filter
+and runs a script for every message that arrives on it. See
+[Scripts and commands](/docs/concepts/scripts#subscriptions) for what the script sees and can do.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | The topic filter. Can use params, `device_id`, `index` and `template_id`, like the availability topic. Must render to a valid MQTT topic filter: not empty, `#` only as the whole last level (`a/#`), `+` only as a whole level (`a/+/b`). |
+| `qos` | integer | `0` | QoS of the subscription: `0`, `1` or `2`. |
+| `script` | string | required | A Rhai script. Must compile, and must not be empty. |
+
+```toml
+[[templates.subscriptions]]
+topic = "cmd/{{ device_id }}/heating"
+qos = 1
+script = '''
+state.heating = payload == "ON";
+publish("state/" + device_id + "/heating", payload);
+'''
+```
+
+An instance subscribes every time it connects, before it publishes its availability `online`.
+Replies a script publishes use the template's `qos` and `retain`. Validation counts subscriptions
+from 1, as in `subscriptions[1].topic`.
+
 ## Devices
 
 Each `[[devices]]` entry runs `count` instances of a template. Every instance is one simulated sensor
@@ -236,7 +276,7 @@ with its own MQTT connection.
 | `params` | table of values | empty | Extra template variables for this device's instances, such as a room name. |
 | `autostart` | boolean | `true` | Whether the device starts when the GUI opens the project, when `senzor-cli run` runs without `--only`, and when `senzor-cli mcp` or the MCP tool `open_project` opens the project (unless `--no-autostart`). |
 | `interval` | duration | the template's `interval` | Overrides the template's interval for this device. Greater than 0. |
-| `fields` | table of tables | empty | Per-device changes to the template's fields. See [Field overrides](#field-overrides). |
+| `fields` | table of tables | empty | Per-device changes to the template's fields, a field's `script` and `start` included. See [Field overrides](#field-overrides). |
 
 ```toml
 [[devices]]

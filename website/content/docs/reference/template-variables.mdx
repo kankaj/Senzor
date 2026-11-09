@@ -88,8 +88,8 @@ parentheses names the template string, with messages counted from 1, and the lin
 
 - **When the project is loaded**, Senzor renders the templates of each device once, for its first
   instance, with `seq` 0, the current time and a sample value for each field: `value` of a
-  `constant`, `start` of a `random_walk`, `center` of a `sine`, `min` of a `uniform` and the first of
-  a `sequence`'s `values`. A problem there blocks the device, and `senzor-cli` refuses to run the
+  `constant`, `start` of a `random_walk`, `center` of a `sine`, `min` of a `uniform`, the first of
+  a `sequence`'s `values` and `start` of a `script`. A problem there blocks the device, and `senzor-cli` refuses to run the
   project. See [Validation errors](/docs/reference/validation-errors).
 - **While running**, a message that fails to render is skipped and counted as an error; the other
   messages of the tick are still published. This can happen when a later value breaks a filter that

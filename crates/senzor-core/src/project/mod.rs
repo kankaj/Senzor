@@ -16,9 +16,9 @@ pub use error::{Location, ProjectError};
 pub use field::FieldSpec;
 pub use file::{
     AvailabilitySpec, BrokerSpec, DEFAULT_WEBSOCKET_PATH, DeviceSpec, MessageSpec, MqttVersion,
-    ProjectFile, SimulationSpec, TemplateSpec, TlsSpec, Transport,
+    ProjectFile, SimulationSpec, SubscriptionSpec, TemplateSpec, TlsSpec, Transport,
 };
 pub use model::{
-    BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, SharedTemplates, TlsConfig,
-    Validated,
+    BrokerConfig, Credentials, DeviceConfig, InstanceConfig, Project, SharedTemplates,
+    Subscription, TlsConfig, Validated,
 };

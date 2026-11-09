@@ -28,6 +28,7 @@ An instance ticks only while it is online. While it is connecting or reconnectin
 | `sine` | A wave around `center` that swings by `amplitude` and repeats every `period`. It follows the time since the run started, shifted by `phase`. |
 | `uniform` | A random number between `min` and `max`, independent of the previous one. |
 | `sequence` | The `values` in order, then again from the start. With `loop = false` it repeats the last value once it reaches the end. |
+| `script` | Whatever its Rhai script computes from its previous value, the time, the params, the other fields and the instance's state. See [Scripts and commands](/docs/concepts/scripts). |
 
 Any generator can add `noise`: a random amount between `-noise` and `+noise`, added to each value. Noise needs numeric values, and it does not change the generator's state: noise never adds up in a random walk, which moves only by its own steps, and each published value gets fresh noise on top.
 
@@ -50,7 +51,7 @@ A pin lasts until you unpin the field or the instance's run ends. `senzor-cli ru
 
 ## Reconnects keep the state
 
-Generator state belongs to the run, not to the connection. When an instance loses its connection and reconnects, its generators, pins and `seq` continue where they were: a random walk does not jump back to `start`. While it is reconnecting, the instance does not tick, and missed ticks are not made up: if any tick fell due during the outage, the instance ticks once right after it is back online and keeps its interval from that moment. A sine, which follows the clock, is further along its wave when the instance is back.
+Generator state belongs to the run, not to the connection. When an instance loses its connection and reconnects, its generators, pins, `seq` and the scripts' `state` continue where they were: a random walk does not jump back to `start`. While it is reconnecting, the instance does not tick, and missed ticks are not made up: if any tick fell due during the outage, the instance ticks once right after it is back online and keeps its interval from that moment. A sine, which follows the clock, is further along its wave when the instance is back.
 
 ## Edits keep the state
 
@@ -63,7 +64,8 @@ An edit that a running instance takes at once does not begin a new run either. F
 - every generator starts afresh, so a random walk begins at `start` again and a sequence at its first value;
 - the time a sine follows starts again from 0;
 - `seq` starts again from 0;
-- pins are cleared.
+- pins are cleared;
+- the scripts' [`state`](/docs/concepts/scripts#state) starts empty.
 
 **Restart** stops a running instance and starts it again in one step, with the same effect. A run that fails, for example because the broker refused the connection, also ends; the next **Start** begins a new run.
 

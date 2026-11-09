@@ -5,19 +5,21 @@ use eframe::egui::{self, RichText, TextEdit};
 use senzor_core::engine::unannounced_fields;
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
-use senzor_core::project::{FieldSpec, Location, MessageSpec, MqttVersion, TemplateSpec};
+use senzor_core::project::{
+    FieldSpec, Location, MessageSpec, MqttVersion, SubscriptionSpec, TemplateSpec,
+};
 
 use super::template_text::{self, TextKind, Variable};
 use super::{
     Action, BoxOrRow, ERROR, UiState, WARNING, checked, duration_edit, errors_at, help,
-    mqtt5_control, name_edit, noise_edit, number_edit, optional_duration_edit, optional_text,
-    replace_if_unchanged, sequence_edit, shortcuts, value_edit,
+    mqtt5_control, name_edit, name_text_box, noise_edit, number_edit, optional_duration_edit,
+    optional_text, replace_if_unchanged, script_edit, sequence_edit, shortcuts, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{
     DEFAULT_NOISE, GeneratorKind, Removal, Rename, default_generator, new_availability,
-    new_message, set_generator_kind, unique_name,
+    new_message, new_subscription, set_generator_kind, unique_name,
 };
 use crate::preview::{json_problem, preview};
 
@@ -149,6 +151,7 @@ fn shown_inline(field: &str) -> bool {
         || field.starts_with("fields.")
         || field.starts_with("messages[")
         || field.starts_with("availability.")
+        || field.starts_with("subscriptions[")
 }
 
 fn uses_mqtt5(doc: &Document) -> bool {
@@ -203,6 +206,28 @@ fn editor(
             })
         },
         |ui| fields_editor(ui, &mut template.fields, key, project, ui_state, actions),
+    );
+    let topic_variables = variables_for(TextKind::AvailabilityTopic, template, project);
+    section(
+        ui,
+        &format!("{key}/section/subscriptions"),
+        |ui| {
+            ui.horizontal(|ui| {
+                let title = title(ui, "Subscriptions");
+                help::mark(ui, "Subscriptions", help::SUBSCRIPTIONS);
+                title
+            })
+            .inner
+        },
+        |ui| {
+            subscriptions_editor(
+                ui,
+                &mut template.subscriptions,
+                key,
+                project,
+                &topic_variables,
+            )
+        },
     );
 }
 
@@ -685,6 +710,7 @@ fn fields_editor(
                 generator_editor(
                     ui,
                     spec,
+                    &name,
                     &format!("{key}/field/{name}"),
                     &mut ui_state.buffers,
                 );
@@ -694,6 +720,80 @@ fn fields_editor(
     if ui.button("Add field").clicked() {
         let name = unique_name("field", fields.keys());
         fields.insert(name, default_generator(GeneratorKind::RandomWalk).into());
+    }
+}
+
+/// The template's subscriptions: a topic filter, a QoS and a script each.
+fn subscriptions_editor(
+    ui: &mut egui::Ui,
+    subscriptions: &mut Vec<SubscriptionSpec>,
+    key: &str,
+    project: Option<ProjectTemplate>,
+    variables: &[Variable],
+) {
+    let mut remove = None;
+    for (i, subscription) in subscriptions.iter_mut().enumerate() {
+        let number = i + 1;
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("Subscription {number}"));
+                let button = ui.button("Remove");
+                button.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Remove subscription {number}"),
+                    )
+                });
+                if button.clicked() {
+                    remove = Some(i);
+                }
+            });
+            // Problems name subscriptions from 1, as messages.
+            let field = |name: &str| format!("subscriptions[{number}].{name}");
+            let id = egui::Id::new(format!("{key}/subscription/{i}/topic"));
+            let label = text_label(
+                ui,
+                "Topic",
+                help::SUBSCRIPTION_TOPIC,
+                id,
+                &mut subscription.topic,
+                variables,
+            );
+            cell(ui, project, &field("topic"), |ui| {
+                template_text::edit(ui, &mut subscription.topic, id, false, variables)
+                    .labelled_by(label.id)
+            });
+            ui.horizontal(|ui| {
+                let label = help::label(ui, "QoS", help::QOS);
+                cell(ui, project, &field("qos"), |ui| {
+                    egui::ComboBox::from_id_salt(format!("{key}/subscription/{i}/qos"))
+                        .selected_text(subscription.qos.to_string())
+                        .show_ui(ui, |ui| {
+                            for qos in 0..=2u8 {
+                                ui.selectable_value(&mut subscription.qos, qos, qos.to_string());
+                            }
+                        })
+                        .response
+                        .labelled_by(label.id)
+                });
+            });
+            help::label(ui, "Script", help::SUBSCRIPTION_SCRIPT);
+            cell(ui, project, &field("script"), |ui| {
+                script_edit(
+                    ui,
+                    &format!("{key}/subscription/{i}/script"),
+                    &mut subscription.script,
+                    Some(&format!("Subscription {number} script")),
+                )
+            });
+        });
+    }
+    if let Some(i) = remove {
+        subscriptions.remove(i);
+    }
+    if ui.button("Add subscription").clicked() {
+        subscriptions.push(new_subscription());
     }
 }
 
@@ -722,7 +822,14 @@ fn describe_edit(
     response
 }
 
-fn generator_editor(ui: &mut egui::Ui, spec: &mut GeneratorSpec, key: &str, buffers: &mut Buffers) {
+/// The settings of field `name`'s generator.
+fn generator_editor(
+    ui: &mut egui::Ui,
+    spec: &mut GeneratorSpec,
+    name: &str,
+    key: &str,
+    buffers: &mut Buffers,
+) {
     let kind = GeneratorKind::of(spec).label();
     let key = format!("{key}/{kind}");
     ui.horizontal_wrapped(|ui| match spec {
@@ -774,7 +881,22 @@ fn generator_editor(ui: &mut egui::Ui, spec: &mut GeneratorSpec, key: &str, buff
             ui.checkbox(looping, "loop");
             noise_editor(ui, noise);
         }
+        GeneratorSpec::Script { start, noise, .. } => {
+            ui.label("start");
+            let response = value_edit(ui, buffers, &format!("{key}/start"), start);
+            name_text_box(&response, &format!("{name} start"), &start.to_input());
+            noise_editor(ui, noise);
+        }
     });
+    if let GeneratorSpec::Script { script, .. } = spec {
+        help::label(ui, "script", help::FIELD_SCRIPT);
+        script_edit(
+            ui,
+            &format!("{key}/script"),
+            script,
+            Some(&format!("{name} script")),
+        );
+    }
 }
 
 fn noise_editor(ui: &mut egui::Ui, noise: &mut Option<f64>) {
@@ -891,6 +1013,94 @@ template = "air"
                 "template = \"air\"\nparams = { room = \"office\" }\n"
             )
         )
+    }
+
+    /// `SRC` with a script field `temp` and one subscription, without the device.
+    fn script_src() -> String {
+        format!(
+            "{}\n[templates.fields.temp]\ngenerator = \"script\"\nstart = 20\n\
+             script = '''\nif state.on == true {{ value + 1 }} else {{ value }}\n'''\n\n\
+             [[templates.subscriptions]]\ntopic = \"cmd/{{{{ device_id }}}}/on\"\nqos = 1\n\
+             script = '''\nstate.on = payload == \"ON\";\n'''\n",
+            src_replacing("\n\n[[devices]]\nid = \"office\"\ntemplate = \"air\"\n", "")
+        )
+    }
+
+    #[test]
+    fn a_script_field_shows_its_start_and_script() {
+        let h = user_harness_with(&script_src());
+        assert_eq!(h.get_by_label("temp start").value().as_deref(), Some("20"));
+        assert_eq!(
+            h.get_by_label("temp script").value().as_deref(),
+            Some("if state.on == true { value + 1 } else { value }\n")
+        );
+    }
+
+    #[test]
+    fn typing_into_a_script_edits_the_field() {
+        let mut h = user_harness_with(&script_src());
+        h.get_by_label("temp script").focus();
+        h.run();
+        h.key_press(egui::Key::End);
+        type_per_frame(&mut h, &[" // warm"]);
+        let field = &h.state().doc.file().templates[0].fields["temp"];
+        let GeneratorSpec::Script { script, .. } = &field.generator else {
+            panic!("still a script");
+        };
+        assert!(script.source().contains("// warm"), "{}", script.source());
+    }
+
+    #[test]
+    fn a_subscription_shows_its_script_and_can_be_removed() {
+        let mut h = user_harness_with(&script_src());
+        assert_eq!(
+            h.get_by_label("Subscription 1 script").value().as_deref(),
+            Some("state.on = payload == \"ON\";\n")
+        );
+        // Folded, the sections above leave the button inside the 800x600 test window.
+        for section in ["Settings", "Messages", "Fields"] {
+            h.get_by_label(section).click();
+            h.run();
+        }
+        h.get_by_label("Remove subscription 1").click();
+        h.run();
+        assert!(h.state().doc.file().templates[0].subscriptions.is_empty());
+    }
+
+    #[test]
+    fn add_subscription_adds_one_that_validates() {
+        let mut h = user_harness();
+        h.get_by_label("Add subscription").click();
+        h.run();
+        let template = &h.state().doc.file().templates[0];
+        assert_eq!(template.subscriptions.len(), 1);
+        assert!(
+            h.state().doc.validated().errors.is_empty(),
+            "{:?}",
+            h.state().doc.validated().errors
+        );
+    }
+
+    /// Editing another part of the template keeps its scripts and subscriptions as written.
+    #[test]
+    fn editing_a_template_keeps_its_scripts_and_subscriptions() {
+        let src = script_src();
+        let mut h = user_harness_with(&src);
+        let before = h.state().doc.file().templates[0].clone();
+        assert_eq!(before.subscriptions.len(), 1, "{src}");
+
+        h.get_by_label("announce over MQTT Discovery").click();
+        h.run();
+        let after = &h.state().doc.file().templates[0];
+        assert!(after.home_assistant);
+        assert_eq!(after.fields, before.fields);
+        assert_eq!(after.subscriptions, before.subscriptions);
+        let text = h.state().doc.text_to_save();
+        assert!(
+            text.contains("state.on = payload == \"ON\";")
+                && text.contains("if state.on == true { value + 1 } else { value }"),
+            "{text}"
+        );
     }
 
     #[test]

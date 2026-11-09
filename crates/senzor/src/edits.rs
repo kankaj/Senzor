@@ -11,8 +11,10 @@ pub use senzor_core::project::edit::{
 };
 use senzor_core::project::file::{DEFAULT_INTERVAL, default_instance_id_pattern};
 use senzor_core::project::{
-    AvailabilitySpec, BrokerSpec, DeviceSpec, FieldSpec, MessageSpec, ProjectFile, TemplateSpec,
+    AvailabilitySpec, BrokerSpec, DeviceSpec, FieldSpec, MessageSpec, ProjectFile,
+    SubscriptionSpec, TemplateSpec,
 };
+use senzor_core::script::Script;
 use senzor_core::value::Value;
 
 /// The topic new messages publish on.
@@ -53,6 +55,7 @@ pub fn add_template(file: &mut ProjectFile) -> usize {
             "value".to_string(),
             default_generator(GeneratorKind::RandomWalk).into(),
         )]),
+        subscriptions: Vec::new(),
     });
     file.templates.len() - 1
 }
@@ -63,6 +66,16 @@ pub fn new_message() -> MessageSpec {
 }
 
 /// The availability topic and payloads a template starts with when availability is turned on.
+/// A subscription to add to a template: a command topic per instance, whose script keeps the
+/// last command in `state`.
+pub fn new_subscription() -> SubscriptionSpec {
+    SubscriptionSpec {
+        topic: "senzor/{{ device_id }}/set".into(),
+        qos: 0,
+        script: Script::new("state.last_command = payload;\n"),
+    }
+}
+
 pub fn new_availability() -> AvailabilitySpec {
     AvailabilitySpec {
         topic: "senzor/{{ device_id }}/status".into(),
@@ -101,15 +114,17 @@ pub enum GeneratorKind {
     Sine,
     Uniform,
     Sequence,
+    Script,
 }
 
 impl GeneratorKind {
-    pub const ALL: [GeneratorKind; 5] = [
+    pub const ALL: [GeneratorKind; 6] = [
         GeneratorKind::Constant,
         GeneratorKind::RandomWalk,
         GeneratorKind::Sine,
         GeneratorKind::Uniform,
         GeneratorKind::Sequence,
+        GeneratorKind::Script,
     ];
 
     pub fn of(spec: &GeneratorSpec) -> Self {
@@ -119,6 +134,7 @@ impl GeneratorKind {
             GeneratorSpec::Sine { .. } => GeneratorKind::Sine,
             GeneratorSpec::Uniform { .. } => GeneratorKind::Uniform,
             GeneratorSpec::Sequence { .. } => GeneratorKind::Sequence,
+            GeneratorSpec::Script { .. } => GeneratorKind::Script,
         }
     }
 
@@ -130,6 +146,7 @@ impl GeneratorKind {
             GeneratorKind::Sine => "sine",
             GeneratorKind::Uniform => "uniform",
             GeneratorKind::Sequence => "sequence",
+            GeneratorKind::Script => "script",
         }
     }
 }
@@ -164,6 +181,11 @@ pub fn default_generator(kind: GeneratorKind) -> GeneratorSpec {
             values: vec![Value::String("on".into()), Value::String("off".into())],
             looping: true,
             noise: None,
+        },
+        GeneratorKind::Script => GeneratorSpec::Script {
+            start: Value::Number(0.0),
+            noise: None,
+            script: Script::new("value + 1"),
         },
     }
 }
@@ -257,6 +279,7 @@ impl GeneratorKind {
             GeneratorKind::Sine => &["center", "amplitude", "period", "phase", "noise"],
             GeneratorKind::Uniform => &["min", "max", "noise"],
             GeneratorKind::Sequence => &["values", "loop", "noise"],
+            GeneratorKind::Script => &["start", "noise", "script"],
         }
     }
 }
@@ -344,9 +367,10 @@ impl FieldOverride {
     /// Whether the row of `setting` must stay overridden: a replaced generator needs its
     /// required parameters.
     pub fn is_required(&self, setting: &str) -> bool {
-        self.replaces_generator
-            && self.kind.parameters().contains(&setting)
-            && !OPTIONAL_PARAMETERS.contains(&setting)
+        // A script starts at 0 without `start`; a random walk needs it.
+        let optional = OPTIONAL_PARAMETERS.contains(&setting)
+            || (self.kind == GeneratorKind::Script && setting == "start");
+        self.replaces_generator && self.kind.parameters().contains(&setting) && !optional
     }
 }
 
@@ -735,6 +759,7 @@ mod tests {
             let written = toml::Table::try_from(default_generator(kind)).unwrap();
             let optional = match kind {
                 GeneratorKind::Sine => &["noise", "phase"][..],
+                GeneratorKind::Script => &["noise", "start"][..],
                 _ => &["noise"][..],
             };
             let keys: BTreeSet<&str> = written

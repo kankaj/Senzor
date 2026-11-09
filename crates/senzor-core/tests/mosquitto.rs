@@ -376,3 +376,69 @@ async fn clearing_deletes_the_retained_messages_on_mosquitto_2() {
         );
     }
 }
+
+/// A command on a subscribed topic runs the subscription's script, which changes the state the
+/// field script reads and publishes a reply, with both MQTT versions.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the Docker brokers in dev/compose.yaml"]
+async fn a_subscription_script_answers_a_command_on_mosquitto_2() {
+    let port = mosquitto_port();
+    for version in ["5", "3.1.1"] {
+        let prefix = unique("command");
+        let src = format!(
+            r#"
+[broker]
+host = "127.0.0.1"
+port = {port}
+client_id_prefix = "{prefix}-"
+mqtt_version = "{version}"
+
+[[templates]]
+id = "t"
+interval = "200ms"
+availability = {{ topic = "{prefix}/status", online = "online", offline = "offline" }}
+messages = [{{ topic = "{prefix}/state", payload = "{{{{ on }}}}" }}]
+fields.on = {{ generator = "script", start = false, script = "state.on == true" }}
+
+[[templates.subscriptions]]
+topic = "{prefix}/cmd/+"
+qos = 1
+script = '''
+state.on = payload == "ON";
+publish("{prefix}/ack", topic + " " + payload);
+'''
+
+[[devices]]
+id = "d"
+template = "t"
+autostart = false
+"#
+        );
+        let validated = ProjectFile::parse(&src)
+            .unwrap()
+            .validate(std::path::Path::new("."));
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let mut sub = Subscriber::connect(port, &format!("{prefix}/#")).await;
+        let engine = spawn(validated.project);
+        start_online(&engine).await;
+        sub.wait_for(WAIT, |m| m.payload == "online").await.unwrap();
+
+        sub.publish(&format!("{prefix}/cmd/power"), "ON").await;
+        let ack = sub.wait_for(WAIT, |m| m.topic.ends_with("/ack")).await;
+        assert_eq!(
+            ack.map(|m| m.payload),
+            Some(format!("{prefix}/cmd/power ON")),
+            "MQTT {version}"
+        );
+        let on = sub
+            .wait_for(WAIT, |m| m.topic.ends_with("/state") && m.payload == "true")
+            .await;
+        assert!(on.is_some(), "MQTT {version}");
+        assert_eq!(
+            engine.snapshot().instances["d"].received,
+            1,
+            "MQTT {version}"
+        );
+        engine.shutdown().await;
+    }
+}

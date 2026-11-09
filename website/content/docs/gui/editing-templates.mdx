@@ -74,7 +74,7 @@ Field names work like the template ID: a rename applies when you press Enter or 
 
 **Name** is a readable name for the field, such as `CO2`, and **Unit** the unit of its values, such as `ppm`, `°C` or `%`. The [instance view](/docs/gui/instance-view#field-values) shows them; they do not change what instances publish. Leave a box empty for none: the instance view then shows the field's key and the value alone. They are saved as `name` and `unit` in the field's table ([project file reference](/docs/reference/project-file#fields)).
 
-The generator picker offers `constant`, `random_walk`, `sine`, `uniform` and `sequence`. Choosing another generator replaces the field's parameters with that generator's defaults. The editor shows these parameters:
+The generator picker offers `constant`, `random_walk`, `sine`, `uniform`, `sequence` and `script`. Choosing another generator replaces the field's parameters with that generator's defaults; a new `script` field adds 1 to its value on every tick. The editor shows these parameters:
 
 | Generator     | Parameters                                    |
 | ------------- | --------------------------------------------- |
@@ -83,12 +83,25 @@ The generator picker offers `constant`, `random_walk`, `sine`, `uniform` and `se
 | `sine`        | **center**, **amplitude**, **period**, **phase**, **noise** |
 | `uniform`     | **min**, **max**, **noise**                   |
 | `sequence`    | **values**, **loop**, **noise**               |
+| `script`      | **start**, **noise**, and **script** below    |
 
 - **period** and **phase** are durations, like **Interval**.
 - **noise** is a checkbox. Ticking it adds noise of 0.1, which you can then change.
 - **values** takes a comma-separated list such as `open, closed`. Each item is read as a number if it can be, then as `true` or `false`, and otherwise as text. Empty items are skipped.
 
 What each parameter does is in the [generators reference](/docs/reference/generators).
+
+A `script` field has a **start** box, the value the script sees as `value` on the first tick, which takes a number, `true`, `false` or text like **value** does, and a **script** code box under the row for its [Rhai script](/docs/concepts/scripts#field-scripts). A script that does not compile is listed in the **Problems** tab with its line and column.
+
+## Subscriptions
+
+The **Subscriptions** section lists the topics each instance subscribes to, and the script that runs for every message that arrives; see [Scripts and commands](/docs/concepts/scripts#subscriptions). Each subscription has:
+
+- **Topic**: the topic filter, which may use `+` and `#`, with the same variables as the availability topic, such as `{{ device_id }}`; the `{}` button inserts one.
+- **QoS**: 0, 1 or 2, the QoS the instance subscribes with.
+- **Script**: the Rhai code run for each message.
+
+**Add subscription** adds one on `senzor/{{ device_id }}/set` whose script keeps the last command in `state.last_command`; change both to what your consumer sends. **Remove** next to **Subscription 1** removes it. Problems with a topic, its QoS or its script show in red under the box they are about.
 
 ### Typed values
 
@@ -104,7 +117,7 @@ To change the type, pick it in the selector. Types that the text in the box does
 
 The **Preview**, beside the form or at the bottom (see above), renders the template's topics and payloads as you edit, before you save. It renders them as the first instance that uses the template would, with that instance's params and field overrides, and says so: **Rendered as office-0 with its params and sample values.** In the showcase project, the state topic of `office-air` renders as `b/office/office-0/state`.
 
-The sample value of each field is its starting value: the `constant` value, the `random_walk` start, the `sine` center, the `uniform` min, or the first `sequence` value.
+The sample value of each field is its starting value: the `constant` value, the `random_walk` start, the `sine` center, the `uniform` min, the first `sequence` value, or the `script` start.
 
 If no valid device uses the template, the preview says **No valid device uses this template, so params are not available.** This is also the case while the template itself has problems, since its devices cannot run then. A template that uses params then shows an error for the missing param.
 

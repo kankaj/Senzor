@@ -9,16 +9,25 @@ use super::field::FieldSpec;
 use super::file::{
     BrokerSpec, DeviceSpec, MqttVersion, ProjectFile, TemplateSpec, default_instance_id_pattern,
 };
-use super::model::{DeviceConfig, InstanceConfig, Project, SharedTemplates, Validated};
+use super::model::{
+    DeviceConfig, InstanceConfig, Project, SharedTemplates, Subscription, Validated,
+};
 use crate::render::{
     CompiledTemplate, TemplateError, base_context, instance_id_context, is_reserved, tick_context,
 };
+use crate::topic::check_filter;
 use crate::value::Value;
+
+/// A template's messages and subscription topics, compiled once for all the devices that use it.
+struct Compiled {
+    templates: SharedTemplates,
+    /// One per subscription, in order.
+    subscription_topics: Vec<CompiledTemplate>,
+}
 
 /// Whether devices can use a template.
 enum TemplateStatus<'a> {
-    /// With its messages compiled once for all the devices that use it.
-    Usable(&'a TemplateSpec, SharedTemplates),
+    Usable(&'a TemplateSpec, Compiled),
     /// The template has errors; its devices are blocked without an error of their own.
     Broken,
 }
@@ -69,7 +78,13 @@ impl ProjectFile {
         let mut templates: HashMap<String, TemplateStatus<'a>> = builtin_templates()
             .iter()
             .zip(builtin_compiled())
-            .map(|(t, compiled)| (t.id.clone(), TemplateStatus::Usable(t, compiled.clone())))
+            .map(|(t, templates)| {
+                let compiled = Compiled {
+                    templates: templates.clone(),
+                    subscription_topics: Vec::new(),
+                };
+                (t.id.clone(), TemplateStatus::Usable(t, compiled))
+            })
             .collect();
         for template in &self.templates {
             if is_builtin(&template.id) {
@@ -185,11 +200,11 @@ fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Op
     })
 }
 
-/// Checks `template` and compiles its messages; `Err` lists its problems.
+/// Checks `template` and compiles its messages and subscription topics; `Err` lists its problems.
 fn check_template(
     template: &TemplateSpec,
     broker: &BrokerSpec,
-) -> Result<SharedTemplates, Vec<ProjectError>> {
+) -> Result<Compiled, Vec<ProjectError>> {
     let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
     let mut problems = check_properties(template, broker);
     if template.messages.is_empty() {
@@ -215,9 +230,19 @@ fn check_template(
         for e in spec.problems() {
             problems.push(at(&field, format!("field `{name}`: {e}")));
         }
+        if let Some(e) = spec.script_problem() {
+            problems.push(at(
+                &format!("{field}.script"),
+                format!("field `{name}`: {e}"),
+            ));
+        }
     }
+    let subscription_topics = check_subscriptions(template, &mut problems);
     match SharedTemplates::compile_located(&template.messages, template.availability.as_ref()) {
-        Ok(compiled) if problems.is_empty() => Ok(compiled),
+        Ok(templates) if problems.is_empty() => Ok(Compiled {
+            templates,
+            subscription_topics,
+        }),
         Ok(_) => Err(problems),
         Err(e) => {
             problems.push(at(&e.field, e.message));
@@ -226,10 +251,50 @@ fn check_template(
     }
 }
 
+/// Checks the qos and script of each of `template`'s subscriptions and compiles its topic.
+/// Returns the compiled topics; the problems go to `problems`.
+fn check_subscriptions(
+    template: &TemplateSpec,
+    problems: &mut Vec<ProjectError>,
+) -> Vec<CompiledTemplate> {
+    let mut topics = Vec::with_capacity(template.subscriptions.len());
+    for (i, subscription) in template.subscriptions.iter().enumerate() {
+        let n = i + 1;
+        let mut at = |key: &str, message: String| {
+            problems.push(
+                ProjectError::template(&template.id, message)
+                    .at(format!("subscriptions[{n}].{key}")),
+            );
+        };
+        match CompiledTemplate::compile_named(&topic_key(i), &subscription.topic) {
+            Ok(topic) => topics.push(topic),
+            Err(e) => at("topic", e),
+        }
+        if subscription.qos > 2 {
+            at(
+                "qos",
+                format!(
+                    "subscription {n}: qos must be 0, 1 or 2, got {}",
+                    subscription.qos
+                ),
+            );
+        }
+        if let Err(e) = subscription.script.compiled() {
+            at("script", format!("subscription {n}: script {e}"));
+        }
+    }
+    topics
+}
+
+/// The key path of subscription `index`'s topic, counted from 1 as problems count.
+fn topic_key(index: usize) -> String {
+    format!("subscriptions[{}].topic", index + 1)
+}
+
 fn resolve_device(
     spec: &DeviceSpec,
     template: &TemplateSpec,
-    compiled: &SharedTemplates,
+    compiled: &Compiled,
     seed: Option<u64>,
 ) -> Result<DeviceConfig, Vec<ProjectError>> {
     let mut problems = check_device(spec, template);
@@ -252,7 +317,7 @@ fn resolve_device(
             template_id: template.id.clone(),
             messages: template.messages.clone(),
             availability: template.availability.clone(),
-            templates: compiled.clone(),
+            templates: compiled.templates.clone(),
             qos: template.qos,
             retain: template.retain,
             home_assistant: template.home_assistant,
@@ -260,11 +325,16 @@ fn resolve_device(
             fields: fields.clone(),
             params: spec.params.clone(),
             seed,
+            subscriptions: Vec::new(),
         })
         .collect();
     // The field is the template's key path: the device's values make that template fail.
-    sample_render(&instances[0])
-        .map_err(|e| vec![ProjectError::device(&spec.id, e.message).at(e.field)])?;
+    let failed = |e: TemplateError| vec![ProjectError::device(&spec.id, e.message).at(e.field)];
+    sample_render(&instances[0]).map_err(failed)?;
+    let mut instances = instances;
+    for instance in &mut instances {
+        instance.subscriptions = subscriptions(instance, template, compiled).map_err(failed)?;
+    }
     Ok(DeviceConfig {
         id: spec.id.clone(),
         autostart: spec.autostart,
@@ -382,6 +452,50 @@ fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<Project
     problems
 }
 
+/// `instance`'s subscriptions, with their topics rendered for it; fails on the first topic that
+/// does not render to a valid topic filter.
+fn subscriptions(
+    instance: &InstanceConfig,
+    template: &TemplateSpec,
+    compiled: &Compiled,
+) -> Result<Vec<Subscription>, TemplateError> {
+    if template.subscriptions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let base = base_context(
+        &instance.id,
+        instance.index,
+        &instance.template_id,
+        &instance.params,
+    );
+    template
+        .subscriptions
+        .iter()
+        .zip(&compiled.subscription_topics)
+        .enumerate()
+        .map(|(i, (spec, topic))| {
+            let failed = |message| TemplateError {
+                field: topic_key(i),
+                message,
+            };
+            let filter = topic.render(&base).map_err(failed)?;
+            check_filter(&filter).map_err(|e| {
+                let n = i + 1;
+                failed(if filter.is_empty() {
+                    format!("subscription {n} topic {e}")
+                } else {
+                    format!("subscription {n} topic `{filter}`: {e}")
+                })
+            })?;
+            Ok(Subscription {
+                filter,
+                qos: spec.qos,
+                script: spec.script.clone(),
+            })
+        })
+        .collect()
+}
+
 /// Applies the device's field overrides to `template`'s fields. Keys merge, except that an
 /// override with `generator` replaces the generator and all its keys; the field's `unit` and
 /// `name` stay unless the override sets them too.
@@ -407,11 +521,18 @@ fn merge_fields(
         match toml::Value::Table(merged).try_into::<FieldSpec>() {
             Ok(field) => {
                 let field_problems = field.problems();
-                if field_problems.is_empty() {
-                    fields.insert(name.clone(), field);
-                }
-                for e in field_problems {
+                let script_problem = field.script_problem();
+                for e in &field_problems {
                     problems.push(at(name, format!("field `{name}` override: {e}")));
+                }
+                if let Some(e) = &script_problem {
+                    problems.push(
+                        ProjectError::device(&spec.id, format!("field `{name}` override: {e}"))
+                            .at(format!("fields.{name}.script")),
+                    );
+                }
+                if field_problems.is_empty() && script_problem.is_none() {
+                    fields.insert(name.clone(), field);
                 }
             }
             Err(e) => problems.push(at(
@@ -1361,5 +1482,175 @@ params = {{ room = \"a\", co2 = 1 }}
 "
         );
         assert_eq!(fields_of(&validate(&src)), [Some("params.co2")]);
+    }
+
+    /// Template `s` with a `temp` field script and the given `subscription` table entries (TOML
+    /// after `[[templates.subscriptions]]`, empty for none), used by device `d` with `room` as
+    /// its param and `extra` device lines.
+    fn scripted(script: &str, subscription: &str, room: &str, extra: &str) -> Validated {
+        let subscription = if subscription.is_empty() {
+            String::new()
+        } else {
+            format!("[[templates.subscriptions]]\n{subscription}\n")
+        };
+        validate(&format!(
+            r#"
+[[templates]]
+id = "s"
+messages = [{{ topic = "s/{{{{ device_id }}}}", payload = "{{{{ temp }}}}" }}]
+fields.temp = {{ generator = "script", start = 20, script = '{script}' }}
+{subscription}
+[[devices]]
+id = "d"
+template = "s"
+count = 2
+params = {{ room = "{room}" }}
+{extra}
+"#
+        ))
+    }
+
+    const SUBSCRIPTION: &str = "topic = \"cmd/{{ room }}/{{ device_id }}/+\"\nqos = 1\nscript = 'state.on = payload == \"ON\";'";
+
+    #[test]
+    fn instances_get_their_subscriptions_with_rendered_filters_and_shared_scripts() {
+        let validated = scripted("value + 1", SUBSCRIPTION, "hall", "");
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(&validated)
+        );
+        let device = validated.project.device("d").unwrap();
+        let filters: Vec<(&str, u8)> = device
+            .instances
+            .iter()
+            .flat_map(|i| &i.subscriptions)
+            .map(|s| (s.filter.as_str(), s.qos))
+            .collect();
+        assert_eq!(filters, [("cmd/hall/d-0/+", 1), ("cmd/hall/d-1/+", 1)]);
+        let scripts: Vec<_> = device
+            .instances
+            .iter()
+            .map(|i| i.subscriptions[0].script.clone())
+            .collect();
+        assert!(scripts[1].is_shared_with(&scripts[0]), "compiled once");
+        let field = |i: usize| match &device.instances[i].fields["temp"].generator {
+            GeneratorSpec::Script { script, .. } => script.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(field(1).is_shared_with(&field(0)), "compiled once");
+    }
+
+    #[test]
+    fn script_and_subscription_problems_name_their_field() {
+        let validated = scripted(
+            "value +",
+            "topic = \"cmd/{{ room\"\nqos = 3\nscript = \"\"",
+            "hall",
+            "",
+        );
+        assert_eq!(
+            error_fields(&validated)
+                .into_iter()
+                .map(|(text, field)| (text.split(" (").next().unwrap().to_string(), field))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "template `s`: field `temp`: script does not compile: Script is incomplete"
+                        .to_string(),
+                    Some("fields.temp.script".to_string())
+                ),
+                (
+                    "template `s`: syntax error: unexpected end of input, expected end of \
+                     variable block"
+                        .to_string(),
+                    Some("subscriptions[1].topic".to_string())
+                ),
+                (
+                    "template `s`: subscription 1: qos must be 0, 1 or 2, got 3".to_string(),
+                    Some("subscriptions[1].qos".to_string())
+                ),
+                (
+                    "template `s`: subscription 1: script is empty".to_string(),
+                    Some("subscriptions[1].script".to_string())
+                ),
+            ],
+        );
+        let errors = error_strings(&validated);
+        assert!(
+            errors[1].contains("(in subscriptions[1].topic:1)"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_subscription_topic_must_render_to_a_valid_filter() {
+        let cases = [
+            ("topic = \"\"", "device `d`: subscription 1 topic is empty"),
+            (
+                "topic = \"cmd/{{ room }}\"",
+                "device `d`: subscription 1 topic `cmd/a#`: `#` must be the whole last level, \
+                 as in `a/#`",
+            ),
+            (
+                "topic = \"cmd/#/x\"",
+                "device `d`: subscription 1 topic `cmd/#/x`: `#` must be the whole last level, \
+                 as in `a/#`",
+            ),
+            (
+                "topic = \"cmd/x+\"",
+                "device `d`: subscription 1 topic `cmd/x+`: `+` must be a whole level, as in \
+                 `a/+/b`",
+            ),
+            (
+                "topic = \"cmd/{{ rom }}\"",
+                "device `d`: undefined value: `rom` is undefined",
+            ),
+        ];
+        for (topic, expected) in cases {
+            let validated = scripted("value", &format!("{topic}\nscript = \"1\""), "a#", "");
+            let errors = error_fields(&validated);
+            assert_eq!(errors.len(), 1, "{topic}: {errors:?}");
+            assert!(errors[0].0.starts_with(expected), "{topic}: {errors:?}");
+            assert_eq!(
+                errors[0].1.as_deref(),
+                Some("subscriptions[1].topic"),
+                "{topic}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_device_can_override_the_script_and_start_of_a_field() {
+        let validated = scripted(
+            "value + 1",
+            "",
+            "a",
+            "fields.temp = { start = 5, script = \"value * 2\" }",
+        );
+        assert!(
+            validated.errors.is_empty(),
+            "{:?}",
+            error_strings(&validated)
+        );
+        let field = &validated.project.instance("d-0").unwrap().fields["temp"];
+        match &field.generator {
+            GeneratorSpec::Script { start, script, .. } => {
+                assert_eq!(*start, Value::Number(5.0));
+                assert_eq!(script.source(), "value * 2");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let broken = scripted("value + 1", "", "a", "fields.temp = { script = \"(\" }");
+        let errors = error_fields(&broken);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .0
+                .starts_with("device `d`: field `temp` override: script does not compile: "),
+            "{errors:?}"
+        );
+        assert_eq!(errors[0].1.as_deref(), Some("fields.temp.script"));
     }
 }

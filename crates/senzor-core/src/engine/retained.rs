@@ -127,7 +127,8 @@ pub async fn clear_retained(
                         return Ok(());
                     }
                 }
-                Ok(ConnEvent::Other) => {}
+                // It subscribes to nothing.
+                Ok(ConnEvent::Other | ConnEvent::Publish { .. } | ConnEvent::SubAck { .. }) => {}
                 Err(error) if !progress.accepted => {
                     return Err(connect_failure(broker, CLIENT_ID, error).await);
                 }

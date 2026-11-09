@@ -1,10 +1,13 @@
+use std::collections::BTreeMap;
 use std::f64::consts::TAU;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use rand::RngExt;
 use rand::rngs::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::script::{FieldInput, Runtime, Script};
 use crate::value::Value;
 
 /// One field's generator as written in the project file (`generator = "..."` plus parameters).
@@ -54,6 +57,23 @@ pub enum GeneratorSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         noise: Option<f64>,
     },
+    /// A Rhai script whose result is the field's value; `start` is its `value` on the first tick.
+    Script {
+        #[cfg_attr(feature = "schema", schemars(extend("default" = 0)))]
+        #[serde(default = "default_start", skip_serializing_if = "is_default_start")]
+        start: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        noise: Option<f64>,
+        script: Script,
+    },
+}
+
+fn default_start() -> Value {
+    Value::Number(0.0)
+}
+
+fn is_default_start(start: &Value) -> bool {
+    *start == default_start()
 }
 
 fn default_loop() -> bool {
@@ -68,11 +88,15 @@ pub struct TickContext<'a> {
     /// Tick number within the run, starting at 0.
     pub seq: u64,
     pub rng: &'a mut ChaCha8Rng,
+    /// Runs the instance's field scripts.
+    pub scripts: &'a mut Runtime,
+    /// Every field's value from the previous tick, for field scripts.
+    pub fields: &'a BTreeMap<String, Value>,
 }
 
-/// Produces a field's value on each tick. Generators implement it now; scripts will later.
+/// Produces a field's value on each tick. Only a script can fail; the error says why.
 pub trait ValueSource: Send {
-    fn next(&mut self, ctx: &mut TickContext<'_>) -> Value;
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String>;
 }
 
 impl GeneratorSpec {
@@ -85,6 +109,7 @@ impl GeneratorSpec {
             if noise <= 0.0 {
                 return Err("noise must be greater than 0".into());
             }
+            // A script's noise applies only when its result is a number.
             let numeric = match self {
                 GeneratorSpec::Constant { value, .. } => value.is_number(),
                 GeneratorSpec::Sequence { values, .. } => values.iter().all(Value::is_number),
@@ -143,6 +168,7 @@ impl GeneratorSpec {
             GeneratorSpec::Sequence { values, .. } => {
                 values.iter().filter_map(Value::as_number).collect()
             }
+            GeneratorSpec::Script { start, .. } => start.as_number().into_iter().collect(),
         };
         numbers.extend(self.noise());
         numbers
@@ -158,6 +184,7 @@ impl GeneratorSpec {
             GeneratorSpec::Sequence { values, .. } => {
                 values.first().cloned().unwrap_or(Value::Number(0.0))
             }
+            GeneratorSpec::Script { start, .. } => start.clone(),
         }
     }
 
@@ -201,6 +228,13 @@ impl GeneratorSpec {
                 looping: *looping,
                 next_index: 0,
             }),
+            GeneratorSpec::Script { start, script, .. } => match script.compiled() {
+                Ok(script) => Box::new(ScriptSource {
+                    script,
+                    value: start.clone(),
+                }),
+                Err(problem) => Box::new(BrokenScript(format!("script {problem}"))),
+            },
         };
         match self.noise() {
             Some(noise) => Box::new(Noisy {
@@ -217,7 +251,8 @@ impl GeneratorSpec {
             | GeneratorSpec::RandomWalk { noise, .. }
             | GeneratorSpec::Sine { noise, .. }
             | GeneratorSpec::Uniform { noise, .. }
-            | GeneratorSpec::Sequence { noise, .. } => *noise,
+            | GeneratorSpec::Sequence { noise, .. }
+            | GeneratorSpec::Script { noise, .. } => *noise,
         }
     }
 }
@@ -225,8 +260,8 @@ impl GeneratorSpec {
 struct Constant(Value);
 
 impl ValueSource for Constant {
-    fn next(&mut self, _ctx: &mut TickContext<'_>) -> Value {
-        self.0.clone()
+    fn next(&mut self, _ctx: &mut TickContext<'_>) -> Result<Value, String> {
+        Ok(self.0.clone())
     }
 }
 
@@ -239,13 +274,13 @@ struct RandomWalk {
 }
 
 impl ValueSource for RandomWalk {
-    fn next(&mut self, ctx: &mut TickContext<'_>) -> Value {
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String> {
         if self.started {
             let delta = ctx.rng.random_range(-self.step..=self.step);
             self.state = (self.state + delta).clamp(self.min, self.max);
         }
         self.started = true;
-        Value::Number(self.state)
+        Ok(Value::Number(self.state))
     }
 }
 
@@ -257,10 +292,10 @@ struct Sine {
 }
 
 impl ValueSource for Sine {
-    fn next(&mut self, ctx: &mut TickContext<'_>) -> Value {
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String> {
         let t = (ctx.elapsed + self.phase).as_secs_f64();
         let angle = TAU * t / self.period.as_secs_f64();
-        Value::Number(self.center + self.amplitude * angle.sin())
+        Ok(Value::Number(self.center + self.amplitude * angle.sin()))
     }
 }
 
@@ -270,8 +305,8 @@ struct Uniform {
 }
 
 impl ValueSource for Uniform {
-    fn next(&mut self, ctx: &mut TickContext<'_>) -> Value {
-        Value::Number(ctx.rng.random_range(self.min..self.max))
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String> {
+        Ok(Value::Number(ctx.rng.random_range(self.min..self.max)))
     }
 }
 
@@ -282,17 +317,47 @@ struct Sequence {
 }
 
 impl ValueSource for Sequence {
-    fn next(&mut self, _ctx: &mut TickContext<'_>) -> Value {
+    fn next(&mut self, _ctx: &mut TickContext<'_>) -> Result<Value, String> {
         if self.next_index >= self.values.len() {
             if self.looping {
                 self.next_index = 0;
             } else {
-                return self.values[self.values.len() - 1].clone();
+                return Ok(self.values[self.values.len() - 1].clone());
             }
         }
         let value = self.values[self.next_index].clone();
         self.next_index += 1;
-        value
+        Ok(value)
+    }
+}
+
+/// Runs a field script; its last result is the script's next `value`.
+struct ScriptSource {
+    script: Arc<rhai::AST>,
+    value: Value,
+}
+
+impl ValueSource for ScriptSource {
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String> {
+        let input = FieldInput {
+            value: &self.value,
+            elapsed: ctx.elapsed,
+            seq: ctx.seq,
+            now: ctx.now,
+            fields: ctx.fields,
+        };
+        let value = ctx.scripts.field_value(&self.script, input, ctx.rng)?;
+        self.value = value.clone();
+        Ok(value)
+    }
+}
+
+/// A script that does not compile, which validation reports; it fails every tick.
+struct BrokenScript(String);
+
+impl ValueSource for BrokenScript {
+    fn next(&mut self, _ctx: &mut TickContext<'_>) -> Result<Value, String> {
+        Err(self.0.clone())
     }
 }
 
@@ -303,11 +368,11 @@ struct Noisy {
 }
 
 impl ValueSource for Noisy {
-    fn next(&mut self, ctx: &mut TickContext<'_>) -> Value {
-        match self.inner.next(ctx) {
+    fn next(&mut self, ctx: &mut TickContext<'_>) -> Result<Value, String> {
+        Ok(match self.inner.next(ctx)? {
             Value::Number(n) => Value::Number(n + ctx.rng.random_range(-self.noise..=self.noise)),
             other => other,
-        }
+        })
     }
 }
 
@@ -321,8 +386,18 @@ mod tests {
     }
 
     fn run(spec: &GeneratorSpec, ticks: usize) -> Vec<Value> {
+        run_seeded(spec, ticks, 7)
+            .into_iter()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    /// Runs one source of `spec` with the instance RNG of `seed`.
+    fn run_seeded(spec: &GeneratorSpec, ticks: usize, seed: u64) -> Vec<Result<Value, String>> {
         const TICK: Duration = Duration::from_secs(1);
-        let mut rng = instance_rng(Some(7), "test");
+        let mut rng = instance_rng(Some(seed), "test");
+        let mut scripts = Runtime::new("test", &BTreeMap::new());
+        let fields = BTreeMap::new();
         let mut source = spec.build();
         (0..ticks)
             .map(|i| {
@@ -331,6 +406,8 @@ mod tests {
                     elapsed: TICK * i as u32,
                     seq: i as u64,
                     rng: &mut rng,
+                    scripts: &mut scripts,
+                    fields: &fields,
                 };
                 source.next(&mut ctx)
             })
@@ -538,6 +615,97 @@ noise = 0.5"#,
         for (src, expected) in cases {
             assert_eq!(spec(src).initial_value(), expected, "for {src}");
         }
+    }
+
+    #[test]
+    fn a_script_carries_on_from_its_previous_value() {
+        let s = spec("generator = \"script\"\nstart = 20\nscript = \"value + 1\"");
+        assert_eq!(numbers(&run(&s, 3)), vec![21.0, 22.0, 23.0]);
+        assert_eq!(s.initial_value(), Value::Number(20.0));
+    }
+
+    #[test]
+    fn a_script_starts_at_zero_by_default_and_may_return_any_value_type() {
+        let s = spec("generator = \"script\"\nscript = \"value + 2\"");
+        assert_eq!(s.initial_value(), Value::Number(0.0));
+        assert_eq!(numbers(&run(&s, 2)), vec![2.0, 4.0]);
+        let s = spec("generator = \"script\"\nstart = true\nscript = \"!value\"");
+        assert_eq!(
+            run(&s, 2),
+            vec![Value::Bool(false), Value::Bool(true)],
+            "a bool flips"
+        );
+        let s = spec(
+            "generator = \"script\"\nscript = 'if seq % 2 == 0 { \"open\" } else { \"closed\" }'",
+        );
+        assert_eq!(
+            run(&s, 2),
+            vec![Value::String("open".into()), Value::String("closed".into())]
+        );
+    }
+
+    #[test]
+    fn a_script_sees_seq_and_time() {
+        let s = spec("generator = \"script\"\nscript = \"seq * 10 + t\"");
+        assert_eq!(numbers(&run(&s, 3)), vec![0.0, 11.0, 22.0]);
+    }
+
+    #[test]
+    fn noise_applies_to_a_script_and_not_to_its_value() {
+        let s = spec("generator = \"script\"\nstart = 10\nnoise = 0.5\nscript = \"value\"");
+        let values = numbers(&run(&s, 200));
+        assert!(values.iter().all(|v| (9.5..=10.5).contains(v)));
+        assert!(values.iter().any(|v| *v != 10.0));
+    }
+
+    #[test]
+    fn a_random_script_repeats_with_the_same_seed() {
+        let s = spec("generator = \"script\"\nscript = \"value + random_range(-1.0, 1.0)\"");
+        assert_eq!(run_seeded(&s, 10, 1), run_seeded(&s, 10, 1));
+        assert_ne!(run_seeded(&s, 10, 1), run_seeded(&s, 10, 2));
+    }
+
+    #[test]
+    fn a_failing_script_fails_each_tick_with_the_reason() {
+        let s = spec("generator = \"script\"\nscript = \"[value]\"");
+        let got = run_seeded(&s, 2, 1);
+        assert!(got.iter().all(|r| {
+            r.as_ref()
+                .is_err_and(|e| e.contains("it must return a number"))
+        }));
+        let s = spec("generator = \"script\"\nscript = \"value +\"");
+        let err = run_seeded(&s, 1, 1).remove(0).unwrap_err();
+        assert!(err.starts_with("script does not compile: "), "{err}");
+    }
+
+    #[test]
+    fn a_script_writes_start_only_when_it_is_not_zero() {
+        let s = spec("generator = \"script\"\nscript = \"value\"");
+        assert_eq!(
+            toml::to_string(&s).unwrap(),
+            "generator = \"script\"\nscript = \"value\"\n"
+        );
+        let s = spec("generator = \"script\"\nstart = 5\nnoise = 1\nscript = \"value\"");
+        let written = toml::to_string(&s).unwrap();
+        assert_eq!(
+            written,
+            "generator = \"script\"\nstart = 5.0\nnoise = 1.0\nscript = \"value\"\n"
+        );
+        assert_eq!(spec(&written), s);
+    }
+
+    #[test]
+    fn a_script_start_must_be_finite_and_its_noise_positive() {
+        let s = spec("generator = \"script\"\nstart = nan\nscript = \"value\"");
+        assert_eq!(s.validate(), Err("numbers must be finite".into()));
+        let s = spec("generator = \"script\"\nnoise = 0\nscript = \"value\"");
+        assert_eq!(s.validate(), Err("noise must be greater than 0".into()));
+        let s = spec("generator = \"script\"\nstart = \"x\"\nnoise = 1\nscript = \"value\"");
+        assert_eq!(
+            s.validate(),
+            Ok(()),
+            "noise applies to numeric results only"
+        );
     }
 
     #[test]

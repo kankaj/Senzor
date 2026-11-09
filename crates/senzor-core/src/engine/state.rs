@@ -51,6 +51,8 @@ pub struct InstanceState {
     pub values: BTreeMap<String, Value>,
     pub pinned: BTreeSet<String>,
     pub published: u64,
+    /// Messages received on the instance's subscriptions.
+    pub received: u64,
     pub errors: u64,
     pub last_publish: Option<SystemTime>,
     /// Running with a configuration that differs from the current project.
@@ -70,6 +72,7 @@ impl InstanceState {
             values: BTreeMap::new(),
             pinned: BTreeSet::new(),
             published: 0,
+            received: 0,
             errors: 0,
             last_publish: None,
             needs_restart: false,
@@ -205,6 +208,11 @@ impl Shared {
             }
             state.push_log(entry);
         });
+    }
+
+    /// Counts a message the instance received.
+    pub fn record_received(&self, id: &str) {
+        self.update_instance(id, |instance| instance.received += 1);
     }
 
     /// Counts a failed publish or render and logs it.

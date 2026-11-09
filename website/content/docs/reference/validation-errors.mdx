@@ -55,7 +55,7 @@ These come from the TOML parser and carry a line and column. The most common one
 | `` invalid value: integer `-1`, expected u64 `` | The number must not be negative, as for `seed`. |
 | `invalid value: string "30", expected a duration` | A duration without a unit. Write `"30s"`. |
 | `` invalid type: integer `30`, expected a duration `` | A duration written as a number. Write it as a string with a unit, `"30s"`. |
-| `` unknown variant `linear`, expected one of `constant`, `random_walk`, `sine`, `uniform`, `sequence` `` | An unknown generator name. |
+| `` unknown variant `linear`, expected one of `constant`, `random_walk`, `sine`, `uniform`, `sequence`, `script` `` | An unknown generator name. |
 | `` unknown variant `4`, expected `5` or `3.1.1` `` | `mqtt_version` is not `"5"` or `"3.1.1"`. |
 | `wanted string or table` | Often `mqtt_version = 5` without quotes. Write `mqtt_version = "5"`. |
 | `` missing field `generator` `` | A field table without a `generator` key. |
@@ -100,7 +100,7 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `interval must be greater than 0` | `interval` is `"0s"`. |
 | `` field `<name>` uses a reserved name `` | Rename the field; see [reserved names](/docs/reference/template-variables#reserved-names). |
 | `` field `<name>`: <problem> `` | The field's generator breaks a rule, or its unit or name is empty; see [Field problems](#field-problems). |
-| `syntax error: <details> (in <template>:<line>)` | A topic, payload or user property is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload`, `messages[<n>].user_properties.<name>` or `availability.topic`, with messages counted from 1. |
+| `syntax error: <details> (in <template>:<line>)` | A topic, payload or user property is not valid Jinja. `<template>` is `messages[<n>].topic`, `messages[<n>].payload`, `messages[<n>].user_properties.<name>`, `availability.topic` or `subscriptions[<n>].topic`, with messages and subscriptions counted from 1. |
 | `messages[<n>].message_expiry must be whole seconds, got <duration>` | Write the expiry in whole seconds, such as `"60s"`. |
 | `messages[<n>].message_expiry must be at least 1s` | Remove `message_expiry` for no expiry, or set `"1s"` or more. |
 | `messages[<n>].content_type must not be empty` | Remove `content_type`, or give it a value such as `"application/json"`. |
@@ -108,6 +108,9 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `<key> must be at most 4294967295 seconds` | `<key>` is `messages[<n>].message_expiry` or `availability.will_delay`. Use a shorter duration. |
 | `availability.will_delay must be whole seconds, got <duration>` | Write the delay in whole seconds, such as `"30s"`. |
 | `availability.will_delay <delay> is longer than the broker's session_expiry <expiry>; set session_expiry to at least <delay>` | MQTT 5 brokers may send the Last Will when the session ends, before the delay passes. Raise `session_expiry` in `[broker]`. |
+| `subscription <n>: qos must be 0, 1 or 2, got <q>` | Set the `qos` of subscription `<n>` (counted from 1) to 0, 1 or 2. |
+| `subscription <n>: script is empty` | Subscription `<n>` has an empty `script`. Write the script that runs for each message. |
+| `subscription <n>: script does not compile: <reason>` | The script of subscription `<n>` is not valid Rhai. `<reason>` names the line and position, such as `Expecting ';' to terminate this statement (line 2, position 1)`. See [Scripts and commands](/docs/concepts/scripts). |
 
 A syntax error is reported for the first broken template string only. For example, a payload
 `{{ v ` without the closing braces gives
@@ -118,7 +121,7 @@ A syntax error is reported for the first broken template string only. For exampl
 Reported as `` field `<name>`: <problem> `` in a template, and as
 `` field `<name>` override: <problem> `` in a device. See [Generators](/docs/reference/generators)
 for the parameters and [Fields](/docs/reference/project-file#fields) for `unit` and `name`. A field
-can have one generator problem, and an empty unit or name on top of it.
+can have one generator problem, and an empty unit or name and a script problem on top of it.
 
 | Problem | Meaning and fix |
 | --- | --- |
@@ -132,6 +135,8 @@ can have one generator problem, and an empty unit or name on top of it.
 | `step must be greater than 0` | Give the `random_walk` a positive `step`. |
 | `period must be greater than 0` | Give the `sine` a `period` longer than `"0s"`. |
 | `values must not be empty` | Give the `sequence` at least one value. |
+| `script is empty` | A `script` field has an empty `script`. |
+| `script does not compile: <reason>` | The field's script is not valid Rhai. `<reason>` names the line and position, such as `Script is incomplete (line 1, position 8)`. See [Scripts and commands](/docs/concepts/scripts). |
 
 ## Devices
 
@@ -147,16 +152,19 @@ can have one generator problem, and an empty unit or name on top of it.
 ### Rendering problems
 
 Senzor renders each device's templates once while it validates, for the first instance and with
-sample values (see [Template variables](/docs/reference/template-variables#undefined-variables-are-errors)).
-It reports the first failure.
+sample values (see [Template variables](/docs/reference/template-variables#undefined-variables-are-errors)),
+and the topics of its subscriptions for every instance. It reports the first failure.
 
 | Message | Meaning and fix |
 | --- | --- |
-| `` undefined value: `<name>` is undefined (in <template>:<line>) `` | A template uses a variable that does not exist here: a typo, a param this device does not set, or a variable this template string cannot see. For a user property the message starts with `messages[<n>].user_properties.<name>: `. |
+| `` undefined value: `<name>` is undefined (in <template>:<line>) `` | A template uses a variable that does not exist here: a typo, a param this device does not set, or a variable this template string cannot see. For a user property the message starts with `messages[<n>].user_properties.<name>: `. A subscription topic, `subscriptions[<n>].topic`, sees the variables of the availability topic. |
 | `availability topic: topic is empty` | The availability topic renders to nothing. |
 | `` availability topic: topic `<topic>` contains a wildcard (+ or #) `` | The rendered availability topic contains `+` or `#`, maybe from a param. |
 | `message <n> topic: topic is empty` | Message `<n>` (counted from 1) has a topic that renders to nothing. |
 | `` message <n> topic: topic `<topic>` contains a wildcard (+ or #) `` | The rendered topic of message `<n>` contains `+` or `#`. |
+| `subscription <n> topic is empty` | Subscription `<n>` (counted from 1) has a topic that renders to nothing. |
+| `` subscription <n> topic `<topic>`: `#` must be the whole last level, as in `a/#` `` | The rendered filter has `#` before its last level, or next to other characters in a level, such as `a/#/b` or `a#`. |
+| `` subscription <n> topic `<topic>`: `+` must be a whole level, as in `a/+/b` `` | The rendered filter has `+` next to other characters in a level, such as `a+`. |
 | Other MiniJinja errors, e.g. `unknown filter: filter <name> is unknown (in <template>:<line>)` | A filter or operation fails on the sample values. |
 
 ## Field overrides

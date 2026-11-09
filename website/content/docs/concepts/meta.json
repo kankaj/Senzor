@@ -5,6 +5,7 @@
     "templates-devices-instances",
     "values-and-generators",
     "availability",
+    "scripts",
     "reproducible-runs",
     "editing-while-running"
   ]

@@ -18,7 +18,7 @@ Use a seed when a test depends on the data: the random parts of the values come 
 
 Each instance has its own random number generator. Senzor creates it at the start of every run from the seed and the instance's ID, and again when a running instance takes a new seed. With the same project and the same seed:
 
-- each instance produces the same `random_walk`, `uniform` and `noise` values, in the same order, on every run;
+- each instance produces the same `random_walk`, `uniform` and `noise` values, and the same results of `random()` and `random_range()` in its [scripts](/docs/concepts/scripts), in the same order, on every run;
 - each instance waits the same time before its first tick (see [Spread-out first ticks](#spread-out-first-ticks));
 - the GUI and `senzor-cli` produce the same random values, because they run the same engine;
 - different instances still produce different values, because their IDs differ.
@@ -30,6 +30,7 @@ Every new run starts the sequence from the beginning: a **Start** after **Stop**
 - **Timestamps.** `now_ms` and `now_iso` are the clock time of each tick.
 - **Sine values.** A `sine` follows the time since the run started, and the seed does not fix exactly when ticks happen. Its values can differ slightly between runs.
 - **Changes to other fields.** All fields of an instance draw from its one random number generator, in the order of their names. Adding, removing or renaming a field that draws random numbers, or adding `noise`, changes the values of the instance's other random fields too. Changing the interval changes the wait before the first tick.
+- **Commands.** Messages that reach an instance's [subscriptions](/docs/concepts/scripts#subscriptions) run scripts at times the seed does not fix. A script that draws random numbers, or changes the `state` that field scripts read, changes the values from then on.
 - **Runs with pins.** A pinned field skips its generator. If that generator draws random numbers (`random_walk`, `uniform` or `noise`), the numbers it would have drawn go to the instance's next draws instead. From then on, the instance's values no longer match a run without the pin.
 
 A reconnect does not change the values either. While reconnecting, the instance does not tick and draws no random numbers, and missed ticks are not made up, so its sequence continues where it stopped. Only the timing differs.

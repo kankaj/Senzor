@@ -235,7 +235,7 @@ fields.v = {{ generator = "constant", value = 3 }}
 
     #[test]
     fn an_unchanged_project_changes_nothing() {
-        let p = project("", &(device("a", "count = 2") + &device("b", "")));
+        let p = project("", &(device("a", "count = 2") + device("b", "").as_str()));
         let (plan, summary) = reload(&p, &p.clone());
         assert_eq!(plan, Reload::default());
         assert!(plan.is_empty() && summary.is_empty());
@@ -243,10 +243,10 @@ fields.v = {{ generator = "constant", value = 3 }}
 
     #[test]
     fn a_changed_device_is_updated_and_the_others_keep_running() {
-        let old = project("", &(device("a", "count = 2") + &device("b", "")));
+        let old = project("", &(device("a", "count = 2") + device("b", "").as_str()));
         let new = project(
             "",
-            &(device("a", "count = 2\nfields.v = { value = 5 }") + &device("b", "")),
+            &(device("a", "count = 2\nfields.v = { value = 5 }") + device("b", "").as_str()),
         );
         let (plan, summary) = reload(&old, &new);
         assert_eq!(strings(&plan.update), ["a-0", "a-1"]);
@@ -291,8 +291,11 @@ fields.v = {{ generator = "constant", value = 3 }}
 
     #[test]
     fn an_added_device_starts_and_a_removed_one_stops() {
-        let old = project("", &(device("a", "") + &device("gone", "count = 2")));
-        let new = project("", &(device("a", "") + &device("lab", "count = 2")));
+        let old = project(
+            "",
+            &(device("a", "") + device("gone", "count = 2").as_str()),
+        );
+        let new = project("", &(device("a", "") + device("lab", "count = 2").as_str()));
         let (plan, summary) = reload(&old, &new);
         assert!(plan.restart.is_empty());
         assert_eq!(strings(&plan.start), ["lab-0", "lab-1"]);
@@ -341,10 +344,10 @@ fields.v = {{ generator = "constant", value = 3 }}
 
     #[test]
     fn a_changed_broker_restarts_every_running_instance() {
-        let old = project("", &(device("a", "count = 2") + &device("b", "")));
+        let old = project("", &(device("a", "count = 2") + device("b", "").as_str()));
         let new = project(
             "keep_alive = \"10s\"",
-            &(device("a", "count = 2") + &device("b", "") + &device("c", "")),
+            &(device("a", "count = 2") + device("b", "").as_str() + device("c", "").as_str()),
         );
         let (plan, summary) = reload(&old, &new);
         assert!(plan.broker_changed);
@@ -356,12 +359,15 @@ fields.v = {{ generator = "constant", value = 3 }}
 
     #[test]
     fn only_the_selected_devices_run() {
-        let old = project("", &(device("a", "") + &device("b", "") + &device("c", "")));
+        let old = project(
+            "",
+            &(device("a", "") + device("b", "").as_str() + device("c", "").as_str()),
+        );
         let new = project(
             "",
             &(device("a", "fields.v = { value = 3 }")
-                + &device("b", "fields.v = { value = 3 }")
-                + &device("c", "")),
+                + device("b", "fields.v = { value = 3 }").as_str()
+                + device("c", "").as_str()),
         );
         // a runs and changed; b did not run and now should; c ran and now should not.
         let plan = Reload::plan(&old, &ids(&["a", "c"]), &new, &ids(&["a", "b"]));

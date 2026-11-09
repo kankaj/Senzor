@@ -176,6 +176,27 @@ pub const HOME_ASSISTANT: Help = help(
      connects, it publishes Home Assistant's MQTT Discovery messages, retained.",
     "recipes/home-assistant-discovery",
 );
+pub const SUBSCRIPTIONS: Help = help(
+    "Topics each instance subscribes to, such as a command topic. For every message that \
+     arrives, the subscription's script runs: it can keep values in state, pin fields and \
+     publish a reply.",
+    "concepts/scripts",
+);
+pub const SUBSCRIPTION_TOPIC: Help = help(
+    "The topic filter, rendered per instance like the availability topic; + and # match any \
+     level. A reply published to a topic it matches comes back to the instance.",
+    "concepts/scripts",
+);
+pub const SUBSCRIPTION_SCRIPT: Help = help(
+    "Rhai code run for each message: it sees topic, payload, json, state, fields and params, \
+     and can call publish, pin and unpin.",
+    "concepts/scripts",
+);
+pub const FIELD_SCRIPT: Help = help(
+    "Rhai code run on every tick; its last value is the field's. It sees value (the last one), \
+     t, seq, state, fields and params.",
+    "concepts/scripts",
+);
 pub const AVAILABILITY: Help = help(
     "An online/offline topic: online when an instance connects, offline when it stops, and \
      offline as its Last Will, which the broker publishes if the instance drops off.",

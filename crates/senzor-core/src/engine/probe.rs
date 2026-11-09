@@ -25,7 +25,7 @@ pub async fn test_connection(broker: &BrokerConfig, timeout: Duration) -> Result
                     let _ = tokio::time::timeout(Duration::from_secs(1), connection.poll()).await;
                     return Ok(());
                 }
-                Ok(ConnEvent::PubAck { .. } | ConnEvent::Other) => {}
+                Ok(_) => {}
                 Err(error) => return Err(connect_failure(broker, CLIENT_ID, error).await),
             }
         }

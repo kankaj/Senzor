@@ -25,6 +25,7 @@ You are building or testing something that reads sensor data over MQTT, and you 
 - **Templates and counts.** A template defines the topics, the payloads, the fields and the interval. A device uses a template with a `count`: `count = 200` gives 200 instances, each with its own MQTT connection and client ID, and with its own availability topic when the template puts `{{ device_id }}` in it.
 - **Built-in templates.** `co2`, `temperature` and `humidity` work without writing a template.
 - **Generated values.** Each field takes its values from a generator: `constant`, `random_walk`, `sine`, `uniform` or `sequence`, with optional noise.
+- **Scripts and commands.** A field can compute its value with a short [Rhai script](/docs/concepts/scripts), and a template can subscribe to command topics: the script of a subscription changes the device's state, pins a field or publishes an answer.
 - **Jinja templates for topics and payloads.** Payloads are text, so you can publish JSON, plain numbers or whatever format your consumer expects.
 - **Pins.** In the GUI you pin a field of a running instance to a value, for example CO2 = 2500. The instance publishes that value until you unpin it or the instance stops.
 - **Stop and Kill.** **Stop** takes an instance offline cleanly. **Kill** drops its connection, so the broker publishes its Last Will (when the template has availability), as it would for a device that loses power.
@@ -37,8 +38,6 @@ You are building or testing something that reads sensor data over MQTT, and you 
 
 ## What 1.0.0 does not do yet
 
-- Scripting. Values come from generators and pins only.
-- Subscribing to topics or reacting to commands. Instances only publish.
 - Event-driven sending. Instances publish at a fixed interval.
 - Binary payloads such as protobuf or CBOR. Payloads are text.
 - Value charts in the GUI.

@@ -8,7 +8,8 @@ use senzor_core::value::Value;
 
 use super::{
     Action, BoxOrRow, ERROR, FIX_PROBLEMS_FIRST, UiState, checked, duration_edit, errors_at, help,
-    name_edit, noise_edit, number_edit, replace_if_unchanged, sequence_edit, shortcuts, value_edit,
+    name_edit, noise_edit, number_edit, replace_if_unchanged, script_edit, sequence_edit,
+    shortcuts, value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -507,7 +508,11 @@ impl OverrideBlock<'_> {
                     return None;
                 }
             },
-            ("value", GeneratorSpec::Constant { value, .. }) => value_edit(ui, buffers, key, value),
+            ("value", GeneratorSpec::Constant { value, .. })
+            | ("start", GeneratorSpec::Script { start: value, .. }) => {
+                value_edit(ui, buffers, key, value)
+            }
+            ("script", GeneratorSpec::Script { script, .. }) => script_edit(ui, key, script, None),
             ("values", GeneratorSpec::Sequence { values, .. }) => {
                 sequence_edit(ui, buffers, key, values)
             }
@@ -551,7 +556,8 @@ fn noise_mut(spec: &mut GeneratorSpec) -> Option<&mut f64> {
         | GeneratorSpec::RandomWalk { noise, .. }
         | GeneratorSpec::Sine { noise, .. }
         | GeneratorSpec::Uniform { noise, .. }
-        | GeneratorSpec::Sequence { noise, .. } => noise.as_mut(),
+        | GeneratorSpec::Sequence { noise, .. }
+        | GeneratorSpec::Script { noise, .. } => noise.as_mut(),
     }
 }
 
@@ -972,6 +978,17 @@ template = "slow"
         let mut h = harness_for(PLAIN);
         click(&mut h, CO2);
         h
+    }
+
+    #[test]
+    fn a_script_override_shows_its_script_and_start() {
+        // A field with an override starts open.
+        let h = with_override(r#"{ generator = "script", start = 5, script = "value + 2" }"#);
+        assert_eq!(
+            h.get_by_label("co2 script").value().as_deref(),
+            Some("value + 2")
+        );
+        assert_eq!(h.get_by_label("co2 start").value().as_deref(), Some("5"));
     }
 
     #[test]

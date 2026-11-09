@@ -348,19 +348,30 @@ const STRING_TEMPLATE: &str = "<string>";
 /// validating a project with thousands of instances slow.
 pub struct CompiledTemplate {
     env: Environment<'static>,
+    /// What errors call the template: `<string>`, or the key path it came from.
+    name: String,
 }
 
 impl CompiledTemplate {
     /// Parses `source`; a syntax error is reported here rather than on the first render.
     pub fn compile(source: &str) -> Result<Self, String> {
+        Self::compile_named(STRING_TEMPLATE, source)
+    }
+
+    /// [`Self::compile`] for a template whose errors name it `name`, such as
+    /// `subscriptions[1].topic`.
+    pub fn compile_named(name: &str, source: &str) -> Result<Self, String> {
         let mut env = strict_environment();
-        env.add_template_owned(STRING_TEMPLATE, source.to_string())
+        env.add_template_owned(name.to_string(), source.to_string())
             .map_err(|e| e.to_string())?;
-        Ok(Self { env })
+        Ok(Self {
+            env,
+            name: name.to_string(),
+        })
     }
 
     pub fn render(&self, ctx: &Context) -> Result<String, String> {
-        render_named(&self.env, STRING_TEMPLATE, ctx)
+        render_named(&self.env, &self.name, ctx)
     }
 }
 

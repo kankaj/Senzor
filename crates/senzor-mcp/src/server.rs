@@ -237,7 +237,7 @@ fn path_text(path: Option<&std::path::Path>) -> Option<String> {
 #[tool_router]
 impl SenzorServer {
     #[tool(
-        description = "Project summary (file, unsaved changes, broker, problem count) and every instance with its status, counters, pins and restart/orphan flags.",
+        description = "Project summary (file, unsaved changes, broker, problem count) and every instance with its status, counters (published, received, errors), pins and restart/orphan flags.",
         annotations(read_only_hint = true)
     )]
     async fn get_status(&self) -> Result<Json<StatusOut>, String> {
@@ -260,7 +260,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "One instance: status, counters, its template, every field it publishes and each field's latest value.",
+        description = "One instance: status, counters (published, received, errors), its template, every field it publishes and each field's latest value.",
         annotations(read_only_hint = true)
     )]
     async fn get_instance(
@@ -470,7 +470,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "Add a template to the project, or replace the project template with the same id. Takes the keys of a [[templates]] table (id, interval, qos, retain, availability, messages, fields). Each field is its generator table and may add a unit and a readable name, e.g. {\"generator\": \"uniform\", \"min\": 400, \"max\": 800, \"unit\": \"ppm\", \"name\": \"CO2\"}. Built-in ids are refused."
+        description = "Add a template to the project, or replace the project template with the same id. Takes the keys of a [[templates]] table (id, interval, qos, retain, home_assistant, availability, messages, fields, subscriptions). Each field is its generator table and may add a unit and a readable name, e.g. {\"generator\": \"uniform\", \"min\": 400, \"max\": 800, \"unit\": \"ppm\", \"name\": \"CO2\"}; a field with {\"generator\": \"script\", \"script\": \"...\"} runs a Rhai script. Each subscription is {\"topic\", \"qos\", \"script\"}: the script runs for every message on the topic. Built-in ids are refused."
     )]
     async fn put_template(
         &self,

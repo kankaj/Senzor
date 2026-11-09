@@ -369,6 +369,43 @@ async fn messages_come_with_a_cursor_filters_and_a_wait() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_command_is_counted_as_received_and_its_script_runs() {
+    let agent = Agent::with_project("received").await;
+    agent
+        .ok(
+            "put_template",
+            json!({
+                "id": "relay",
+                "interval": "100ms",
+                "availability": {"topic": "t/{{ device_id }}/status", "online": "online", "offline": "offline"},
+                "messages": [{"topic": "t/{{ device_id }}/state", "payload": "{{ on }}"}],
+                "fields": {"on": {"generator": "script", "start": false, "script": "state.on == true"}},
+                "subscriptions": [{"topic": "cmd/{{ device_id }}/set", "qos": 1, "script": "state.on = payload == \"ON\";"}]
+            }),
+        )
+        .await;
+    agent
+        .ok(
+            "put_device",
+            json!({"id": "relay", "template": "relay", "autostart": false}),
+        )
+        .await;
+    let mut sub = Subscriber::connect(agent.port, "t/relay/#").await;
+    agent.ok("start", json!({"devices": ["relay"]})).await;
+    let relay = agent.ok("get_instance", json!({"instance": "relay"})).await;
+    assert_eq!(relay["received"], 0);
+
+    sub.publish("cmd/relay/set", "ON").await;
+    sub.wait_for(WAIT, |m| m.topic == "t/relay/state" && m.payload == "true")
+        .await
+        .expect("the script turned it on");
+    let relay = agent.ok("get_instance", json!({"instance": "relay"})).await;
+    assert_eq!(relay["received"], 1);
+    assert_eq!(relay["errors"], 0);
+    agent.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn get_messages_without_a_wait_returns_at_once() {
     let agent = Agent::with_project("messages-now").await;
     let started = Instant::now();

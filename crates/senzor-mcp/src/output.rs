@@ -62,8 +62,10 @@ pub struct InstanceSummary {
     /// Messages published since the project was opened or the instance was added; stopping and
     /// restarting do not reset it.
     pub published: u64,
-    /// Messages that could not be rendered or published, and failed availability `online`
-    /// messages, counted like `published`.
+    /// Messages received on the instance's subscriptions, counted like `published`.
+    pub received: u64,
+    /// Messages that could not be rendered or published, failed availability `online`
+    /// messages and failed scripts, counted like `published`.
     pub errors: u64,
     pub last_publish: Option<String>,
     /// Fields forced to a value with `pin`.
@@ -82,6 +84,7 @@ impl InstanceSummary {
             device: state.device.clone(),
             status: (&state.status).into(),
             published: state.published,
+            received: state.received,
             errors: state.errors,
             last_publish: state.last_publish.map(time),
             pinned: state.pinned.iter().cloned().collect(),

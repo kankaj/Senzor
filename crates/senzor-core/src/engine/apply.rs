@@ -11,7 +11,8 @@ pub enum Apply {
     /// The configuration is the same.
     Unchanged,
     /// The running instance takes the new configuration at once and stays connected: messages,
-    /// fields, interval, QoS, retain, params, seed and Home Assistant.
+    /// fields and their scripts, interval, QoS, retain, params, seed, Home Assistant and
+    /// subscriptions (it unsubscribes from the filters that are gone and subscribes to new ones).
     InPlace,
     /// The new configuration needs a new connection, because the broker settings or the Last Will
     /// (the availability topic and its payloads) changed: the instance needs a restart.
@@ -142,6 +143,15 @@ template = "air"
             ),
             ("template = \"air\"", "template = \"other\""),
             ("[[templates]]", "[simulation]\nseed = 7\n\n[[templates]]"),
+            (
+                "fields.v = { generator = \"constant\", value = 1 }",
+                "fields.v = { generator = \"script\", script = \"1\" }",
+            ),
+            (
+                "[[templates]]\nid = \"other\"",
+                "[[templates.subscriptions]]\ntopic = \"c/{{ device_id }}\"\nscript = \"1\"\n\n\
+                 [[templates]]\nid = \"other\"",
+            ),
         ] {
             assert_eq!(apply(from, to), Apply::InPlace, "{from} -> {to}");
         }
