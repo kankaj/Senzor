@@ -16,7 +16,8 @@ The first release.
 - Simulate MQTT sensors from templates: one template gives as many devices and instances as you need, each with its own connection.
 - A desktop window to edit a project, start and stop devices, pin values and watch every message, and `senzor-cli` to run the same project in a terminal, in Docker or in CI.
 - MQTT 5 by default, with message expiry, content type, user properties and a delayed Last Will; MQTT 3.1.1 can be chosen per project.
-- Built-in templates and five example projects to start from.
+- Built-in templates and six example projects to start from.
+- Simulated devices can appear in Home Assistant by themselves, through MQTT Discovery.
 - Problems are shown next to the box they are about, and a device with problems does not start.
 - AI agents such as Claude Code can drive Senzor over MCP, headless or in the window.
 
@@ -40,6 +41,7 @@ The first release.
 - Pin a field of a running instance to a value until you unpin it.
 - Edits to a running project mark the instances that need a restart; nothing restarts by itself.
 - Clear the retained messages a project leaves on the broker, in the window or with `senzor-cli clear-retained`.
+- Home Assistant MQTT Discovery: with `home_assistant = true` on a template, each instance announces itself when it connects, as a device with one entity per field. Senzor finds each field in the payload itself; the template editor names the fields it cannot find.
 
 #### Window
 

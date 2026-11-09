@@ -23,6 +23,7 @@ Every change goes into the project as you make it, and Senzor validates the proj
 | **Interval**     | How often instances publish, as a duration such as `10s`, `500ms` or `1h`.                     |
 | **QoS**          | The QoS of the data messages: 0, 1 or 2.                                                       |
 | **Retain**       | **retain data messages** sets the retain flag on the data messages.                            |
+| **Home Assistant** | **announce over MQTT Discovery** makes each instance appear in Home Assistant, with one entity per field. Below it, the editor says **Every field is announced.**, or names the fields it cannot find in a payload. See [Home Assistant discovery](/docs/recipes/home-assistant-discovery). |
 | **Availability** | **online/offline topic with Last Will** turns on the availability topic and its payloads.      |
 
 ### Renaming a template

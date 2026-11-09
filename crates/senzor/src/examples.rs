@@ -17,7 +17,7 @@ impl Example {
 }
 
 /// Every example, the simplest first.
-pub const EXAMPLES: [Example; 5] = [
+pub const EXAMPLES: [Example; 6] = [
     Example {
         name: "Quick start",
         summary: "Two CO2 sensors and a thermometer on the built-in templates",
@@ -32,6 +32,11 @@ pub const EXAMPLES: [Example; 5] = [
         name: "Home Assistant Statestream",
         summary: "A sensor as Home Assistant's MQTT Statestream republishes it",
         text: include_str!("../../../examples/home-assistant-statestream.toml"),
+    },
+    Example {
+        name: "Home Assistant Discovery",
+        summary: "An air sensor and a door contact that appear in Home Assistant by themselves",
+        text: include_str!("../../../examples/home-assistant-discovery.toml"),
     },
     Example {
         name: "Fleet",

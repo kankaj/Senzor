@@ -143,7 +143,8 @@ works with `--duration`, which still ends the run. The
 
 ## Clear retained messages
 
-Status messages are retained, and so are the messages of a template with `retain = true`. The broker
+Status messages are retained, and so are the messages of a template with `retain = true` and the
+Home Assistant discovery messages of a template with `home_assistant = true`. The broker
 keeps them after the run, and every new subscriber receives them first. `clear-retained` deletes them:
 
 ```bash

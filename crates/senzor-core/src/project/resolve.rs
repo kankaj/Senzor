@@ -255,6 +255,7 @@ fn resolve_device(
             templates: compiled.clone(),
             qos: template.qos,
             retain: template.retain,
+            home_assistant: template.home_assistant,
             interval: spec.interval.unwrap_or(template.interval),
             fields: fields.clone(),
             params: spec.params.clone(),

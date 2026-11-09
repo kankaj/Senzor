@@ -64,6 +64,8 @@ pub struct InstanceConfig {
     pub templates: SharedTemplates,
     pub qos: u8,
     pub retain: bool,
+    /// Announce the instance and its fields to Home Assistant (the template's `home_assistant`).
+    pub home_assistant: bool,
     pub interval: Duration,
     /// Template fields with the device's overrides applied: each field's generator, unit and
     /// readable name.

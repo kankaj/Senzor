@@ -129,7 +129,9 @@ Deletes the retained messages that the project's instances leave on the broker.
    and exits with 2 without connecting.
 2. Lists the topics on which the selected devices' instances can leave a retained message:
    - the availability topic of each instance, if its template has availability;
-   - the message topics of each instance, if its template has `retain = true`.
+   - the message topics of each instance, if its template has `retain = true`;
+   - the Home Assistant discovery topics of each instance, one per field, if its template has
+     `home_assistant = true` (see [Home Assistant discovery](/docs/recipes/home-assistant-discovery)).
 
    Each topic is listed once, even if several instances publish on it. Topics are rendered as
    validation renders them: with each field's initial value, `seq` 0 and the current time. A topic

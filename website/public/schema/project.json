@@ -430,6 +430,10 @@
           },
           "type": "object"
         },
+        "home_assistant": {
+          "description": "Announce each instance and its fields to Home Assistant over MQTT Discovery.",
+          "type": "boolean"
+        },
         "id": {
           "type": "string"
         },

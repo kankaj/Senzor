@@ -1,5 +1,6 @@
 //! Runs instances on a tokio runtime and exposes their state.
 
+mod discovery;
 mod instance;
 mod mqtt;
 mod probe;
@@ -21,6 +22,7 @@ use crate::value::Value;
 use instance::{InstanceCmd, STOP_TIMEOUT, run_instance};
 use state::Shared;
 
+pub use discovery::{DISCOVERY_PREFIX, unannounced_fields};
 pub use probe::{CONNECTION_TEST_TIMEOUT, test_connection};
 pub use reload::{Reload, ReloadSummary};
 pub use retained::{CLEAR_RETAINED_TIMEOUT, clear_retained, retained_topics};

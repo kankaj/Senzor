@@ -6,6 +6,7 @@ use rand::rngs::ChaCha8Rng;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
+use super::discovery::{self, Announcement};
 use super::mqtt::{
     Client, ConnError, ConnEvent, Connection, MAX_MESSAGE_BYTES, PUBLISH_HEADER_BYTES, Will,
     answers_mqtt311, backoff, connect,
@@ -98,6 +99,17 @@ impl Availability {
     }
 }
 
+/// Publishes one discovery message, retained with QoS 1 like the availability messages.
+fn announce(client: &Client, announcement: &Announcement) -> Result<(), String> {
+    client.try_publish(
+        &announcement.topic,
+        1,
+        true,
+        &announcement.payload,
+        &MessageProperties::default(),
+    )
+}
+
 async fn run(
     config: &InstanceConfig,
     broker: &BrokerConfig,
@@ -117,6 +129,7 @@ async fn run(
             will_delay: spec.will_delay.map(mqtt_seconds),
         });
     let will = availability.as_ref().map(Availability::last_will);
+    let announcements = discovery::announcements(config, &base);
     let (client, mut connection) = connect(broker, id, will, REQUEST_QUEUE_CAPACITY);
     let mut ticker = Ticker::new(config, base);
     let mut timer = ticker.timer();
@@ -136,6 +149,12 @@ async fn run(
                     attempt = 0;
                     ticker.broker_max_packet_size = max_packet_size;
                     shared.set_status(id, InstanceStatus::Online);
+                    // Before `online`, so Home Assistant knows the entities the status is for.
+                    for announcement in &announcements {
+                        if let Err(e) = announce(&client, announcement) {
+                            shared.record_error(id, &format!("announce to Home Assistant: {e}"));
+                        }
+                    }
                     if let Some(a) = &availability
                         && let Err(e) = a.publish_online(&client)
                     {
@@ -490,6 +509,41 @@ fields.co2 = {{ generator = "constant", value = 600 }}
         assert_eq!(state.log.back().unwrap().topic, "it/d/state");
     }
 
+    async fn announces_itself_to_home_assistant_before_it_goes_online(version: MqttVersion) {
+        let (ports, port) = broker(version);
+        let mut sub = Subscriber::connect(ports.v5, "#").await;
+        let src = project(port, version, DEVICE);
+        let mut config = src.instance("d").unwrap().clone();
+        config.home_assistant = true;
+        let project = Project {
+            devices: vec![crate::project::DeviceConfig {
+                id: "d".into(),
+                autostart: true,
+                instances: vec![config],
+            }],
+            ..src
+        };
+        let _running = spawn(&project, "d");
+
+        let first = sub.wait_for(WAIT, |_| true).await.unwrap();
+        assert_eq!(first.topic, "homeassistant/sensor/d/co2/config");
+        let config: serde_json::Value = serde_json::from_str(&first.payload).unwrap();
+        assert_eq!(config["state_topic"], "it/d/state");
+        let online = sub.wait_for(WAIT, |_| true).await.unwrap();
+        assert_eq!(
+            (online.topic.as_str(), online.payload.as_str()),
+            ("it/d/status", "online")
+        );
+
+        // Retained, so Home Assistant finds it after a restart.
+        let late = Subscriber::connect(ports.v5, "homeassistant/#")
+            .await
+            .wait_for(WAIT, |_| true)
+            .await
+            .unwrap();
+        assert_eq!((late.payload, late.retain), (first.payload, true));
+    }
+
     async fn stop_publishes_offline_without_last_will(version: MqttVersion) {
         let (ports, port) = broker(version);
         let mut sub = Subscriber::connect(ports.v5, "it/d/status").await;
@@ -700,6 +754,7 @@ template = "big"
 
     on_both_versions!(
         publishes_online_retained_and_data_on_interval,
+        announces_itself_to_home_assistant_before_it_goes_online,
         stop_publishes_offline_without_last_will,
         kill_makes_the_broker_send_the_last_will,
         pin_overrides_value_and_unpin_restores_generator,

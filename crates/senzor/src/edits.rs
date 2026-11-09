@@ -43,6 +43,7 @@ pub fn add_template(file: &mut ProjectFile) -> usize {
         interval: DEFAULT_INTERVAL,
         qos: 0,
         retain: false,
+        home_assistant: false,
         availability: None,
         messages: vec![MessageSpec::new(
             NEW_MESSAGE_TOPIC,

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use eframe::egui::{self, RichText, TextEdit};
+use senzor_core::engine::unannounced_fields;
 use senzor_core::generator::GeneratorSpec;
 use senzor_core::project::builtin::builtin_template;
 use senzor_core::project::{FieldSpec, Location, MessageSpec, MqttVersion, TemplateSpec};
@@ -302,7 +303,29 @@ fn name_or_label(
     Some(response)
 }
 
-/// ID, interval, QoS, retain and availability.
+/// Which fields Home Assistant gets, as the first instance of the template would announce them.
+fn discovery_note(template: &TemplateSpec, project: Option<ProjectTemplate>) -> Option<RichText> {
+    let validated = project?.doc.validated();
+    let Some(instance) = validated
+        .project
+        .instances()
+        .find(|i| i.template_id == template.id)
+    else {
+        return Some(RichText::new("No device uses this template yet.").weak());
+    };
+    let left_out = unannounced_fields(instance);
+    Some(if left_out.is_empty() {
+        RichText::new("Every field is announced.").weak()
+    } else {
+        RichText::new(format!(
+            "Not announced, not in one place of a payload: {}",
+            left_out.join(", ")
+        ))
+        .color(WARNING)
+    })
+}
+
+/// ID, interval, QoS, retain, Home Assistant and availability.
 fn settings_grid(
     ui: &mut egui::Ui,
     template: &mut TemplateSpec,
@@ -366,6 +389,17 @@ fn settings_grid(
             help::label(ui, "Retain", help::RETAIN);
             ui.checkbox(&mut template.retain, "retain data messages");
             ui.end_row();
+
+            help::label(ui, "Home Assistant", help::HOME_ASSISTANT);
+            ui.checkbox(&mut template.home_assistant, "announce over MQTT Discovery");
+            ui.end_row();
+            if template.home_assistant
+                && let Some(note) = discovery_note(template, project)
+            {
+                ui.label("");
+                ui.label(note);
+                ui.end_row();
+            }
 
             help::label(ui, "Availability", help::AVAILABILITY);
             let mut enabled = template.availability.is_some();
@@ -857,6 +891,28 @@ template = "air"
                 "template = \"air\"\nparams = { room = \"office\" }\n"
             )
         )
+    }
+
+    #[test]
+    fn turning_on_home_assistant_says_which_fields_are_announced() {
+        let mut h = user_harness();
+        assert!(h.query_by_label("Every field is announced.").is_none());
+        h.get_by_label("announce over MQTT Discovery").click();
+        h.run();
+        assert!(h.state().doc.file().templates[0].home_assistant);
+        h.run();
+        assert!(h.query_by_label("Every field is announced.").is_some());
+    }
+
+    #[test]
+    fn a_field_home_assistant_cannot_read_is_named() {
+        let src = src_replacing(r#"id = "air""#, "id = \"air\"\nhome_assistant = true")
+            .replace(r#"payload = "{{ co2 }}""#, r#"payload = "co2={{ co2 }}""#);
+        let h = user_harness_with(&src);
+        assert!(
+            h.query_by_label("Not announced, not in one place of a payload: co2")
+                .is_some()
+        );
     }
 
     #[test]

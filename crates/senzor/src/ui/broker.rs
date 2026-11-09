@@ -364,7 +364,10 @@ fn clear_retained(
             ui.colored_label(ONLINE, format!("Cleared {}", retained_topics_text(*count)));
         }
         Some(ClearRetained::Nothing) => {
-            ui.weak("Nothing to clear: no template has availability or retains its messages.");
+            ui.weak(
+                "Nothing to clear: no template has availability, retains its messages or announces \
+                 to Home Assistant.",
+            );
         }
         Some(ClearRetained::Failed(reason)) => {
             ui.colored_label(ERROR, reason);

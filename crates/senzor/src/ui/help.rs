@@ -161,6 +161,11 @@ pub const RETAIN: Help = help(
     "The broker keeps each topic's last data message and hands it to new subscribers first.",
     "gui/editing-templates#settings",
 );
+pub const HOME_ASSISTANT: Help = help(
+    "Each instance appears in Home Assistant as a device with one entity per field: when it \
+     connects, it publishes Home Assistant's MQTT Discovery messages, retained.",
+    "recipes/home-assistant-discovery",
+);
 pub const AVAILABILITY: Help = help(
     "An online/offline topic: online when an instance connects, offline when it stops, and \
      offline as its Last Will, which the broker publishes if the instance drops off.",

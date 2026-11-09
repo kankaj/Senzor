@@ -128,10 +128,17 @@ pub struct TemplateSpec {
     pub qos: u8,
     #[serde(default)]
     pub retain: bool,
+    /// Announce each instance and its fields to Home Assistant over MQTT Discovery.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub home_assistant: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub availability: Option<AvailabilitySpec>,
     pub messages: Vec<MessageSpec>,
     pub fields: BTreeMap<String, FieldSpec>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// The publish interval of a template that sets none.

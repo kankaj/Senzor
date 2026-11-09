@@ -20,7 +20,8 @@ const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Every topic on which the instances of `devices` (all devices when `None`) can leave a retained
 /// message, sorted and without duplicates: the availability topic of each instance whose template
-/// has availability, and the message topics of each instance whose template has `retain = true`.
+/// has availability, the message topics of each instance whose template has `retain = true`, and
+/// the Home Assistant discovery topics of each instance whose template has `home_assistant = true`.
 /// Device IDs that are not in the project are ignored.
 ///
 /// Topics are rendered as validation renders them: with each field's initial value, `seq` 0 and
@@ -63,6 +64,7 @@ fn instance_topics(instance: &InstanceConfig) -> Vec<String> {
         let ctx = tick_context(&base, &values, SystemTime::now(), 0);
         topics.extend(instance.templates.render_topics(&ctx).into_iter().flatten());
     }
+    topics.extend(super::discovery::topics(instance));
     topics
 }
 
@@ -244,6 +246,14 @@ count = 3
 
     fn strings(topics: &[&str]) -> Vec<String> {
         topics.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn home_assistant_discovery_topics_are_listed() {
+        let mut project = project();
+        project.devices[1].instances[0].home_assistant = true;
+        let topics = retained_topics(&project, Some(&["p".to_string()]));
+        assert_eq!(topics, strings(&["homeassistant/sensor/p/v/config"]));
     }
 
     #[test]

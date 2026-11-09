@@ -3,6 +3,7 @@
   "pages": [
     "ikea-zigbee2mqtt",
     "home-assistant-statestream",
+    "home-assistant-discovery",
     "fleet",
     "device-dropping-off",
     "ai-agent-testing",

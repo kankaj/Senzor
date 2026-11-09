@@ -132,6 +132,7 @@ declared.
 | `interval` | duration | `"10s"` | Time between two publishes. Greater than 0. A device can override it. |
 | `qos` | integer | `0` | QoS of the messages: `0`, `1` or `2`. |
 | `retain` | boolean | `false` | Retain flag of the messages. |
+| `home_assistant` | boolean | `false` | Announce each instance to Home Assistant over MQTT Discovery when it connects: a device with one entity per field. See [Home Assistant discovery](/docs/recipes/home-assistant-discovery). |
 | `availability` | table | none | Status topic and Last Will. See [Availability](#availability). |
 | `messages` | array of tables | required | What to publish on every tick. At least one. See [Messages](#messages). |
 | `fields` | table | required | The values to generate. At least one. See [Fields](#fields). |

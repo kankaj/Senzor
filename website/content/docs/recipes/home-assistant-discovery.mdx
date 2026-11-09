@@ -1,0 +1,78 @@
+---
+title: Home Assistant discovery
+description: Make simulated devices appear in Home Assistant by themselves, with MQTT Discovery.
+---
+
+Home Assistant's MQTT integration finds devices through [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery): a device publishes a config message that says what it measures and where, and Home Assistant creates the device and its entities. With `home_assistant = true` on a template, every instance of the template does that when it connects. You get sensors in Home Assistant without writing any YAML, to build dashboards and automations against before the real hardware exists.
+
+## The project
+
+<include lang="toml" meta='title="examples/home-assistant-discovery.toml"'>../../../../examples/home-assistant-discovery.toml</include>
+
+- Both templates set `home_assistant = true`. Each instance becomes one Home Assistant device, named after the instance ID: `living_room` and `front_door`.
+- Each field becomes one entity of that device. The air sensor has three: CO2, Temperature and Humidity. The field's `name` is the entity's name and its `unit` the unit Home Assistant shows; a field without a `name` is named by its key.
+- `open` is a boolean field, so it becomes a binary sensor, which Home Assistant shows as on or off. Fields with numbers are sensors that Home Assistant keeps statistics for; fields with text are sensors without them.
+- Both templates have [availability](/docs/concepts/availability), so Home Assistant shows the entities as unavailable while an instance is offline, including when it drops off and the broker publishes its Last Will.
+
+In the GUI, the example is under **Examples** as **Home Assistant Discovery**.
+
+## Run it
+
+Your Home Assistant needs the [MQTT integration](https://www.home-assistant.io/integrations/mqtt/) connected to the same broker as Senzor. Discovery is on by default there, with the prefix `homeassistant`, which is the prefix Senzor publishes under. Set the project's broker to that broker, then run the project:
+
+```bash
+senzor-cli run examples/home-assistant-discovery.toml
+```
+
+Within a few seconds, **Settings → Devices & services → MQTT** lists two new devices, `living_room` and `front_door`, with their entities. Their values follow the messages Senzor publishes every 30 and 10 seconds.
+
+## What Senzor publishes
+
+When an instance connects, it publishes one config message per field, QoS 1 and retained, before its `online` status. It publishes them again after every reconnect. The topic is `homeassistant/<component>/<instance ID>/<field>/config`, where `<component>` is `binary_sensor` for a boolean field and `sensor` for the others. Characters other than letters, digits, `_` and `-` in the instance ID and the field name become `_`, since Home Assistant does not allow them there.
+
+The CO2 field of `living_room` is announced on `homeassistant/sensor/living_room/co2/config` with:
+
+```json
+{
+  "availability_topic": "senzor/living_room/status",
+  "device": {
+    "identifiers": ["senzor_living_room"],
+    "manufacturer": "Senzor",
+    "model": "air-sensor",
+    "name": "living_room"
+  },
+  "name": "CO2",
+  "origin": {
+    "name": "Senzor",
+    "support_url": "https://senzor.kankaj.cz",
+    "sw_version": "1.0.0"
+  },
+  "payload_available": "online",
+  "payload_not_available": "offline",
+  "state_class": "measurement",
+  "state_topic": "senzor/living_room/state",
+  "unique_id": "senzor_living_room_co2",
+  "unit_of_measurement": "ppm",
+  "value_template": "{{ value_json.co2 }}"
+}
+```
+
+- `model` is the template's ID. `unique_id` is `senzor_`, the instance ID and the field name, so Home Assistant keeps the entity, and any changes you make to it there, across restarts.
+- `state_topic` and `value_template` say where the value is. Senzor works them out from the template, as the next section describes.
+- Without availability on the template, the three `availability` and `payload_` keys are left out.
+
+## How Senzor finds a field
+
+Senzor renders each message twice, with only the field's value changed, and looks at what changes:
+
+- One value inside a JSON payload: Home Assistant reads it there, for example `{{ value_json.co2 }}`, `{{ value_json.door.open }}` or `{{ value_json.readings[0] }}`. A key that is not a plain name is quoted: `{{ value_json["CO2 level"] }}`.
+- The whole payload, when it is the value alone such as `650` or `heat`: Home Assistant reads `{{ value }}`.
+- For a binary sensor, the value template turns what the payload holds for `true` into `ON` and anything else into `OFF`, for example `{{ 'ON' if value_json.open == true else 'OFF' }}`.
+
+The first message that holds the field in one of these ways is the one Home Assistant reads. A field that is in no message, only in a topic, in two places of one payload, or in a payload that is neither JSON nor the value alone, such as `co2=650;temp=21`, is not announced. The template editor says which: under **announce over MQTT Discovery** it shows **Every field is announced.**, or names the fields after **Not announced, not in one place of a payload:**.
+
+## Remove the devices from Home Assistant
+
+The config messages are retained, so the devices stay in Home Assistant after Senzor stops; they show as unavailable when the template has availability. To remove them, stop the devices and clear the retained messages: **Clear retained messages…** in the [broker settings](/docs/gui/broker-settings#clear-retained-messages), or [`senzor-cli clear-retained`](/docs/reference/cli#clear-retained). With `home_assistant = true`, the topics it clears include the config topics, and Home Assistant removes an entity when its config is cleared. Clear them before you turn `home_assistant` off: once it is off, Senzor no longer lists those topics.
+
+[Home Assistant MQTT Statestream](/docs/recipes/home-assistant-statestream) is the opposite direction: it simulates what Home Assistant publishes about its own entities.
