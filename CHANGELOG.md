@@ -33,6 +33,7 @@ The first release.
 - Availability: an online and offline topic per instance, with a Last Will the broker publishes when an instance drops off.
 - A seed makes every run of a project draw the same values.
 - Username and password (the password can come from an environment variable), TLS and client certificates.
+- MQTT over WebSocket (`transport = "websocket"`, with a `path`), also over TLS as `wss://`.
 - Validation collects every problem in the project with its location; only what a problem affects is blocked.
 - Saving changes only what was edited in the file: comments, the layout and how values are written stay as you wrote them.
 

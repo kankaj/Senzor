@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, DragValue};
-use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec};
+use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec, Transport};
 
 use super::{
     Action, BoxOrRow, ClearRetained, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked,
@@ -139,6 +139,30 @@ pub fn show(
                         .response
                         .labelled_by(label.id);
                     ui.end_row();
+
+                    let label = help::label(ui, "Transport", help::TRANSPORT);
+                    egui::ComboBox::from_id_salt("broker-transport")
+                        .selected_text(transport_label(broker.transport))
+                        .show_ui(ui, |ui| {
+                            for transport in Transport::ALL {
+                                ui.selectable_value(
+                                    &mut broker.transport,
+                                    transport,
+                                    transport_label(transport),
+                                );
+                            }
+                        })
+                        .response
+                        .labelled_by(label.id);
+                    ui.end_row();
+                    if broker.transport == Transport::WebSocket {
+                        let label = help::label(ui, "  Path", help::WEBSOCKET_PATH);
+                        checked(ui, doc, at, "path", |ui| {
+                            ui.text_edit_singleline(&mut broker.path)
+                                .labelled_by(label.id)
+                        });
+                        ui.end_row();
+                    }
 
                     help::label(ui, "Client ID prefix", help::CLIENT_ID_PREFIX);
                     ui.text_edit_singleline(&mut broker.client_id_prefix);
@@ -406,8 +430,16 @@ fn path_edit(ui: &mut egui::Ui, path: &mut Option<PathBuf>) -> egui::Response {
 fn shown_inline(field: &str) -> bool {
     matches!(
         field,
-        "host" | "port" | "keep_alive" | "session_expiry" | "username" | "password_env"
+        "host" | "port" | "keep_alive" | "session_expiry" | "username" | "password_env" | "path"
     ) || field.starts_with("tls.")
+}
+
+/// A transport as the broker settings name it.
+fn transport_label(transport: Transport) -> &'static str {
+    match transport {
+        Transport::Tcp => "TCP",
+        Transport::WebSocket => "WebSocket",
+    }
 }
 
 #[cfg(test)]
@@ -638,6 +670,21 @@ mod tests {
                 .to_toml_string()
                 .contains(r#"mqtt_version = "3.1.1""#)
         );
+    }
+
+    #[test]
+    fn choosing_websocket_shows_the_path_and_writes_both() {
+        let mut h = harness();
+        assert!(h.query_by_label("  Path").is_none(), "no path over TCP");
+        h.get_by_label("Transport").click();
+        h.run();
+        h.get_by_label("WebSocket").click();
+        h.run();
+        let broker = &h.state().doc.file().broker;
+        assert_eq!(broker.transport, senzor_core::project::Transport::WebSocket);
+        assert_eq!(h.get_by_label("  Path").value().as_deref(), Some("/mqtt"));
+        let toml = h.state().doc.file().to_toml_string();
+        assert!(toml.contains(r#"transport = "websocket""#), "{toml}");
     }
 
     #[test]

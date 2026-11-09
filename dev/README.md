@@ -6,6 +6,7 @@ broker. Both listen on `127.0.0.1` only and accept anonymous clients.
 | Service | Image | Port | Speaks |
 | --- | --- | --- | --- |
 | `mosquitto` | `eclipse-mosquitto:2` | 18831 | MQTT 5 and 3.1.1 |
+| `mosquitto` | `eclipse-mosquitto:2` | 18833 | MQTT 5 and 3.1.1 over WebSocket, path `/` |
 | `mosquitto-1-5` | `eclipse-mosquitto:1.5` | 18832 | MQTT 3.1.1 only |
 
 ```bash

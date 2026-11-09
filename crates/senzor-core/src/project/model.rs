@@ -8,7 +8,7 @@ use tokio_rustls::rustls::ClientConfig;
 
 use super::error::ProjectError;
 use super::field::FieldSpec;
-use super::file::{AvailabilitySpec, MessageSpec, MqttVersion};
+use super::file::{AvailabilitySpec, MessageSpec, MqttVersion, Transport};
 use crate::render::{InstanceTemplates, TemplateError};
 use crate::value::Value;
 
@@ -135,6 +135,9 @@ pub struct BrokerConfig {
     pub credentials: Option<Credentials>,
     pub tls: Option<TlsConfig>,
     pub mqtt_version: MqttVersion,
+    pub transport: Transport,
+    /// The WebSocket path; used only with [`Transport::WebSocket`].
+    pub path: String,
     /// MQTT 5 session expiry; zero means a clean start on every connect.
     pub session_expiry: Duration,
 }

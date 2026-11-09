@@ -14,6 +14,8 @@ The broker button opens **Project settings**, whose **Broker** section edits the
 | **Host**             | `host`                       | `localhost` |
 | **Port**             | `port`                       | `1883`      |
 | **MQTT version**     | `mqtt_version`               | `5`         |
+| **Transport**        | `transport`                  | TCP         |
+| **Path**             | `path`                       | `/mqtt`     |
 | **Client ID prefix** | `client_id_prefix`           | `senzor-`   |
 | **Keep alive**       | `keep_alive`                 | `30s`       |
 | **Session expiry**   | `session_expiry`             | `0s`        |
@@ -42,6 +44,12 @@ The broker button opens **Project settings**, whose **Broker** section edits the
 - A broker that speaks only MQTT 3.1.1, such as Mosquitto before 1.6, closes the connection. Senzor then checks whether the broker answers MQTT 3.1.1, and if it does, ends the instance **Failed** with the same message. Over TLS it cannot check: the instance keeps reconnecting, and until it has connected once its error ends with `the broker closed the connection before accepting it; if it supports only MQTT 3.1.1, …`.
 
 With **3.1.1**, the MQTT 5 settings (**Session expiry** here, and the message properties and **Will delay** in the [template editor](/docs/gui/editing-templates)) are disabled with the note **needs MQTT 5; the broker settings use MQTT 3.1.1**. A setting that still has a value stays editable, so you can clear it; until you do, the Problems tab lists it, and the devices it affects cannot start (all of them, for **Session expiry**).
+
+## Transport
+
+**Transport** chooses how instances reach the broker: **TCP**, the usual MQTT connection, or **WebSocket**, MQTT inside a WebSocket connection, as brokers behind a web server or a proxy take it. With **WebSocket**, a **Path** row appears under it: the path the broker serves MQTT on, `/mqtt` unless you change it. It must start with `/`, or the Problems tab lists `` path `mqtt` must start with / `` and no device can start. Brokers take WebSocket on a port of their own, such as 8080 or 8083, so set **Port** to that.
+
+With **TLS** on, WebSocket connects over `wss://`, with the same certificates. The project file writes `transport = "websocket"` and `path`; with **TCP**, neither is written. The **Path** of a TCP connection is not used.
 
 ## Session expiry
 

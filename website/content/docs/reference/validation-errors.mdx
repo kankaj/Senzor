@@ -74,6 +74,7 @@ See [Project file reference](/docs/reference/project-file) for every key and its
 | `keep_alive must be whole seconds, got <duration>` | Write `keep_alive` in whole seconds, such as `"30s"`. |
 | `keep_alive must be at most 65535 seconds (18h 12m 15s)` | MQTT sends the keep-alive as a 16-bit number of seconds. Use a shorter duration. |
 | `session_expiry must be at most 4294967295 seconds` | MQTT counts it in a 32-bit number of seconds (about 136 years). Use a shorter duration. |
+| `` path `<path>` must start with / `` | With `transport = "websocket"`, write the WebSocket path with its leading slash, such as `"/mqtt"`. |
 | `use either password or password_env, not both` | Remove one of them. |
 | `` environment variable `<name>` (password_env) is not set `` | Set the variable before you start Senzor or run `senzor-cli`. |
 | `a password requires a username` | Add `username`, or remove the password. |

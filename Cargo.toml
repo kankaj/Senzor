@@ -35,7 +35,7 @@ jsonschema = { version = "0.58.6", default-features = false }
 minijinja = { version = "3.0.0", features = ["json"] }
 rand = { version = "0.10.3", features = ["chacha"] }
 rmcp = { version = "3.8.0", default-features = false }
-rumqttc = "0.25.1"
+rumqttc = { version = "0.25.1", features = ["websocket"] }
 rumqttd = { version = "0.20.0", default-features = false }
 rustls-native-certs = "0.8.4"
 schemars = "1.2.3"

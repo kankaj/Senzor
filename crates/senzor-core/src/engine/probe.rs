@@ -83,6 +83,8 @@ mod tests {
             credentials: None,
             tls: None,
             mqtt_version: MqttVersion::V5,
+            transport: crate::project::Transport::Tcp,
+            path: "/mqtt".into(),
             session_expiry: Duration::ZERO,
         }
     }

@@ -480,6 +480,17 @@ fn connect_protocol(connect: &[u8]) -> Protocol {
 pub const MOSQUITTO_PORT: u16 = 18831;
 /// The Mosquitto 1.5 broker of `dev/compose.yaml` (MQTT 3.1.1 only, anonymous).
 pub const MOSQUITTO_15_PORT: u16 = 18832;
+/// The WebSocket listener of the Mosquitto 2 broker of `dev/compose.yaml`.
+pub const MOSQUITTO_WS_PORT: u16 = 18833;
+
+/// The WebSocket port of the Docker Mosquitto 2: `SENZOR_MOSQUITTO_WS_PORT` or
+/// [`MOSQUITTO_WS_PORT`]. Call [`mosquitto_port`] first: it checks that the broker is up.
+pub fn mosquitto_ws_port() -> u16 {
+    std::env::var("SENZOR_MOSQUITTO_WS_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(MOSQUITTO_WS_PORT)
+}
 
 /// The port of the Docker Mosquitto 2: `SENZOR_MOSQUITTO_PORT` or [`MOSQUITTO_PORT`]. Panics with
 /// how to start it when no MQTT 5 broker answers there.

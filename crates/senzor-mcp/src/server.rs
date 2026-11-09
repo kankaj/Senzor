@@ -514,7 +514,7 @@ impl SenzorServer {
     }
 
     #[tool(
-        description = "Replace the broker settings. Takes the keys of the [broker] table (host, port, client_id_prefix, keep_alive, mqtt_version, session_expiry, username, password, password_env, tls). Omitted keys take their defaults: mqtt_version becomes \"5\", session_expiry 0s, and username, password, password_env and tls are removed. To change one setting, pass every key get_project shows under [broker], with password \"<redacted>\" to keep the stored password. Running instances need a restart to use them."
+        description = "Replace the broker settings. Takes the keys of the [broker] table (host, port, client_id_prefix, keep_alive, mqtt_version, transport, path, session_expiry, username, password, password_env, tls). Omitted keys take their defaults: mqtt_version becomes \"5\", transport \"tcp\", path \"/mqtt\", session_expiry 0s, and username, password, password_env and tls are removed. To change one setting, pass every key get_project shows under [broker], with password \"<redacted>\" to keep the stored password. Running instances need a restart to use them."
     )]
     async fn set_broker(
         &self,

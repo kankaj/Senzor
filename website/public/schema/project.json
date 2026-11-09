@@ -59,6 +59,10 @@
             "null"
           ]
         },
+        "path": {
+          "description": "The WebSocket path, such as `/mqtt`; used only with `transport = \"websocket\"`.",
+          "type": "string"
+        },
         "port": {
           "default": 1883,
           "format": "uint16",
@@ -79,6 +83,10 @@
               "type": "null"
             }
           ]
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport",
+          "description": "How instances reach the broker: plain MQTT over TCP, or MQTT over WebSocket."
         },
         "username": {
           "type": [
@@ -489,6 +497,21 @@
         }
       },
       "type": "object"
+    },
+    "Transport": {
+      "description": "How a project's instances reach the broker.",
+      "oneOf": [
+        {
+          "const": "tcp",
+          "description": "MQTT over TCP (with `tls`, over TLS).",
+          "type": "string"
+        },
+        {
+          "const": "websocket",
+          "description": "MQTT over WebSocket, `ws://` (with `tls`, `wss://`), at the broker's `path`.",
+          "type": "string"
+        }
+      ]
     },
     "Value": {
       "anyOf": [

@@ -340,7 +340,7 @@ Errors: `` unknown built-in template `<id>` ``, `` a template `<id>` already exi
 
 ### `set_broker`
 
-Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the project file: an omitted `mqtt_version` is `"5"`, and an omitted `username`, `password`, `password_env` or `tls` is removed. To change one setting, pass every key `get_project` shows under `[broker]`; pass `password = "<redacted>"` to keep the stored password. Every running instance needs a restart to use the new settings.
+Replaces the broker settings. The arguments are the keys of the `[broker]` table: `host`, `port`, `client_id_prefix`, `keep_alive`, `mqtt_version`, `transport`, `path`, `session_expiry`, `username`, `password`, `password_env` and `tls`. Omitted keys take their defaults, as in the project file: an omitted `mqtt_version` is `"5"`, and an omitted `username`, `password`, `password_env` or `tls` is removed. To change one setting, pass every key `get_project` shows under `[broker]`; pass `password = "<redacted>"` to keep the stored password. Every running instance needs a restart to use the new settings.
 
 ## Undo and redo
 

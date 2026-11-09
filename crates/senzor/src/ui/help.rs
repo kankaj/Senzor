@@ -72,6 +72,16 @@ pub const MQTT_VERSION: Help = help(
      every instance.",
     "gui/broker-settings#mqtt-version",
 );
+pub const TRANSPORT: Help = help(
+    "TCP, the usual MQTT connection, or MQTT over WebSocket for brokers behind a web server or \
+     proxy. With TLS, WebSocket becomes wss://. Brokers take WebSocket on their own port, such \
+     as 8080 or 8083.",
+    "gui/broker-settings#transport",
+);
+pub const WEBSOCKET_PATH: Help = help(
+    "The path the broker serves MQTT over WebSocket on, often /mqtt; it must start with /.",
+    "gui/broker-settings#transport",
+);
 pub const CLIENT_ID_PREFIX: Help = help(
     "Each instance's client ID is this prefix followed by its instance ID, such as \
      senzor-office-0. A broker allows one connection per client ID.",

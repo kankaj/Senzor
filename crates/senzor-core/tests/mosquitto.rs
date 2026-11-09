@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use senzor_core::engine::{Command, Engine, EngineHandle, EngineState, InstanceStatus, Target};
 use senzor_core::project::{Project, ProjectFile};
-use senzor_testkit::{Subscriber, mosquitto_15_port, mosquitto_port};
+use senzor_testkit::{Subscriber, mosquitto_15_port, mosquitto_port, mosquitto_ws_port};
 use tokio::runtime::Handle;
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -96,6 +96,28 @@ async fn both_versions_connect_and_publish_on_mosquitto_2() {
             port,
             &prefix,
             &format!("mqtt_version = \"{version}\""),
+            "",
+            "",
+        ));
+        start_online(&engine).await;
+        let state = sub.wait_for(WAIT, |m| m.topic.ends_with("/state")).await;
+        assert_eq!(state.map(|m| m.payload), Some("1".into()), "MQTT {version}");
+        engine.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the Docker brokers in dev/compose.yaml"]
+async fn both_versions_publish_over_websocket() {
+    let tcp = mosquitto_port();
+    let ws = mosquitto_ws_port();
+    for version in ["5", "3.1.1"] {
+        let prefix = unique("ws");
+        let mut sub = Subscriber::connect(tcp, &format!("{prefix}/#")).await;
+        let engine = spawn(project(
+            ws,
+            &prefix,
+            &format!("mqtt_version = \"{version}\"\ntransport = \"websocket\"\npath = \"/\""),
             "",
             "",
         ));

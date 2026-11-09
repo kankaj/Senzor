@@ -43,6 +43,12 @@ pub struct BrokerSpec {
     pub tls: Option<TlsSpec>,
     /// The MQTT protocol version every instance of the project connects with.
     pub mqtt_version: MqttVersion,
+    /// How instances reach the broker: plain MQTT over TCP, or MQTT over WebSocket.
+    #[serde(skip_serializing_if = "Transport::is_tcp")]
+    pub transport: Transport,
+    /// The WebSocket path, such as `/mqtt`; used only with `transport = "websocket"`.
+    #[serde(skip_serializing_if = "is_default_path")]
+    pub path: String,
     /// MQTT 5 session expiry interval. Above zero, instances reconnect without a clean start, so
     /// a reconnect within `availability.will_delay` cancels the Last Will.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
@@ -59,6 +65,41 @@ pub enum MqttVersion {
     V5,
     #[serde(rename = "3.1.1")]
     V311,
+}
+
+/// How a project's instances reach the broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum Transport {
+    /// MQTT over TCP (with `tls`, over TLS).
+    #[default]
+    Tcp,
+    /// MQTT over WebSocket, `ws://` (with `tls`, `wss://`), at the broker's `path`.
+    WebSocket,
+}
+
+impl Transport {
+    pub const ALL: [Transport; 2] = [Transport::Tcp, Transport::WebSocket];
+
+    fn is_tcp(&self) -> bool {
+        *self == Transport::Tcp
+    }
+
+    /// The transport as written in the project file: `tcp` or `websocket`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Transport::Tcp => "tcp",
+            Transport::WebSocket => "websocket",
+        }
+    }
+}
+
+/// The WebSocket path brokers commonly serve MQTT on, used when the file sets none.
+pub const DEFAULT_WEBSOCKET_PATH: &str = "/mqtt";
+
+fn is_default_path(path: &String) -> bool {
+    path == DEFAULT_WEBSOCKET_PATH
 }
 
 impl MqttVersion {
@@ -85,6 +126,8 @@ impl Default for BrokerSpec {
             password_env: None,
             tls: None,
             mqtt_version: MqttVersion::default(),
+            transport: Transport::default(),
+            path: DEFAULT_WEBSOCKET_PATH.into(),
             session_expiry: Duration::ZERO,
         }
     }

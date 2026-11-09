@@ -44,6 +44,8 @@ Each instance opens its own connection.
 | `client_id_prefix` | string | `"senzor-"` | The MQTT client ID of an instance is this prefix followed by the instance ID, e.g. `senzor-office-0`. |
 | `keep_alive` | duration | `"30s"` | MQTT keep-alive. Whole seconds, from `"1s"` to `"65535s"` (18h 12m 15s). |
 | `mqtt_version` | string | `"5"` | `"5"` or `"3.1.1"`. Every instance connects with this MQTT version. See [MQTT version](#mqtt-version). |
+| `transport` | string | `"tcp"` | `"tcp"` or `"websocket"`. With `"websocket"`, instances connect to `ws://<host>:<port><path>`, or `wss://` with `tls`. |
+| `path` | string | `"/mqtt"` | The WebSocket path. Must start with `/` when `transport = "websocket"`; not used with `"tcp"`. |
 | `session_expiry` | duration | `"0s"` | MQTT 5 only. Whole seconds, at most 4294967295 (about 136 years). How long the broker keeps an instance's session after the connection ends. `"0s"` starts a clean session on every connect; above zero, a reconnect continues the session, which lets a reconnect within [`will_delay`](#availability) cancel the Last Will. |
 | `username` | string | none | Can be used without a password; Senzor then sends only the username. |
 | `password` | string | none | Requires `username`. Cannot be combined with `password_env`. |

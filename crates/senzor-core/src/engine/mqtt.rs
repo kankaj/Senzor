@@ -10,7 +10,7 @@ use rumqttc::v5::mqttbytes::v5::{
 use rumqttc::{LastWill, MqttOptions, TlsConfiguration, Transport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::project::{BrokerConfig, MqttVersion, TlsConfig, mqtt_seconds};
+use crate::project::{BrokerConfig, MqttVersion, Transport as BrokerTransport, mqtt_seconds};
 use crate::render::MessageProperties;
 
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -116,7 +116,7 @@ fn client_id(broker: &BrokerConfig, instance_id: &str) -> String {
 fn v311_options(broker: &BrokerConfig, instance_id: &str, will: Option<Will>) -> MqttOptions {
     let mut options = MqttOptions::new(
         client_id(broker, instance_id),
-        broker.host.clone(),
+        broker_address(broker),
         broker.port,
     );
     options.set_keep_alive(broker.keep_alive);
@@ -134,9 +134,7 @@ fn v311_options(broker: &BrokerConfig, instance_id: &str, will: Option<Will>) ->
             true,
         ));
     }
-    if let Some(tls) = &broker.tls {
-        options.set_transport(transport(tls));
-    }
+    options.set_transport(transport(broker));
     options
 }
 
@@ -150,7 +148,7 @@ fn v5_options(
 ) -> rumqttc::v5::MqttOptions {
     let mut options = rumqttc::v5::MqttOptions::new(
         client_id(broker, instance_id),
-        broker.host.clone(),
+        broker_address(broker),
         broker.port,
     );
     options.set_keep_alive(broker.keep_alive);
@@ -180,15 +178,39 @@ fn v5_options(
             properties,
         ));
     }
-    if let Some(tls) = &broker.tls {
-        options.set_transport(transport(tls));
-    }
+    options.set_transport(transport(broker));
     options
 }
 
-/// The TLS setup built at validation, shared by every instance.
-fn transport(tls: &TlsConfig) -> Transport {
-    Transport::Tls(TlsConfiguration::Rustls(tls.client.clone()))
+/// What rumqttc connects to: the host for TCP, the whole URL for WebSocket (`ws://` or, with
+/// TLS, `wss://`, with the broker's path).
+fn broker_address(broker: &BrokerConfig) -> String {
+    match broker.transport {
+        BrokerTransport::Tcp => broker.host.clone(),
+        BrokerTransport::WebSocket => {
+            let scheme = if broker.tls.is_some() { "wss" } else { "ws" };
+            let host = if broker.host.contains(':') {
+                format!("[{}]", broker.host)
+            } else {
+                broker.host.clone()
+            };
+            format!("{scheme}://{host}:{}{}", broker.port, broker.path)
+        }
+    }
+}
+
+/// The transport, with the TLS setup built at validation, shared by every instance.
+fn transport(broker: &BrokerConfig) -> Transport {
+    let tls = broker
+        .tls
+        .as_ref()
+        .map(|tls| TlsConfiguration::Rustls(tls.client.clone()));
+    match (broker.transport, tls) {
+        (BrokerTransport::Tcp, None) => Transport::Tcp,
+        (BrokerTransport::Tcp, Some(tls)) => Transport::Tls(tls),
+        (BrokerTransport::WebSocket, None) => Transport::Ws,
+        (BrokerTransport::WebSocket, Some(tls)) => Transport::Wss(tls),
+    }
 }
 
 impl Client {
@@ -393,7 +415,66 @@ mod tests {
             }),
             tls: None,
             mqtt_version,
+            transport: crate::project::Transport::Tcp,
+            path: "/mqtt".into(),
             session_expiry: Duration::ZERO,
+        }
+    }
+
+    /// The broker address and transport both versions' options get for `config`.
+    fn addresses(config: &BrokerConfig) -> [(String, Transport); 2] {
+        let mut config = config.clone();
+        config.mqtt_version = MqttVersion::V311;
+        let v311 = v311_options(&config, "x", None);
+        config.mqtt_version = MqttVersion::V5;
+        let v5 = v5_options(&config, "x", None);
+        [
+            (v311.broker_address().0, v311.transport()),
+            (v5.broker_address().0, v5.transport()),
+        ]
+    }
+
+    #[test]
+    fn websocket_connects_to_the_url_with_its_path() {
+        let mut config = broker(MqttVersion::V5);
+        config.transport = crate::project::Transport::WebSocket;
+        config.port = 8080;
+        for (address, transport) in addresses(&config) {
+            assert_eq!(address, "ws://mqtt.local:8080/mqtt");
+            assert!(matches!(transport, Transport::Ws));
+        }
+        config.host = "::1".into();
+        config.path = "/".into();
+        for (address, _) in addresses(&config) {
+            assert_eq!(address, "ws://[::1]:8080/");
+        }
+    }
+
+    #[test]
+    fn websocket_with_tls_uses_wss_and_the_tls_setup_built_at_validation() {
+        let testdata = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/tls");
+        let validated = crate::project::ProjectFile::parse(
+            "[broker]\ntransport = \"websocket\"\nport = 8443\ntls = { ca_file = \"ca.pem\" }\n",
+        )
+        .unwrap()
+        .validate(&testdata);
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let config = validated.project.broker;
+        let built = config.tls.as_ref().unwrap().client.clone();
+        for (address, transport) in addresses(&config) {
+            assert_eq!(address, "wss://localhost:8443/mqtt");
+            assert!(matches!(
+                transport,
+                Transport::Wss(TlsConfiguration::Rustls(client)) if std::sync::Arc::ptr_eq(&client, &built)
+            ));
+        }
+    }
+
+    #[test]
+    fn tcp_connects_to_the_host() {
+        for (address, transport) in addresses(&broker(MqttVersion::V5)) {
+            assert_eq!(address, "mqtt.local");
+            assert!(matches!(transport, Transport::Tcp));
         }
     }
 

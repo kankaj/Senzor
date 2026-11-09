@@ -7,7 +7,7 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::{self, ClientConfig, RootCertStore};
 
 use super::error::ProjectError;
-use super::file::{BrokerSpec, MqttVersion, TlsSpec};
+use super::file::{BrokerSpec, MqttVersion, TlsSpec, Transport};
 use super::model::{BrokerConfig, Credentials, TlsConfig};
 
 /// The longest keep-alive MQTT can carry: 16-bit seconds.
@@ -42,6 +42,11 @@ pub fn resolve_broker(
         errors.push(keep_alive(
             "keep_alive must be at most 65535 seconds (18h 12m 15s)".into(),
         ));
+    }
+    if spec.transport == Transport::WebSocket && !spec.path.starts_with('/') {
+        errors.push(
+            ProjectError::broker(format!("path `{}` must start with /", spec.path)).at("path"),
+        );
     }
     if let Err(e) = whole_seconds("session_expiry", spec.session_expiry) {
         errors.push(ProjectError::broker(e).at("session_expiry"));
@@ -82,6 +87,8 @@ pub fn broker_config(
         credentials,
         tls,
         mqtt_version: spec.mqtt_version,
+        transport: spec.transport,
+        path: spec.path.clone(),
         session_expiry: spec.session_expiry,
     }
 }
@@ -497,6 +504,31 @@ mod tests {
             }),
             ..BrokerSpec::default()
         }
+    }
+
+    #[test]
+    fn a_websocket_path_must_start_with_a_slash() {
+        let spec = BrokerSpec {
+            transport: crate::project::Transport::WebSocket,
+            path: "mqtt".into(),
+            ..BrokerSpec::default()
+        };
+        let errors = resolve_broker(&spec, Path::new("."), &no_env).unwrap_err();
+        assert_eq!(
+            (fields(errors.clone()), messages(errors)),
+            (
+                some(&["path"]),
+                vec!["path `mqtt` must start with /".to_string()]
+            )
+        );
+        let tcp = BrokerSpec {
+            path: "mqtt".into(),
+            ..BrokerSpec::default()
+        };
+        assert!(
+            resolve_broker(&tcp, Path::new("."), &no_env).is_ok(),
+            "the path is not used over TCP"
+        );
     }
 
     #[test]
