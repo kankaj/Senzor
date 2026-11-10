@@ -51,6 +51,11 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - Validation collects every problem with a location (broker, template, device) and blocks only
   what it affects; there are no warnings. A problem's text is what users see in the Problems tab
   and the CLI, and `website/content/docs/reference/validation-errors.mdx` lists each one.
+- The window is in English or Czech. Every text it shows goes through `t!` (`crates/senzor/src/i18n.rs`)
+  with the same key in `crates/senzor/locales/en/` and `cs/` (one `.ftl` per source file); problem
+  texts are built with `text!` from `crates/senzor-core/locales/`. Write both languages in the same
+  change; tests check that the two match. A release's Highlights also go, in Czech, into
+  `crates/senzor/locales/cs/whats-new.md`. The docs, `senzor-cli` and MCP stay English.
 - The engine's instance loop is version-neutral; MQTT 3.1.1 and MQTT 5 differences live in
   `crates/senzor-core/src/engine/mqtt.rs`. MQTT 5 is the default.
 

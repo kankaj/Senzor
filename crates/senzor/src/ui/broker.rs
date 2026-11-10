@@ -6,45 +6,45 @@ use senzor_core::project::{BrokerSpec, Location, MqttVersion, TlsSpec, Transport
 use super::{
     Action, BoxOrRow, ClearRetained, ConnectionTest, ERROR, ONLINE, ParsedEdit, UiState, checked,
     duration_edit, errors_at, help, mqtt5_control, optional_text, replace_if_unchanged,
-    retained_topics_text,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{PasswordSource, set_password_source};
+use crate::i18n::t;
 
 /// A broker to try Senzor with: its name in the Presets menu, host, port and what it is.
 struct Preset {
-    name: &'static str,
+    name: fn() -> String,
     host: &'static str,
     port: u16,
-    hint: &'static str,
+    hint: fn() -> String,
 }
 
 /// Anyone can read what is published to the public brokers, hence their hints.
 const PRESETS: [Preset; 4] = [
     Preset {
-        name: "Mosquitto on this computer",
+        name: || t!("broker-preset-local"),
         host: "localhost",
         port: 1883,
-        hint: "A broker running on this computer, installed or in Docker",
+        hint: || t!("broker-preset-local-hint"),
     },
     Preset {
-        name: "Mosquitto test server",
+        name: || t!("broker-preset-mosquitto"),
         host: "test.mosquitto.org",
         port: 1883,
-        hint: "Public: anyone can read what is published there",
+        hint: || t!("broker-preset-public-hint"),
     },
     Preset {
-        name: "HiveMQ public broker",
+        name: || t!("broker-preset-hivemq"),
         host: "broker.hivemq.com",
         port: 1883,
-        hint: "Public: anyone can read what is published there",
+        hint: || t!("broker-preset-public-hint"),
     },
     Preset {
-        name: "EMQX public broker",
+        name: || t!("broker-preset-emqx"),
         host: "broker.emqx.io",
         port: 1883,
-        hint: "Public: anyone can read what is published there",
+        hint: || t!("broker-preset-public-hint"),
     },
 ];
 
@@ -60,17 +60,13 @@ fn apply_preset(broker: &mut BrokerSpec, preset: &Preset) {
 
 /// The Presets menu, which sets the broker's address to a known broker.
 fn presets_menu(ui: &mut egui::Ui, broker: &mut BrokerSpec) {
-    ui.menu_button("Presets", |ui| {
+    ui.menu_button(t!("broker-presets"), |ui| {
         for preset in &PRESETS {
+            let name = (preset.name)();
             let item = ui
-                .button(format!(
-                    "{}  ({}:{})",
-                    preset.name, preset.host, preset.port
-                ))
-                .on_hover_text(preset.hint);
-            item.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, preset.name)
-            });
+                .button(format!("{name}  ({}:{})", preset.host, preset.port))
+                .on_hover_text((preset.hint)());
+            item.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
             if item.clicked() {
                 apply_preset(broker, preset);
                 ui.close();
@@ -78,12 +74,12 @@ fn presets_menu(ui: &mut egui::Ui, broker: &mut BrokerSpec) {
         }
     })
     .response
-    .on_hover_text("Fill in a known broker's address; credentials and TLS are cleared");
+    .on_hover_text(t!("broker-presets-hint"));
 }
 
 /// The Password row: where the password comes from, and the password or variable.
 fn password_row(ui: &mut egui::Ui, doc: &Document, at: &Location, broker: &mut BrokerSpec) {
-    help::label(ui, "Password", help::PASSWORD);
+    help::label(ui, &t!("broker-password"), help::PASSWORD);
     checked(ui, doc, at, "password_env", |ui| {
         ui.horizontal(|ui| {
             let mut source = PasswordSource::of(broker);
@@ -110,31 +106,42 @@ fn password_row(ui: &mut egui::Ui, doc: &Document, at: &Location, broker: &mut B
 
 /// The TLS row, and the certificate rows under it while TLS is on.
 fn tls_rows(ui: &mut egui::Ui, doc: &Document, at: &Location, broker: &mut BrokerSpec) {
-    help::label(ui, "TLS", help::TLS);
+    help::label(ui, &t!("broker-tls"), help::TLS);
     let mut tls = broker.tls.is_some();
-    if ui.checkbox(&mut tls, "use TLS").changed() {
+    if ui.checkbox(&mut tls, t!("broker-use-tls")).changed() {
         broker.tls = tls.then(TlsSpec::default);
     }
     ui.end_row();
     if let Some(tls) = &mut broker.tls {
         for (label, field, path) in [
-            ("  CA file", "tls.ca_file", &mut tls.ca_file),
+            (t!("broker-ca-file"), "tls.ca_file", &mut tls.ca_file),
             (
-                "  Client certificate",
+                t!("broker-client-cert"),
                 "tls.client_cert",
                 &mut tls.client_cert,
             ),
-            ("  Client key", "tls.client_key", &mut tls.client_key),
+            (
+                t!("broker-client-key"),
+                "tls.client_key",
+                &mut tls.client_key,
+            ),
         ] {
-            ui.label(label);
+            ui.label(indented(&label));
             checked(ui, doc, at, field, |ui| path_edit(ui, path));
             ui.end_row();
         }
     }
 }
 
-/// Shown under the seed box while its text is not a seed.
-const SEED_HINT: &str = "use a whole number, or leave it empty";
+/// A row label under another row, set in by two spaces.
+fn indented(label: &str) -> String {
+    format!("  {label}")
+}
+
+/// The window's ID, the same in every language, so switching keeps it where it is.
+fn window_id() -> egui::Id {
+    egui::Id::new("project-settings-window")
+}
 
 /// The project's settings: the `[broker]` / `[broker.tls]` section and `[simulation]`.
 pub fn show(
@@ -148,13 +155,14 @@ pub fn show(
     let mut broker = original.clone();
     let original_simulation = &doc.file().simulation;
     let mut simulation = original_simulation.clone();
-    egui::Window::new("Project settings")
+    egui::Window::new(t!("broker-title"))
+        .id(window_id())
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.strong("Broker");
+                ui.strong(t!("broker-broker"));
                 presets_menu(ui, &mut broker);
             });
             let at = &Location::Broker;
@@ -162,21 +170,21 @@ pub fn show(
             egui::Grid::new("broker-form")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    let label = help::label(ui, "Host", help::HOST);
+                    let label = help::label(ui, &t!("broker-host"), help::HOST);
                     checked(ui, doc, at, "host", |ui| {
                         ui.text_edit_singleline(&mut broker.host)
                             .labelled_by(label.id)
                     });
                     ui.end_row();
 
-                    let label = help::label(ui, "Port", help::PORT);
+                    let label = help::label(ui, &t!("broker-port"), help::PORT);
                     checked(ui, doc, at, "port", |ui| {
                         ui.add(DragValue::new(&mut broker.port))
                             .labelled_by(label.id)
                     });
                     ui.end_row();
 
-                    let label = help::label(ui, "MQTT version", help::MQTT_VERSION);
+                    let label = help::label(ui, &t!("broker-mqtt-version"), help::MQTT_VERSION);
                     egui::ComboBox::from_id_salt("broker-mqtt-version")
                         .selected_text(broker.mqtt_version.label())
                         .show_ui(ui, |ui| {
@@ -192,7 +200,7 @@ pub fn show(
                         .labelled_by(label.id);
                     ui.end_row();
 
-                    let label = help::label(ui, "Transport", help::TRANSPORT);
+                    let label = help::label(ui, &t!("broker-transport"), help::TRANSPORT);
                     egui::ComboBox::from_id_salt("broker-transport")
                         .selected_text(transport_label(broker.transport))
                         .show_ui(ui, |ui| {
@@ -208,7 +216,8 @@ pub fn show(
                         .labelled_by(label.id);
                     ui.end_row();
                     if broker.transport == Transport::WebSocket {
-                        let label = help::label(ui, "  Path", help::WEBSOCKET_PATH);
+                        let label =
+                            help::label(ui, &indented(&t!("broker-path")), help::WEBSOCKET_PATH);
                         checked(ui, doc, at, "path", |ui| {
                             ui.text_edit_singleline(&mut broker.path)
                                 .labelled_by(label.id)
@@ -216,11 +225,11 @@ pub fn show(
                         ui.end_row();
                     }
 
-                    help::label(ui, "Client ID prefix", help::CLIENT_ID_PREFIX);
+                    help::label(ui, &t!("broker-client-id-prefix"), help::CLIENT_ID_PREFIX);
                     ui.text_edit_singleline(&mut broker.client_id_prefix);
                     ui.end_row();
 
-                    let label = help::label(ui, "Keep alive", help::KEEP_ALIVE);
+                    let label = help::label(ui, &t!("broker-keep-alive"), help::KEEP_ALIVE);
                     checked(ui, doc, at, "keep_alive", |ui| {
                         duration_edit(
                             ui,
@@ -232,7 +241,7 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    let label = help::label(ui, "Session expiry", help::SESSION_EXPIRY);
+                    let label = help::label(ui, &t!("broker-session-expiry"), help::SESSION_EXPIRY);
                     let mqtt5 = broker.mqtt_version == MqttVersion::V5;
                     let has_value = !broker.session_expiry.is_zero();
                     checked(ui, doc, at, "session_expiry", |ui| {
@@ -248,30 +257,30 @@ pub fn show(
                     });
                     ui.end_row();
 
-                    help::label(ui, "Username", help::USERNAME);
+                    help::label(ui, &t!("broker-username"), help::USERNAME);
                     checked(ui, doc, at, "username", |ui| {
-                        optional_text(ui, &mut broker.username, "none")
+                        optional_text(ui, &mut broker.username, &t!("broker-none"))
                     });
                     ui.end_row();
 
                     password_row(ui, doc, at, &mut broker);
                     tls_rows(ui, doc, at, &mut broker);
                 });
-            ui.weak("Relative paths are resolved against the project file's folder.");
+            ui.weak(t!("broker-relative-paths"));
             connection_test(ui, doc, ui_state.connection_test.as_ref(), actions);
             clear_retained(ui, doc, ui_state, actions);
 
             ui.separator();
-            ui.strong("Simulation");
+            ui.strong(t!("broker-simulation"));
             egui::Grid::new("simulation-form")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    let label = help::label(ui, "Seed", help::SEED);
+                    let label = help::label(ui, &t!("broker-seed"), help::SEED);
                     seed_edit(ui, &mut ui_state.buffers, &mut simulation.seed)
                         .labelled_by(label.id);
                     ui.end_row();
                 });
-            ui.weak("With a seed, every run draws the same random values.");
+            ui.weak(t!("broker-seed-text"));
 
             ui.separator();
             run_elsewhere(ui, doc, ui_state, actions);
@@ -299,12 +308,15 @@ fn connection_test(
         .iter()
         .any(|e| e.location == Location::Broker);
     let button = ui
-        .add_enabled(!running && !problems, egui::Button::new("Test connection"))
-        .on_hover_text("Connect once with these settings, then disconnect")
+        .add_enabled(
+            !running && !problems,
+            egui::Button::new(t!("broker-test-connection")),
+        )
+        .on_hover_text(t!("broker-test-connection-hint"))
         .on_disabled_hover_text(if problems {
-            "Fix the broker problems first"
+            t!("broker-fix-problems")
         } else {
-            "Testing…"
+            t!("broker-testing")
         });
     if button.clicked() {
         actions.push(Action::TestConnection);
@@ -313,11 +325,11 @@ fn connection_test(
         Some(ConnectionTest::Running) => {
             ui.horizontal(|ui| {
                 ui.weak(egui_phosphor::regular::HOURGLASS_MEDIUM);
-                ui.weak("connecting…");
+                ui.weak(t!("broker-connecting"));
             });
         }
         Some(ConnectionTest::Passed) => {
-            ui.colored_label(ONLINE, "Connected");
+            ui.colored_label(ONLINE, t!("broker-connected"));
         }
         Some(ConnectionTest::Failed(reason)) => {
             ui.colored_label(ERROR, reason);
@@ -329,14 +341,14 @@ fn connection_test(
 /// Copy buttons for running the project with senzor-cli in CI or in a container.
 fn run_elsewhere(ui: &mut egui::Ui, doc: &Document, ui_state: &UiState, actions: &mut Vec<Action>) {
     use crate::snippets::Snippet;
-    ui.strong("Run elsewhere");
+    ui.strong(t!("broker-run-elsewhere"));
     let saved = doc.file_name().is_some();
     ui.horizontal_wrapped(|ui| {
         for snippet in [Snippet::GitHubActions, Snippet::DockerCompose] {
             if ui
                 .add_enabled(saved, egui::Button::new(snippet.label()))
-                .on_hover_text("Puts text on the clipboard that runs this project with senzor-cli")
-                .on_disabled_hover_text("Save the project first: the snippet names its file")
+                .on_hover_text(t!("broker-snippet-hint"))
+                .on_disabled_hover_text(t!("broker-snippet-disabled"))
                 .clicked()
             {
                 actions.push(Action::CopySnippet(snippet));
@@ -344,14 +356,10 @@ fn run_elsewhere(ui: &mut egui::Ui, doc: &Document, ui_state: &UiState, actions:
         }
     });
     if saved && ui_state.snippet_copied.is_some() {
-        ui.colored_label(ONLINE, "Copied.");
+        ui.colored_label(ONLINE, t!("broker-copied"));
     }
-    ui.weak("See the CI and Docker recipe in the documentation for the rest of the job.");
+    ui.weak(t!("broker-run-elsewhere-text"));
 }
-
-/// Hover hint of Clear retained messages while the project's devices run.
-const CLEAR_WHILE_RUNNING: &str =
-    "Stop the devices first: running instances would publish their retained messages again";
 
 /// Clear retained messages…, then how it went.
 fn clear_retained(
@@ -367,21 +375,18 @@ fn clear_retained(
         .iter()
         .any(|e| e.location == Location::Broker);
     let hint = if ui_state.devices_running {
-        CLEAR_WHILE_RUNNING
+        t!("broker-clear-while-running")
     } else if problems {
-        "Fix the broker problems first"
+        t!("broker-fix-problems")
     } else {
-        "Clearing…"
+        t!("broker-clearing-hint")
     };
     let button = ui
         .add_enabled(
             !clearing && !problems && !ui_state.devices_running,
-            egui::Button::new("Clear retained messages…"),
+            egui::Button::new(t!("broker-clear-retained")),
         )
-        .on_hover_text(
-            "Delete the retained messages this project's instances leave on the broker, \
-             such as their last offline",
-        )
+        .on_hover_text(t!("broker-clear-retained-hint"))
         .on_disabled_hover_text(hint);
     if button.clicked() {
         actions.push(Action::AskClearRetained);
@@ -390,17 +395,14 @@ fn clear_retained(
         Some(ClearRetained::Running) => {
             ui.horizontal(|ui| {
                 ui.weak(egui_phosphor::regular::HOURGLASS_MEDIUM);
-                ui.weak("clearing…");
+                ui.weak(t!("broker-clearing"));
             });
         }
         Some(ClearRetained::Cleared(count)) => {
-            ui.colored_label(ONLINE, format!("Cleared {}", retained_topics_text(*count)));
+            ui.colored_label(ONLINE, t!("broker-cleared", count = *count));
         }
         Some(ClearRetained::Nothing) => {
-            ui.weak(
-                "Nothing to clear: no template has availability, retains its messages or announces \
-                 to Home Assistant.",
-            );
+            ui.weak(t!("broker-nothing-to-clear"));
         }
         Some(ClearRetained::Failed(reason)) => {
             ui.colored_label(ERROR, reason);
@@ -412,7 +414,7 @@ fn clear_retained(
 /// The seed: a whole number, or empty for none, which makes every run draw fresh random values.
 fn seed_edit(ui: &mut egui::Ui, buffers: &mut Buffers, seed: &mut Option<u64>) -> egui::Response {
     ParsedEdit::new("simulation/seed", 160.0)
-        .hint("random")
+        .hint(t!("broker-seed-random"))
         .show(
             ui,
             buffers,
@@ -423,14 +425,14 @@ fn seed_edit(ui: &mut egui::Ui, buffers: &mut Buffers, seed: &mut Option<u64>) -
                 if text.is_empty() {
                     return Ok(None);
                 }
-                text.parse().map(Some).map_err(|_| SEED_HINT.to_string())
+                text.parse().map(Some).map_err(|_| t!("broker-seed-hint"))
             },
         )
 }
 
 fn path_edit(ui: &mut egui::Ui, path: &mut Option<PathBuf>) -> egui::Response {
     let mut text = path.as_ref().map(|p| p.display().to_string());
-    let response = optional_text(ui, &mut text, "system roots / none");
+    let response = optional_text(ui, &mut text, &t!("broker-tls-path-hint"));
     *path = text.map(PathBuf::from);
     response
 }
@@ -443,7 +445,7 @@ fn shown_inline(field: &str) -> bool {
     ) || field.starts_with("tls.")
 }
 
-/// A transport as the broker settings name it.
+/// A transport as the broker settings name it: the protocol's name, the same in every language.
 fn transport_label(transport: Transport) -> &'static str {
     match transport {
         Transport::Tcp => "TCP",
@@ -521,7 +523,11 @@ mod tests {
     #[test]
     fn clear_retained_waits_until_the_devices_stop() {
         let mut h = harness_with_running(true);
-        assert_disabled_with_hint(&mut h, "Clear retained messages…", CLEAR_WHILE_RUNNING);
+        assert_disabled_with_hint(
+            &mut h,
+            "Clear retained messages…",
+            "Stop the devices first: running instances would publish their retained messages again",
+        );
     }
 
     #[test]
@@ -566,6 +572,33 @@ mod tests {
     }
 
     #[test]
+    fn the_window_speaks_czech_and_keeps_its_place() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut fixture = Fixture::new("[broker]\nmqtt_version = \"3.1.1\"\n");
+        fixture.ui.broker_open = true;
+        fixture.ui.clear_retained = Some(ClearRetained::Cleared(3));
+        let h = fixture.harness(|ui, fx| {
+            let ctx = ui.ctx().clone();
+            show(&ctx, &fx.doc, &mut fx.ui, &mut fx.actions);
+        });
+        for text in [
+            "Nastavení projektu",
+            "Host",
+            "Vyzkoušet připojení",
+            "Smazat retained zprávy…",
+            "Retained zprávy smazány (3 topiky)",
+            "Simulace",
+            "vyžaduje MQTT 5; nastavení brokeru používá MQTT 3.1.1",
+        ] {
+            assert!(h.query_by_label(text).is_some(), "{text}");
+        }
+        assert!(
+            h.ctx.memory(|m| m.area_rect(window_id())).is_some(),
+            "the window's ID is the same in every language"
+        );
+    }
+
+    #[test]
     fn typing_a_seed_sets_it_in_the_project() {
         let mut h = harness();
         type_into_label(&mut h, "Seed", "42");
@@ -599,7 +632,10 @@ mod tests {
         let mut h = harness();
         type_into_label(&mut h, "Seed", "4x");
         assert_eq!(h.state().doc.file().simulation.seed, None);
-        assert!(h.query_by_label(SEED_HINT).is_some());
+        assert!(
+            h.query_by_label("use a whole number, or leave it empty")
+                .is_some()
+        );
     }
 
     #[test]

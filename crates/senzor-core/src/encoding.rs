@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use crate::i18n::{Text, text};
 pub use crate::project::file::Encoding;
 use crate::project::file::MessageSpec;
 use crate::proto::{self, ProtoError, ProtoMessage};
@@ -32,12 +33,20 @@ impl Encoder {
     /// The bytes to publish for the rendered `text`; the error says why the text does not
     /// encode.
     pub fn encode(&self, text: &str) -> Result<Vec<u8>, String> {
+        self.encode_text(text).map_err(|e| e.to_string())
+    }
+
+    /// [`Self::encode`], with the error as a translatable text.
+    pub(crate) fn encode_text(&self, text: &str) -> Result<Vec<u8>, Text> {
         match self {
             Encoder::Text => Ok(text.as_bytes().to_vec()),
             Encoder::Hex => from_hex(text),
             Encoder::Base64 => from_base64(text),
             Encoder::Cbor => json_to_cbor(text),
-            Encoder::Protobuf(message) => message.encode_json(text),
+            // prost-reflect's own (English) text.
+            Encoder::Protobuf(message) => message
+                .encode_json(text)
+                .map_err(|e| text!("verbatim", text = e)),
         }
     }
 }
@@ -52,18 +61,18 @@ pub fn to_hex(bytes: &[u8]) -> String {
     hex
 }
 
-fn from_hex(text: &str) -> Result<Vec<u8>, String> {
+fn from_hex(text: &str) -> Result<Vec<u8>, Text> {
     let digits = text
         .chars()
         .filter(|c| !c.is_ascii_whitespace())
         .map(|c| {
             c.to_digit(16)
                 .map(|d| d as u8)
-                .ok_or_else(|| format!("`{c}` is not a hex digit"))
+                .ok_or_else(|| text!("hex-bad-digit", char = c.to_string()))
         })
-        .collect::<Result<Vec<u8>, String>>()?;
+        .collect::<Result<Vec<u8>, Text>>()?;
     if digits.len() % 2 != 0 {
-        return Err(format!("odd number of hex digits ({})", digits.len()));
+        return Err(text!("hex-odd-digits", count = digits.len()));
     }
     Ok(digits
         .chunks(2)
@@ -71,36 +80,35 @@ fn from_hex(text: &str) -> Result<Vec<u8>, String> {
         .collect())
 }
 
-fn from_base64(text: &str) -> Result<Vec<u8>, String> {
+fn from_base64(text: &str) -> Result<Vec<u8>, Text> {
     use base64::{DecodeError, Engine};
     let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let char = |byte: u8| char::from(byte).to_string();
     base64::engine::general_purpose::STANDARD
         .decode(&compact)
         .map_err(|e| match e {
             DecodeError::InvalidByte(_, byte) if byte != b'=' => {
-                format!("`{}` is not a base64 character", char::from(byte))
+                text!("base64-bad-character", char = char(byte))
             }
-            DecodeError::InvalidLastSymbol { symbol, .. } => format!(
-                "the last character `{}` leaves bits over; the text is cut short or changed",
-                char::from(symbol)
-            ),
-            DecodeError::InvalidLength(_) => {
-                "the length does not fit base64; a character is missing or one too many".into()
+            DecodeError::InvalidLastSymbol { symbol, .. } => {
+                text!("base64-last-character", char = char(symbol))
             }
+            DecodeError::InvalidLength(_) => text!("base64-length"),
             DecodeError::InvalidByte(..) | DecodeError::InvalidPadding => {
-                "base64 needs padding (=) to a multiple of 4 characters".into()
+                text!("base64-padding")
             }
         })
 }
 
 /// JSON `text` as CBOR. Integers stay integers and numbers with a fraction or exponent stay
 /// floats; objects keep their key order.
-fn json_to_cbor(text: &str) -> Result<Vec<u8>, String> {
+fn json_to_cbor(text: &str) -> Result<Vec<u8>, Text> {
     // Read straight into CBOR's own value: serde_json's would sort the keys.
     let value: ciborium::Value =
-        serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
+        serde_json::from_str(text).map_err(|e| text!("cbor-not-json", reason = e.to_string()))?;
     let mut bytes = Vec::new();
-    ciborium::into_writer(&value, &mut bytes).map_err(|e| e.to_string())?;
+    ciborium::into_writer(&value, &mut bytes)
+        .map_err(|e| text!("verbatim", text = e.to_string()))?;
     Ok(bytes)
 }
 
@@ -114,7 +122,7 @@ pub fn message_encoder(
     message_encoder_located(message, index, base_dir).map_err(|problems| {
         problems
             .into_iter()
-            .map(|p| p.message)
+            .map(|p| p.message.to_string())
             .collect::<Vec<_>>()
             .join("\n")
     })
@@ -127,25 +135,19 @@ pub(crate) fn message_encoder_located(
     base_dir: &Path,
 ) -> Result<Encoder, Vec<TemplateError>> {
     let n = index + 1;
-    let problem = |key: &str, text: String| {
+    let problem = |key: &str, problem: Text| {
         TemplateError::new(
             format!("messages[{n}].{key}"),
-            format!("message {n}: {text}"),
+            text!("message-problem", n = n, problem = problem),
         )
     };
     let mut problems = Vec::new();
     if message.encoding != Encoding::Protobuf {
         if message.proto.is_some() {
-            problems.push(problem(
-                "proto",
-                "proto is used only with encoding protobuf".into(),
-            ));
+            problems.push(problem("proto", text!("proto-without-protobuf")));
         }
         if message.message.is_some() {
-            problems.push(problem(
-                "message",
-                "message is used only with encoding protobuf".into(),
-            ));
+            problems.push(problem("message", text!("message-type-without-protobuf")));
         }
     }
     let encoder = match message.encoding {
@@ -157,20 +159,26 @@ pub(crate) fn message_encoder_located(
             Ok((proto, name)) => match proto::load(&base_dir.join(proto), name) {
                 Ok(message) => Encoder::Protobuf(message),
                 Err(e) => {
-                    let shown = proto.display();
+                    let path = proto.display().to_string();
                     problems.push(match e {
-                        ProtoError::Read(e) => {
-                            problem("proto", format!("cannot read proto `{shown}`: {e}"))
-                        }
-                        ProtoError::Compile(e) => problem("proto", format!("proto `{shown}`: {e}")),
+                        ProtoError::Read(e) => problem(
+                            "proto",
+                            text!("proto-cannot-read", path = path, reason = e.to_string()),
+                        ),
+                        ProtoError::Compile(e) => problem(
+                            "proto",
+                            text!("proto-does-not-compile", path = path, error = e),
+                        ),
                         ProtoError::NoMessage { did_you_mean } => problem(
                             "message",
                             match did_you_mean {
-                                Some(full) => format!(
-                                    "proto `{shown}` has no message type `{name}`; did you \
-                                     mean `{full}`?"
+                                Some(full) => text!(
+                                    "proto-no-message-type-did-you-mean",
+                                    path = path,
+                                    name = name,
+                                    full = full
                                 ),
-                                None => format!("proto `{shown}` has no message type `{name}`"),
+                                None => text!("proto-no-message-type", path = path, name = name),
                             },
                         ),
                     });
@@ -179,16 +187,10 @@ pub(crate) fn message_encoder_located(
             },
             Err((no_proto, no_name)) => {
                 if no_proto {
-                    problems.push(problem(
-                        "proto",
-                        "encoding protobuf needs a proto file".into(),
-                    ));
+                    problems.push(problem("proto", text!("protobuf-needs-proto")));
                 }
                 if no_name {
-                    problems.push(problem(
-                        "message",
-                        "encoding protobuf needs a message type".into(),
-                    ));
+                    problems.push(problem("message", text!("protobuf-needs-message-type")));
                 }
                 Encoder::Text
             }
@@ -279,6 +281,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn base64_cut_short_or_changed_says_so() {
+        assert_eq!(
+            Encoder::Base64.encode("AR=="),
+            Err("the last character `R` leaves bits over; the text is cut short or changed".into())
+        );
+        assert_eq!(
+            Encoder::Base64.encode("AQIDB"),
+            Err("the length does not fit base64; a character is missing or one too many".into())
+        );
+    }
+
+    #[test]
+    fn encoding_problems_show_in_czech() {
+        let czech = |encoder: Encoder, text: &str| {
+            encoder
+                .encode_text(text)
+                .unwrap_err()
+                .render(crate::i18n::Language::Czech)
+        };
+        assert_eq!(
+            czech(Encoder::Hex, "00d"),
+            "lichý počet šestnáctkových číslic (3)"
+        );
+        assert_eq!(czech(Encoder::Base64, "AQ*D"), "`*` není znak base64");
+    }
+
     /// CBOR as ciborium reads it back.
     fn cbor(json: &str) -> ciborium::Value {
         let bytes = Encoder::Cbor.encode(json).unwrap();
@@ -338,7 +367,7 @@ mod tests {
         message_encoder_located(message, 1, base_dir)
             .unwrap_err()
             .into_iter()
-            .map(|e| (e.field, e.message))
+            .map(|e| (e.field, e.message.to_string()))
             .collect()
     }
 

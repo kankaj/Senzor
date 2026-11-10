@@ -5,6 +5,7 @@ use senzor_core::render::Payload;
 use super::{Action, BottomTab, ERROR, UiState, request_field_focus, shortcuts};
 use crate::document::Document;
 use crate::format;
+use crate::i18n::t;
 use crate::log_view::pretty_payload;
 use crate::selection::problem_target;
 use egui_phosphor::regular as icons;
@@ -17,12 +18,16 @@ pub fn show(
     actions: &mut Vec<Action>,
 ) {
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut ui_state.bottom_tab, BottomTab::Log, "Message log");
+        ui.selectable_value(
+            &mut ui_state.bottom_tab,
+            BottomTab::Log,
+            t!("bottom-message-log"),
+        );
         let count = doc.validated().errors.len();
         let label = if count == 0 {
-            RichText::new("Problems")
+            RichText::new(t!("bottom-problems"))
         } else {
-            RichText::new(format!("Problems ({count})")).color(ERROR)
+            RichText::new(t!("bottom-problems-count", count = count)).color(ERROR)
         };
         ui.selectable_value(&mut ui_state.bottom_tab, BottomTab::Problems, label);
     });
@@ -58,10 +63,11 @@ fn log(ui: &mut egui::Ui, state: &EngineState, ui_state: &mut UiState, actions: 
     let columns = Columns::fitting(&entries);
     ui.label(
         RichText::new(format!(
-            "{:<13} {:<instance$} {:<topic$} QoS  Payload",
-            "Time",
-            "Instance",
-            "Topic",
+            "{:<13} {:<instance$} {:<topic$} QoS  {}",
+            t!("bottom-time"),
+            t!("bottom-instance"),
+            t!("bottom-topic"),
+            t!("bottom-column-payload"),
             instance = columns.instance,
             topic = columns.topic,
         ))
@@ -101,31 +107,38 @@ fn log_toolbar(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    let label = ui.label("Filter");
+    let label = ui.label(t!("bottom-filter"));
     let filter = ui
-        .add(TextEdit::singleline(&mut ui_state.log_filter.topic).hint_text("topic contains…"))
+        .add(
+            TextEdit::singleline(&mut ui_state.log_filter.topic)
+                .hint_text(t!("bottom-filter-placeholder")),
+        )
         .labelled_by(label.id)
         .on_hover_text(shortcuts::tip(
             ui.ctx(),
-            "Show only messages whose topic contains this",
+            &t!("bottom-filter-hint"),
             &shortcuts::FIND,
         ));
     if std::mem::take(&mut ui_state.focus_log_filter) {
         filter.request_focus();
     }
     if let Some(instance) = ui_state.log_filter.instance.clone() {
+        let every = t!("bottom-show-every-instance");
         let chip = ui
             .button(format!("{instance} {}", icons::X))
-            .on_hover_text("Show every instance");
-        chip.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show every instance")
-        });
+            .on_hover_text(&every);
+        chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &every));
         if chip.clicked() {
             ui_state.log_filter.instance = None;
         }
     }
     let paused = ui_state.log_frozen.is_some();
-    if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+    let pause = if paused {
+        t!("bottom-resume")
+    } else {
+        t!("bottom-pause")
+    };
+    if ui.button(pause).clicked() {
         ui_state.log_frozen = if paused {
             None
         } else {
@@ -133,17 +146,18 @@ fn log_toolbar(
         };
     }
     let clear = ui
-        .button(format!("{} Clear", icons::TRASH))
-        .on_hover_text("Empty the log; new messages still show");
-    clear
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear the log"));
+        .button(format!("{} {}", icons::TRASH, t!("bottom-clear")))
+        .on_hover_text(t!("bottom-clear-hint"));
+    let name = t!("bottom-clear-name");
+    clear.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     if clear.clicked() {
         ui_state.clear_log(&state.log);
     }
+    let name = t!("bottom-export");
     let export = ui
-        .button(format!("{} Export…", icons::EXPORT))
-        .on_hover_text("Save the messages shown here as a CSV file");
-    export.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Export…"));
+        .button(format!("{} {name}", icons::EXPORT))
+        .on_hover_text(t!("bottom-export-hint"));
+    export.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     if export.clicked() {
         actions.push(Action::ExportLog);
     }
@@ -167,8 +181,8 @@ impl Columns {
                 .unwrap_or(0)
         };
         Self {
-            instance: widest(|e| &e.instance).max("Instance".len()),
-            topic: widest(|e| &e.topic).clamp("Topic".len(), TOPIC_COLUMN_MAX),
+            instance: widest(|e| &e.instance).max(t!("bottom-instance").chars().count()),
+            topic: widest(|e| &e.topic).clamp(t!("bottom-topic").chars().count(), TOPIC_COLUMN_MAX),
         }
     }
 }
@@ -201,7 +215,7 @@ fn log_row(ui: &mut egui::Ui, entry: &LogEntry, columns: Columns, selected: bool
         topic: topic_width,
     } = columns;
     let time = clickable(ui, cell(format!("{:<13} ", format::clock(entry.time))));
-    let filter_label = format!("Show only {}'s messages", entry.instance);
+    let filter_label = t!("bottom-show-only", instance = entry.instance.as_str());
     let instance = clickable(ui, cell(format!("{:<instance_width$} ", entry.instance)))
         .on_hover_text(&filter_label);
     // Named for what a click does: the tree already has a widget per instance ID.
@@ -213,7 +227,7 @@ fn log_row(ui: &mut egui::Ui, entry: &LogEntry, columns: Columns, selected: bool
     );
     ui.label(cell(entry.qos.to_string()));
     ui.label(cell(if entry.retain { "R" } else { " " }.to_string()))
-        .on_hover_text("Retained");
+        .on_hover_text(t!("bottom-retained"));
     ui.label(cell("   ".to_string()));
     // Cut at the edge, so a long payload does not run under the shown message.
     let payload = ui.add(
@@ -240,9 +254,10 @@ fn cut(text: &str, width: usize) -> String {
 /// The selected message in full: where and how it was published, and its payload indented.
 fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
     ui.horizontal(|ui| {
-        ui.strong("Message");
-        let close = ui.small_button(icons::X).on_hover_text("Close");
-        close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
+        ui.strong(t!("bottom-message"));
+        let name = t!("bottom-close");
+        let close = ui.small_button(icons::X).on_hover_text(&name);
+        close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         if close.clicked() {
             *selected = None;
         }
@@ -250,31 +265,33 @@ fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
     egui::Grid::new("log-detail-grid")
         .num_columns(2)
         .show(ui, |ui| {
-            let mut row = |name: &str, value: String| {
+            let mut row = |name: String, value: String| {
                 ui.weak(name);
                 ui.label(value);
                 ui.end_row();
             };
             row(
-                "Time",
+                t!("bottom-time"),
                 humantime::format_rfc3339_millis(entry.time).to_string(),
             );
-            row("Instance", entry.instance.clone());
-            row("Topic", entry.topic.clone());
-            row("QoS", entry.qos.to_string());
-            row(
-                "Retained",
-                if entry.retain { "yes" } else { "no" }.to_string(),
-            );
+            row(t!("bottom-instance"), entry.instance.clone());
+            row(t!("bottom-topic"), entry.topic.clone());
+            row("QoS".to_string(), entry.qos.to_string());
+            let retained = if entry.retain {
+                t!("bottom-yes")
+            } else {
+                t!("bottom-no")
+            };
+            row(t!("bottom-retained"), retained);
             let properties = &entry.properties;
             if let Some(content_type) = &properties.content_type {
-                row("Content type", content_type.clone());
+                row(t!("bottom-content-type"), content_type.clone());
             }
             if let Some(expiry) = properties.message_expiry {
-                row("Message expiry", format!("{expiry} s"));
+                row(t!("bottom-message-expiry"), format!("{expiry} s"));
             }
             for (name, value) in &properties.user_properties {
-                row("User property", format!("{name} = {value}"));
+                row(t!("bottom-user-property"), format!("{name} = {value}"));
             }
         });
     let Some(text) = entry.payload.as_text() else {
@@ -282,10 +299,10 @@ fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
         return;
     };
     ui.horizontal(|ui| {
-        ui.strong("Payload");
+        ui.strong(t!("bottom-payload"));
         if ui
-            .button("Copy payload")
-            .on_hover_text("Copy the payload as it was sent")
+            .button(t!("bottom-copy-payload"))
+            .on_hover_text(t!("bottom-copy-payload-hint"))
             .clicked()
         {
             ui.ctx().copy_text(text.to_string());
@@ -304,15 +321,15 @@ fn details(ui: &mut egui::Ui, entry: &LogEntry, selected: &mut Option<u64>) {
 fn binary_payload(ui: &mut egui::Ui, payload: &Payload) {
     let bytes = payload.bytes();
     ui.horizontal(|ui| {
-        ui.strong("Payload");
+        ui.strong(t!("bottom-payload"));
         ui.weak(format!(
             "{}, {}",
             payload.encoding().label(),
             format::byte_count(bytes.len())
         ));
         if ui
-            .button("Copy as hex")
-            .on_hover_text("Copy the bytes sent, as hex digits")
+            .button(t!("bottom-copy-hex"))
+            .on_hover_text(t!("bottom-copy-hex-hint"))
             .clicked()
         {
             ui.ctx().copy_text(payload.hex());
@@ -324,7 +341,7 @@ fn binary_payload(ui: &mut egui::Ui, payload: &Payload) {
         .show(ui, |ui| {
             super::hex_dump_label(ui, bytes);
             ui.add_space(6.0);
-            ui.strong("Rendered text");
+            ui.strong(t!("bottom-rendered-text"));
             ui.label(RichText::new(pretty_payload(payload.text())).monospace());
         });
 }
@@ -332,7 +349,7 @@ fn binary_payload(ui: &mut egui::Ui, payload: &Payload) {
 fn problems(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
     let errors = &doc.validated().errors;
     if errors.is_empty() {
-        ui.label("No problems.");
+        ui.label(t!("bottom-no-problems"));
         return;
     }
     egui::ScrollArea::vertical()
@@ -340,7 +357,9 @@ fn problems(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             for error in errors {
-                if ui.link(error.to_string()).clicked()
+                if ui
+                    .link(error.to_string_in(crate::i18n::language()))
+                    .clicked()
                     && let Some(target) = problem_target(&error.location, doc.file())
                 {
                     actions.push(Action::GoTo(target));
@@ -462,6 +481,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_czech_window_lists_the_problems_in_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = Fixture::new(ONE_PROBLEM).harness(|ui, fx| {
+            fx.ui.bottom_tab = BottomTab::Problems;
+            show(
+                ui,
+                &fx.doc,
+                &EngineState::default(),
+                &mut fx.ui,
+                &mut fx.actions,
+            );
+        });
+        h.run();
+        assert!(
+            h.query_by_label("zařízení `bad`: neznámá šablona `nope`")
+                .is_some(),
+            "the problem and its place in Czech"
+        );
+    }
+
     /// A log with one CBOR message of 20 bytes.
     fn binary_log() -> EngineState {
         let entry = LogEntry {
@@ -532,6 +572,45 @@ mod tests {
             "no message is shown"
         );
         assert_eq!(h.state().ui.log_selected, None);
+    }
+
+    #[test]
+    fn the_message_log_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = log_harness(two_instances());
+        for name in [
+            "Záznam zpráv",
+            "Problémy",
+            "Filtr",
+            "Pozastavit",
+            "Vymazat záznam",
+            "Exportovat…",
+        ] {
+            assert!(h.query_by_label(name).is_some(), "{name}");
+        }
+        assert!(h.query_by_label_contains("Čas").is_some(), "the header");
+        h.get_by_label_contains(r#"{"co2":605}"#).click();
+        h.run();
+        assert!(h.query_by_label("Zpráva").is_some());
+        assert!(h.query_by_label("Kopírovat payload").is_some());
+        h.get_by_label("Problémy").click();
+        h.run();
+        assert!(h.query_by_label("Žádné problémy.").is_some());
+    }
+
+    #[test]
+    fn the_problems_tab_counts_in_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let h = Fixture::new(ONE_PROBLEM).harness(|ui, fx| {
+            show(
+                ui,
+                &fx.doc,
+                &EngineState::default(),
+                &mut fx.ui,
+                &mut fx.actions,
+            );
+        });
+        assert!(h.query_by_label("Problémy (1)").is_some());
     }
 
     #[test]

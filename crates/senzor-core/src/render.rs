@@ -6,6 +6,7 @@ use minijinja::value::{Rest, StringInput, ValueKind, ValueOrKwargs};
 use minijinja::{AutoEscape, Environment, ErrorKind, UndefinedBehavior};
 
 use crate::encoding::{Encoder, Encoding, message_encoder_located, to_hex};
+use crate::i18n::{Text, text};
 use crate::project::file::{AvailabilitySpec, MessageSpec};
 use crate::project::mqtt_seconds;
 use crate::value::Value;
@@ -35,15 +36,20 @@ const AVAILABILITY_TOPIC: &str = "availability.topic";
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TemplateError {
     pub field: String,
-    pub message: String,
+    pub message: Text,
 }
 
 impl TemplateError {
-    pub(crate) fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn new(field: impl Into<String>, message: Text) -> Self {
         Self {
             field: field.into(),
-            message: message.into(),
+            message,
         }
+    }
+
+    /// The problem that MiniJinja reports, in its own (English) words.
+    fn minijinja(field: impl Into<String>, error: String) -> Self {
+        Self::new(field, text!("verbatim", text = error))
     }
 }
 
@@ -350,7 +356,7 @@ fn add_template(
     field: impl FnOnce() -> String,
 ) -> Result<(), TemplateError> {
     env.add_template_owned(name.to_string(), source.to_string())
-        .map_err(|e| TemplateError::new(field(), e.to_string()))
+        .map_err(|e| TemplateError::minijinja(field(), e.to_string()))
 }
 
 impl InstanceTemplates {
@@ -361,7 +367,7 @@ impl InstanceTemplates {
         messages: &[MessageSpec],
         availability: Option<&AvailabilitySpec>,
     ) -> Result<Self, String> {
-        Self::compile_located(messages, availability).map_err(|e| e.message)
+        Self::compile_located(messages, availability).map_err(|e| e.message.to_string())
     }
 
     /// [`Self::compile`], with the key path of the broken template.
@@ -386,7 +392,8 @@ impl InstanceTemplates {
         availability: Option<&AvailabilitySpec>,
         encoders: Vec<Encoder>,
     ) -> Result<Self, String> {
-        Self::compile_with_located(messages, availability, encoders).map_err(|e| e.message)
+        Self::compile_with_located(messages, availability, encoders)
+            .map_err(|e| e.message.to_string())
     }
 
     /// [`Self::compile_with`], with the key path of the broken template.
@@ -439,7 +446,8 @@ impl InstanceTemplates {
 
     /// Renders the availability topic, or `None` when the template has no availability.
     pub fn availability_topic(&self, ctx: &Context) -> Result<Option<String>, String> {
-        self.availability_topic_located(ctx).map_err(|e| e.message)
+        self.availability_topic_located(ctx)
+            .map_err(|e| e.message.to_string())
     }
 
     /// [`Self::availability_topic`], with the key path of the template that failed.
@@ -450,16 +458,19 @@ impl InstanceTemplates {
         if !self.has_availability {
             return Ok(None);
         }
-        let failed = |message| TemplateError::new(AVAILABILITY_TOPIC, message);
-        let topic = render_named(&self.env, AVAILABILITY_TOPIC, ctx).map_err(failed)?;
-        check_topic(&topic).map_err(|e| failed(format!("availability topic: {e}")))?;
+        let topic = render_named(&self.env, AVAILABILITY_TOPIC, ctx)
+            .map_err(|e| TemplateError::minijinja(AVAILABILITY_TOPIC, e))?;
+        check_topic(&topic).map_err(|e| {
+            let text = text!("availability-topic-problem", problem = e);
+            TemplateError::new(AVAILABILITY_TOPIC, text)
+        })?;
         Ok(Some(topic))
     }
 
     /// Renders every message. A failure affects only that message.
     pub fn render_messages(&self, ctx: &Context) -> Vec<Result<RenderedMessage, String>> {
         self.render_messages_located(ctx)
-            .map(|rendered| rendered.map_err(|e| e.message))
+            .map(|rendered| rendered.map_err(|e| e.message.to_string()))
             .collect()
     }
 
@@ -479,7 +490,10 @@ impl InstanceTemplates {
         self.messages
             .iter()
             .enumerate()
-            .map(|(i, message)| self.render_topic(i, message, ctx).map_err(|e| e.message))
+            .map(|(i, message)| {
+                self.render_topic(i, message, ctx)
+                    .map_err(|e| e.message.to_string())
+            })
             .collect()
     }
 
@@ -490,9 +504,10 @@ impl InstanceTemplates {
         ctx: &Context,
     ) -> Result<String, TemplateError> {
         let topic = render_named(&self.env, &message.topic, ctx)
-            .map_err(|e| TemplateError::new(&message.topic, e))?;
+            .map_err(|e| TemplateError::minijinja(&message.topic, e))?;
         check_topic(&topic).map_err(|e| {
-            TemplateError::new(&message.topic, format!("message {} topic: {e}", i + 1))
+            let text = text!("message-topic-problem", n = i + 1, problem = e);
+            TemplateError::new(&message.topic, text)
         })?;
         Ok(topic)
     }
@@ -505,16 +520,19 @@ impl InstanceTemplates {
     ) -> Result<RenderedMessage, TemplateError> {
         let topic = self.render_topic(i, message, ctx)?;
         let text = render_named(&self.env, &message.payload, ctx)
-            .map_err(|e| TemplateError::new(&message.payload, e))?;
+            .map_err(|e| TemplateError::minijinja(&message.payload, e))?;
         let payload = match &self.encoders[i] {
             Encoder::Text => Payload::Text(text),
             encoder => {
                 let encoding = encoder.encoding();
-                let bytes = encoder.encode(&text).map_err(|e| {
-                    TemplateError::new(
-                        &message.payload,
-                        format!("message {} payload as {}: {e}", i + 1, encoding.name()),
-                    )
+                let bytes = encoder.encode_text(&text).map_err(|e| {
+                    let problem = text!(
+                        "message-payload-problem",
+                        n = i + 1,
+                        encoding = encoding.name(),
+                        problem = e
+                    );
+                    TemplateError::new(&message.payload, problem)
                 })?;
                 Payload::Binary {
                     encoding,
@@ -528,7 +546,8 @@ impl InstanceTemplates {
             .iter()
             .map(|(key, name)| {
                 let value = render_named(&self.env, name, ctx).map_err(|e| {
-                    TemplateError::new(user_properties_field(i), format!("{name}: {e}"))
+                    let text = text!("user-property-problem", name = name, error = e);
+                    TemplateError::new(user_properties_field(i), text)
                 })?;
                 Ok((key.clone(), value))
             })
@@ -641,11 +660,11 @@ pub fn tick_context(
 }
 
 /// A publish topic must be non-empty and contain no wildcards.
-fn check_topic(topic: &str) -> Result<(), String> {
+fn check_topic(topic: &str) -> Result<(), Text> {
     if topic.is_empty() {
-        Err("topic is empty".into())
+        Err(text!("topic-empty"))
     } else if topic.contains(['+', '#']) {
-        Err(format!("topic `{topic}` contains a wildcard (+ or #)"))
+        Err(text!("topic-wildcard", topic = topic))
     } else {
         Ok(())
     }
@@ -1084,21 +1103,20 @@ mod tests {
         .unwrap();
         let ctx = tick_ctx(&BTreeMap::new());
         let rendered: Vec<_> = templates.render_messages_located(&ctx).collect();
+        let error = rendered[0].clone().unwrap_err();
         assert_eq!(
-            rendered[0],
-            Err(TemplateError::new(
+            (error.field.as_str(), error.message.to_string()),
+            (
                 "messages[1].payload",
-                "message 1 payload as hex: `z` is not a hex digit"
-            ))
+                "message 1 payload as hex: `z` is not a hex digit".to_string()
+            )
         );
         let error = rendered[1].clone().unwrap_err();
         assert_eq!(error.field, "messages[2].payload");
+        let message = error.message.to_string();
         assert!(
-            error
-                .message
-                .starts_with("message 2 payload as CBOR: not JSON: "),
-            "{}",
-            error.message
+            message.starts_with("message 2 payload as CBOR: not JSON: "),
+            "{message}"
         );
     }
 

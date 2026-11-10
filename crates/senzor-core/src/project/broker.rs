@@ -9,6 +9,7 @@ use tokio_rustls::rustls::{self, ClientConfig, RootCertStore};
 use super::error::ProjectError;
 use super::file::{BrokerSpec, MqttVersion, TlsSpec, Transport};
 use super::model::{BrokerConfig, Credentials, TlsConfig};
+use crate::i18n::{Language, Text, text};
 
 /// The longest keep-alive MQTT can carry: 16-bit seconds.
 const MAX_KEEP_ALIVE: Duration = Duration::from_secs(65_535);
@@ -24,28 +25,23 @@ pub fn resolve_broker(
 ) -> Result<BrokerConfig, Vec<ProjectError>> {
     let mut errors = Vec::new();
     if spec.host.trim().is_empty() {
-        errors.push(ProjectError::broker("host must not be empty").at("host"));
+        errors.push(ProjectError::broker(text!("must-not-be-empty", key = "host")).at("host"));
     }
     if spec.port == 0 {
-        errors.push(ProjectError::broker("port must not be 0").at("port"));
+        errors.push(ProjectError::broker(text!("broker-port-zero")).at("port"));
     }
-    let keep_alive = |message: String| ProjectError::broker(message).at("keep_alive");
+    let keep_alive = |text: Text| ProjectError::broker(text).at("keep_alive");
     if spec.keep_alive < Duration::from_secs(1) {
-        errors.push(keep_alive("keep_alive must be at least 1s".into()));
+        errors.push(keep_alive(text!("at-least-1s", key = "keep_alive")));
     } else if spec.keep_alive.subsec_nanos() != 0 {
-        errors.push(keep_alive(format!(
-            "keep_alive must be whole seconds, got {}",
-            humantime::format_duration(spec.keep_alive)
-        )));
+        errors.push(keep_alive(not_whole_seconds("keep_alive", spec.keep_alive)));
     } else if spec.keep_alive > MAX_KEEP_ALIVE {
         // MQTT sends the keep-alive as 16-bit seconds.
-        errors.push(keep_alive(
-            "keep_alive must be at most 65535 seconds (18h 12m 15s)".into(),
-        ));
+        errors.push(keep_alive(text!("keep-alive-too-long")));
     }
     if spec.transport == Transport::WebSocket && !spec.path.starts_with('/') {
         errors.push(
-            ProjectError::broker(format!("path `{}` must start with /", spec.path)).at("path"),
+            ProjectError::broker(text!("websocket-path-slash", path = &spec.path)).at("path"),
         );
     }
     if let Err(e) = whole_seconds("session_expiry", spec.session_expiry) {
@@ -94,24 +90,36 @@ pub fn broker_config(
 }
 
 /// `duration` as MQTT's whole seconds (a `u32`), or the problem with it, naming `key`.
-pub(crate) fn whole_seconds(key: &str, duration: Duration) -> Result<u32, String> {
+pub(crate) fn whole_seconds(key: &str, duration: Duration) -> Result<u32, Text> {
     if duration.subsec_nanos() != 0 {
-        return Err(format!(
-            "{key} must be whole seconds, got {}",
-            humantime::format_duration(duration)
-        ));
+        return Err(not_whole_seconds(key, duration));
     }
     u32::try_from(duration.as_secs())
-        .map_err(|_| format!("{key} must be at most {} seconds", u32::MAX))
+        .map_err(|_| text!("at-most-seconds", key = key, max = u32::MAX))
+}
+
+/// The problem with `key`'s `duration` that has a fraction of a second.
+fn not_whole_seconds(key: &str, duration: Duration) -> Text {
+    text!(
+        "whole-seconds",
+        key = key,
+        duration = humantime::format_duration(duration).to_string()
+    )
 }
 
 /// Why an MQTT 5 setting cannot be used: the end of every such validation problem, and the note
-/// the GUI shows next to disabled MQTT 5 settings.
+/// the GUI shows next to disabled MQTT 5 settings. In English; [`needs_mqtt5_note`] gives it in
+/// any language.
 pub const NEEDS_MQTT5: &str = "needs MQTT 5; the broker settings use MQTT 3.1.1";
 
+/// [`NEEDS_MQTT5`] in `lang`.
+pub fn needs_mqtt5_note(lang: Language) -> String {
+    text!("needs-mqtt5-note").render(lang)
+}
+
 /// The problem for an MQTT 5 setting `key` in a project that uses MQTT 3.1.1.
-pub(crate) fn needs_mqtt5(key: &str) -> String {
-    format!("{key} {NEEDS_MQTT5}")
+pub(crate) fn needs_mqtt5(key: &str) -> Text {
+    text!("needs-mqtt5", key = key)
 }
 
 /// `duration` in MQTT's whole seconds. Validation ([`whole_seconds`]) rejects durations that do
@@ -126,17 +134,11 @@ fn resolve_credentials(
 ) -> Result<Option<Credentials>, ProjectError> {
     let password = match (&spec.password, &spec.password_env) {
         (Some(_), Some(_)) => {
-            return Err(
-                ProjectError::broker("use either password or password_env, not both")
-                    .at("password_env"),
-            );
+            return Err(ProjectError::broker(text!("password-and-password-env")).at("password_env"));
         }
         (Some(password), None) => Some(password.clone()),
         (None, Some(var)) => Some(env(var).ok_or_else(|| {
-            ProjectError::broker(format!(
-                "environment variable `{var}` (password_env) is not set"
-            ))
-            .at("password_env")
+            ProjectError::broker(text!("password-env-not-set", var = var)).at("password_env")
         })?),
         (None, None) => None,
     };
@@ -146,7 +148,7 @@ fn resolve_credentials(
             password: password.unwrap_or_default(),
         })),
         (None, Some(_)) => {
-            Err(ProjectError::broker("a password requires a username").at("username"))
+            Err(ProjectError::broker(text!("password-without-username")).at("username"))
         }
         (None, None) => Ok(None),
     }
@@ -157,10 +159,13 @@ fn resolve_tls(spec: &TlsSpec, base_dir: &Path) -> Result<TlsConfig, Vec<Project
     let mut read = |name: &str, path: &Path| match std::fs::read(base_dir.join(path)) {
         Ok(bytes) => Some(bytes),
         Err(e) => {
-            errors.push(
-                ProjectError::broker(format!("cannot read tls.{name} `{}`: {e}", path.display()))
-                    .at(format!("tls.{name}")),
+            let text = text!(
+                "tls-cannot-read",
+                key = name,
+                path = path.display().to_string(),
+                reason = e.to_string()
             );
+            errors.push(ProjectError::broker(text).at(format!("tls.{name}")));
             None
         }
     };
@@ -179,15 +184,12 @@ fn resolve_tls(spec: &TlsSpec, base_dir: &Path) -> Result<TlsConfig, Vec<Project
             } else {
                 "tls.client_cert"
             };
-            errors.push(
-                ProjectError::broker("tls.client_cert and tls.client_key must be set together")
-                    .at(missing),
-            );
+            errors.push(ProjectError::broker(text!("tls-cert-and-key")).at(missing));
             None
         }
     };
     if spec.client_cert.is_some() && spec.ca_file.is_none() {
-        errors.push(ProjectError::broker("tls.client_cert requires tls.ca_file").at("tls.ca_file"));
+        errors.push(ProjectError::broker(text!("tls-cert-needs-ca")).at("tls.ca_file"));
     }
     if !errors.is_empty() {
         return Err(errors);
@@ -233,14 +235,12 @@ fn client_config(
                 return Err(no_certificate("client_cert", &shown(&spec.client_cert)));
             }
             let key = PrivateKeyDer::from_pem_slice(key).map_err(|_| {
-                ProjectError::broker(format!(
-                    "tls.client_key `{}` holds no PEM private key",
-                    shown(&spec.client_key)
-                ))
-                .at("tls.client_key")
+                let path = shown(&spec.client_key);
+                ProjectError::broker(text!("tls-no-private-key", path = path)).at("tls.client_key")
             })?;
             builder.with_client_auth_cert(chain, key).map_err(|e| {
-                ProjectError::broker(format!("tls.client_key: {e}")).at("tls.client_key")
+                ProjectError::broker(text!("tls-client-key", reason = e.to_string()))
+                    .at("tls.client_key")
             })?
         }
     };
@@ -250,15 +250,15 @@ fn client_config(
 /// The TLS setup that trusts the system's certificates, built once per process: loading them
 /// takes milliseconds, and validation runs on every edit in the window.
 fn system_client_config() -> Result<Arc<ClientConfig>, ProjectError> {
-    static SYSTEM: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
+    static SYSTEM: OnceLock<Result<Arc<ClientConfig>, Text>> = OnceLock::new();
     SYSTEM
         .get_or_init(|| {
             let mut roots = RootCertStore::empty();
             roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
             if roots.is_empty() {
-                return Err("no trusted certificates found on this system; set tls.ca_file".into());
+                return Err(text!("tls-no-system-certificates"));
             }
-            let builder = builder().map_err(|e| e.message)?;
+            let builder = builder().map_err(|e| e.text)?;
             Ok(Arc::new(
                 builder.with_root_certificates(roots).with_no_client_auth(),
             ))
@@ -271,7 +271,7 @@ fn builder() -> Result<rustls::ConfigBuilder<ClientConfig, rustls::WantsVerifier
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|e| ProjectError::broker(format!("TLS: {e}")))
+        .map_err(|e| ProjectError::broker(text!("tls-setup", reason = e.to_string())))
 }
 
 /// The PEM certificates in `pem`, skipping what does not parse.
@@ -282,7 +282,7 @@ fn certificates(pem: &[u8]) -> Vec<CertificateDer<'static>> {
 }
 
 fn no_certificate(key: &str, path: &str) -> ProjectError {
-    ProjectError::broker(format!("tls.{key} `{path}` holds no PEM certificate"))
+    ProjectError::broker(text!("tls-no-certificate", key = key, path = path))
         .at(format!("tls.{key}"))
 }
 
@@ -478,6 +478,15 @@ mod tests {
             ..BrokerSpec::default()
         };
         assert!(resolve_broker(&spec, Path::new("."), &no_env).is_ok());
+    }
+
+    #[test]
+    fn the_mqtt5_note_is_the_catalog_text() {
+        assert_eq!(needs_mqtt5_note(Language::English), NEEDS_MQTT5);
+        assert_eq!(
+            needs_mqtt5_note(Language::Czech),
+            "vyžaduje MQTT 5; nastavení brokeru používá MQTT 3.1.1"
+        );
     }
 
     #[test]

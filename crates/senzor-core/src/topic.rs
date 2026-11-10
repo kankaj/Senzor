@@ -3,19 +3,29 @@
 /// The prefix of an MQTT 5 shared subscription: `$share/<group>/<filter>`.
 const SHARED_PREFIX: &str = "$share/";
 
+/// What is wrong with an MQTT topic filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterProblem {
+    Empty,
+    /// `#` is not the whole last level, as in `a/#/b` or `a#`.
+    HashNotLast,
+    /// `+` is not a whole level, as in `a+`.
+    PlusNotWhole,
+}
+
 /// Checks an MQTT topic filter: not empty, `#` only as the whole last level, `+` only as a whole
-/// level. The message says what is wrong.
-pub fn check_filter(filter: &str) -> Result<(), String> {
+/// level.
+pub fn check_filter(filter: &str) -> Result<(), FilterProblem> {
     if filter.is_empty() {
-        return Err("is empty".into());
+        return Err(FilterProblem::Empty);
     }
     let levels: Vec<&str> = filter.split('/').collect();
     for (i, level) in levels.iter().enumerate() {
         if level.contains('#') && (*level != "#" || i + 1 != levels.len()) {
-            return Err("`#` must be the whole last level, as in `a/#`".into());
+            return Err(FilterProblem::HashNotLast);
         }
         if level.contains('+') && *level != "+" {
-            return Err("`+` must be a whole level, as in `a/+/b`".into());
+            return Err(FilterProblem::PlusNotWhole);
         }
     }
     Ok(())
@@ -69,18 +79,18 @@ mod tests {
 
     #[test]
     fn invalid_filters_say_why() {
-        assert_eq!(check_filter(""), Err("is empty".into()));
+        assert_eq!(check_filter(""), Err(FilterProblem::Empty));
         for filter in ["a/#/b", "a#", "a/b#", "#/a"] {
             assert_eq!(
                 check_filter(filter),
-                Err("`#` must be the whole last level, as in `a/#`".into()),
+                Err(FilterProblem::HashNotLast),
                 "{filter}"
             );
         }
         for filter in ["a+", "a/+b", "+a/b"] {
             assert_eq!(
                 check_filter(filter),
-                Err("`+` must be a whole level, as in `a/+/b`".into()),
+                Err(FilterProblem::PlusNotWhole),
                 "{filter}"
             );
         }

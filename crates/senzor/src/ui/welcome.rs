@@ -6,6 +6,7 @@ use egui_phosphor::regular as icons;
 use super::{Action, recent_project_button};
 use crate::document::Document;
 use crate::examples::EXAMPLES;
+use crate::i18n::t;
 
 /// The welcome screen replaces the detail panel's hint for a new project that is still blank:
 /// no file, no changes, no devices and no templates. That is how the window starts without a
@@ -22,28 +23,28 @@ pub fn applies(doc: &Document) -> bool {
 pub fn show(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
     ui.add_space(16.0);
     ui.vertical_centered(|ui| {
-        ui.heading(egui::RichText::new("Welcome to Senzor").size(24.0));
-        ui.label("Simulated MQTT sensors for testing what reads them.");
+        ui.heading(egui::RichText::new(t!("welcome-title")).size(24.0));
+        ui.label(t!("welcome-tagline"));
         ui.add_space(12.0);
         centered_row(ui, "start", |ui| {
-            if start_button(ui, icons::PLUS, "Add your first device").clicked() {
+            if start_button(ui, icons::PLUS, &t!("welcome-add-device")).clicked() {
                 actions.push(Action::AddDevice);
             }
-            if start_button(ui, icons::FOLDER_OPEN, "Open a project").clicked() {
+            if start_button(ui, icons::FOLDER_OPEN, &t!("welcome-open")).clicked() {
                 actions.push(Action::Open);
             }
-            if start_button(ui, icons::PLUGS_CONNECTED, "Set the broker").clicked() {
+            if start_button(ui, icons::PLUGS_CONNECTED, &t!("welcome-broker")).clicked() {
                 actions.push(Action::OpenBroker);
             }
         });
 
         ui.add_space(16.0);
-        ui.strong("Examples");
+        ui.strong(t!("welcome-examples"));
         centered_row(ui, "examples", |ui| {
             for (index, example) in EXAMPLES.iter().enumerate() {
                 if ui
-                    .button(example.name)
-                    .on_hover_text(example.summary)
+                    .button(example.title())
+                    .on_hover_text(example.description())
                     .clicked()
                 {
                     actions.push(Action::OpenExample(index));
@@ -52,9 +53,9 @@ pub fn show(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
         });
 
         ui.add_space(16.0);
-        ui.strong("Recent projects");
+        ui.strong(t!("welcome-recent"));
         if recent.is_empty() {
-            ui.weak("No recent projects yet.");
+            ui.weak(t!("welcome-no-recent"));
         }
         for path in recent {
             if recent_project_button(ui, path).clicked() {
@@ -65,11 +66,11 @@ pub fn show(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
         ui.add_space(16.0);
         centered_row(ui, "links", |ui| {
             ui.hyperlink_to(
-                format!("{} Quick start guide", icons::ROCKET_LAUNCH),
+                format!("{} {}", icons::ROCKET_LAUNCH, t!("welcome-quick-start")),
                 format!("{}/quick-start", super::DOCS_URL),
             );
             ui.hyperlink_to(
-                format!("{} Documentation", icons::BOOK_OPEN),
+                format!("{} {}", icons::BOOK_OPEN, t!("welcome-documentation")),
                 super::DOCS_URL,
             );
         });
@@ -99,4 +100,34 @@ fn start_button(ui: &mut egui::Ui, icon: &str, label: &str) -> egui::Response {
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::ui::test_support::Fixture;
+
+    #[test]
+    fn the_welcome_screen_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = Fixture::new("").harness(|ui, fx| show(ui, &[], &mut fx.actions));
+        for name in [
+            "Vítá vás Senzor",
+            "Příklady",
+            "Nedávné projekty",
+            "Zatím žádné nedávné projekty.",
+        ] {
+            assert!(h.query_by_label(name).is_some(), "{name}");
+        }
+        h.get_by_label("Přidat první zařízení").click();
+        h.run();
+        assert!(
+            h.state()
+                .other
+                .iter()
+                .any(|a| matches!(a, Action::AddDevice))
+        );
+    }
 }

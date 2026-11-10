@@ -4,6 +4,7 @@ use egui_phosphor::regular as icons;
 use super::switch::switch;
 use super::{Action, ERROR, UiState};
 use crate::app::McpStatus;
+use crate::i18n::{Language, t};
 use crate::settings::{AppSettings, Theme};
 use crate::update::Release;
 
@@ -18,7 +19,8 @@ pub fn show(
     actions: &mut Vec<Action>,
 ) {
     let mut open = ui_state.settings_open;
-    egui::Window::new("Settings")
+    egui::Window::new(t!("settings-title"))
+        .id(egui::Id::new("settings-window"))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .collapsible(false)
@@ -27,6 +29,7 @@ pub fn show(
             egui::Grid::new("settings-form")
                 .num_columns(2)
                 .show(ui, |ui| {
+                    language_row(ui, settings.language, actions);
                     theme_row(ui, settings.theme, actions);
                     zoom_row(ui);
                     notify_row(ui, settings.notify_failures, actions);
@@ -34,25 +37,28 @@ pub fn show(
 
                     updates_row(ui, settings.check_updates, actions);
 
-                    ui.label("Version");
+                    ui.label(t!("settings-version"));
                     ui.horizontal(|ui| {
                         ui.label(env!("CARGO_PKG_VERSION"));
                         if let Some(release) = newer {
                             ui.label("·");
-                            ui.hyperlink_to(format!("{} is out", release.version), &release.url)
-                                .on_hover_text("See what's new and download it");
+                            ui.hyperlink_to(
+                                t!("settings-release-out", version = release.version.as_str()),
+                                &release.url,
+                            )
+                            .on_hover_text(t!("settings-release-out-hint"));
                         }
                     });
                     ui.end_row();
 
-                    ui.label("Licence");
+                    ui.label(t!("settings-licence"));
                     ui.hyperlink_to(
                         env!("CARGO_PKG_LICENSE"),
                         format!("{}/blob/main/LICENSE", super::SOURCE_URL),
                     );
                     ui.end_row();
 
-                    ui.label("Author");
+                    ui.label(t!("settings-author"));
                     ui.label(format!("© 2026 {}", env!("CARGO_PKG_AUTHORS")));
                     ui.end_row();
                 });
@@ -62,9 +68,27 @@ pub fn show(
     ui_state.settings_open = open;
 }
 
+/// One button per language, each named in itself; the chosen one is highlighted.
+fn language_row(ui: &mut egui::Ui, current: Language, actions: &mut Vec<Action>) {
+    ui.label(format!("{} {}", icons::TRANSLATE, t!("settings-language")));
+    ui.horizontal(|ui| {
+        for language in Language::ALL {
+            let chosen = language == current;
+            if ui
+                .selectable_label(chosen, language.native_name())
+                .clicked()
+                && !chosen
+            {
+                actions.push(Action::SetLanguage(language));
+            }
+        }
+    });
+    ui.end_row();
+}
+
 /// One button per theme; the chosen one is highlighted.
 fn theme_row(ui: &mut egui::Ui, current: Theme, actions: &mut Vec<Action>) {
-    ui.label("Theme");
+    ui.label(t!("settings-theme"));
     ui.horizontal(|ui| {
         for theme in Theme::ALL {
             let icon = match theme {
@@ -99,7 +123,7 @@ const MAX_ZOOM: f32 = 5.0;
 fn zoom_row(ui: &mut egui::Ui) {
     use egui::gui_zoom::{self, kb_shortcuts};
 
-    ui.label("Zoom");
+    ui.label(t!("settings-zoom"));
     ui.horizontal(|ui| {
         let ctx = ui.ctx().clone();
         let zoom = ctx.zoom_factor();
@@ -115,7 +139,7 @@ fn zoom_row(ui: &mut egui::Ui) {
             ui,
             zoom > MIN_ZOOM,
             icons::MINUS,
-            "Zoom out",
+            &t!("settings-zoom-out"),
             &kb_shortcuts::ZOOM_OUT,
         ) {
             gui_zoom::zoom_out(&ctx);
@@ -125,7 +149,7 @@ fn zoom_row(ui: &mut egui::Ui) {
             ui,
             zoom < MAX_ZOOM,
             icons::PLUS,
-            "Zoom in",
+            &t!("settings-zoom-in"),
             &kb_shortcuts::ZOOM_IN,
         ) {
             gui_zoom::zoom_in(&ctx);
@@ -133,8 +157,8 @@ fn zoom_row(ui: &mut egui::Ui) {
         if button(
             ui,
             zoom != 1.0,
-            "Reset",
-            "Reset zoom",
+            &t!("settings-zoom-reset"),
+            &t!("settings-zoom-reset-name"),
             &kb_shortcuts::ZOOM_RESET,
         ) {
             ctx.set_zoom_factor(1.0);
@@ -145,36 +169,38 @@ fn zoom_row(ui: &mut egui::Ui) {
 
 /// The switch for desktop notifications about failed instances.
 fn notify_row(ui: &mut egui::Ui, notify: bool, actions: &mut Vec<Action>) {
-    ui.label(format!("{} Notifications", icons::BELL));
+    ui.label(format!("{} {}", icons::BELL, t!("settings-notifications")));
     let mut on = notify;
     ui.horizontal(|ui| {
-        let hint = "A desktop notification when an instance fails while Senzor is in the \
-                    background, for example when the broker refuses its connection";
-        if switch(ui, &mut on, "Notify me when an instance fails")
+        let hint = t!("settings-notifications-hint");
+        if switch(ui, &mut on, &t!("settings-notifications-switch"))
             .on_hover_text(hint)
             .clicked()
         {
             actions.push(Action::SetNotifyFailures(on));
         }
-        ui.label("when an instance fails in the background");
+        ui.label(t!("settings-notifications-text"));
     });
     ui.end_row();
 }
 
 /// The switch for the daily look for a newer release.
 fn updates_row(ui: &mut egui::Ui, check: bool, actions: &mut Vec<Action>) {
-    ui.label(format!("{} Updates", icons::ARROW_CIRCLE_UP));
+    ui.label(format!(
+        "{} {}",
+        icons::ARROW_CIRCLE_UP,
+        t!("settings-updates")
+    ));
     let mut on = check;
     ui.horizontal(|ui| {
-        let hint = "Asks GitHub once a day whether a newer release exists; nothing about you or \
-                    your projects is sent";
-        if switch(ui, &mut on, "Check for updates")
+        let hint = t!("settings-updates-hint");
+        if switch(ui, &mut on, &t!("settings-updates-switch"))
             .on_hover_text(hint)
             .clicked()
         {
             actions.push(Action::SetCheckUpdates(on));
         }
-        ui.label("say when a newer version is out");
+        ui.label(t!("settings-updates-text"));
     });
     ui.end_row();
 }
@@ -184,28 +210,27 @@ fn remote_rows(ui: &mut egui::Ui, settings: &AppSettings, actions: &mut Vec<Acti
     ui.label("");
     let mut remote = settings.mcp_remote;
     ui.horizontal(|ui| {
-        let hint = "MCP listens on every address of this machine, and agents need a token. \
-                    Anyone on your network who has the token can control this window.";
-        if switch(ui, &mut remote, "MCP from other machines")
+        let hint = t!("settings-mcp-remote-hint");
+        if switch(ui, &mut remote, &t!("settings-mcp-remote-switch"))
             .on_hover_text(hint)
             .clicked()
         {
             actions.push(Action::SetMcpRemote(remote));
         }
-        ui.label("let agents on other machines connect, with a token");
+        ui.label(t!("settings-mcp-remote-text"));
     });
     ui.end_row();
     if settings.mcp_remote {
-        ui.label("Token");
+        ui.label(t!("settings-token"));
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("••••••••").monospace())
-                .on_hover_text("Agents send it as Authorization: Bearer <token>");
-            if ui.button("Copy token").clicked() {
+                .on_hover_text(t!("settings-token-hint"));
+            if ui.button(t!("settings-copy-token")).clicked() {
                 actions.push(Action::CopyMcpToken);
             }
             if ui
-                .button("New token")
-                .on_hover_text("Agents that use the old token can no longer connect")
+                .button(t!("settings-new-token"))
+                .on_hover_text(t!("settings-new-token-hint"))
                 .clicked()
             {
                 actions.push(Action::NewMcpToken);
@@ -219,15 +244,19 @@ fn remote_rows(ui: &mut egui::Ui, settings: &AppSettings, actions: &mut Vec<Acti
 fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: &mut Vec<Action>) {
     let hint = match mcp {
         McpStatus::Listening(address) => {
-            format!("AI agents can control this window at http://{address}/mcp. Click to stop.")
+            t!("settings-mcp-hint-on", address = address.to_string())
         }
         McpStatus::Off { port, error: None } => {
-            format!("Let AI agents control this window over MCP at http://127.0.0.1:{port}/mcp")
+            t!("settings-mcp-hint-off", port = *port)
         }
         McpStatus::Off {
             port,
             error: Some(error),
-        } => format!("MCP could not start: {error}. Click to try port {port} again."),
+        } => t!(
+            "settings-mcp-hint-failed",
+            error = error.as_str(),
+            port = *port
+        ),
     };
     ui.label(format!("{} MCP", icons::ROBOT));
     let mut on = matches!(mcp, McpStatus::Listening(_));
@@ -235,11 +264,11 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: 
         if switch(ui, &mut on, "MCP").on_hover_text(hint).clicked() {
             actions.push(Action::ToggleMcp);
         }
-        ui.label("let AI agents control this window");
+        ui.label(t!("settings-mcp-text"));
     });
     ui.end_row();
 
-    let label = ui.label("MCP port");
+    let label = ui.label(t!("settings-mcp-port"));
     let mut port = match mcp {
         McpStatus::Listening(address) => address.port(),
         McpStatus::Off { port, .. } => *port,
@@ -253,8 +282,8 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: 
                 .clamp_existing_to_range(false),
         )
         .labelled_by(label.id)
-        .on_hover_text("The port AI agents connect to")
-        .on_disabled_hover_text("Turn MCP off to change its port");
+        .on_hover_text(t!("settings-mcp-port-hint"))
+        .on_disabled_hover_text(t!("settings-mcp-port-disabled"));
     if response.changed() {
         actions.push(Action::SetMcpPort(port));
     }
@@ -264,19 +293,13 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: 
 
     match mcp {
         McpStatus::Listening(address) if address.ip().is_unspecified() => {
-            ui.label("Address");
-            ui.label(format!(
-                "this machine's name or address, port {}",
-                address.port()
-            ))
-            .on_hover_text(format!(
-                "Agents connect to http://<this machine>:{}/mcp with the token",
-                address.port()
-            ));
+            ui.label(t!("settings-address"));
+            ui.label(t!("settings-address-any", port = address.port()))
+                .on_hover_text(t!("settings-address-any-hint", port = address.port()));
             ui.end_row();
         }
         McpStatus::Listening(address) => {
-            ui.label("Address");
+            ui.label(t!("settings-address"));
             ui.label(address.to_string());
             ui.end_row();
         }
@@ -284,7 +307,7 @@ fn mcp_row(ui: &mut egui::Ui, mcp: &McpStatus, settings: &AppSettings, actions: 
             error: Some(error), ..
         } => {
             ui.label("");
-            ui.colored_label(ERROR, format!("Could not start: {error}"));
+            ui.colored_label(ERROR, t!("settings-mcp-failed", error = error.as_str()));
             ui.end_row();
         }
         McpStatus::Off { error: None, .. } => {}
@@ -348,22 +371,25 @@ const CREDITS: &[(&str, &str, &str)] = &[
 /// Links to the documentation and the source, and the credits, folded at first.
 fn about(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
-        if ui.link("What's new").clicked() {
+        if ui.link(t!("settings-whats-new")).clicked() {
             actions.push(Action::ShowWhatsNew);
         }
         ui.label("·");
-        ui.hyperlink_to("Documentation", super::DOCS_URL);
+        ui.hyperlink_to(t!("settings-documentation"), super::DOCS_URL);
         ui.label("·");
-        ui.hyperlink_to("Source code", super::SOURCE_URL);
+        ui.hyperlink_to(t!("settings-source-code"), super::SOURCE_URL);
     });
-    ui.collapsing("Open-source credits", |ui| {
-        ui.label("Senzor is built with these projects, and the Rust crates they depend on:");
-        egui::Grid::new("credits").num_columns(2).show(ui, |ui| {
-            for (name, licence, url) in CREDITS {
-                ui.hyperlink_to(*name, *url);
-                ui.weak(*licence);
-                ui.end_row();
-            }
+    egui::CollapsingHeader::new(t!("settings-credits"))
+        .id_salt("settings-credits")
+        .show(ui, |ui| {
+            ui.label(t!("settings-credits-text"));
+            egui::Grid::new("credits").num_columns(2).show(ui, |ui| {
+                for (name, licence, url) in CREDITS {
+                    ui.hyperlink_to(*name, *url);
+                    // "MIT or Apache-2.0": only the "or" is a word.
+                    ui.weak(licence.replace(" or ", &format!(" {} ", t!("settings-licence-or"))));
+                    ui.end_row();
+                }
+            });
         });
-    });
 }

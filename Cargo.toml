@@ -23,6 +23,8 @@ eframe = { version = "0.36.2", features = ["persistence"] }
 # Icons for the GUI: one icon font (Phosphor, MIT) instead of egui's mixed emoji fonts.
 egui-phosphor = "0.14.0"
 egui_kittest = { version = "0.36.2", features = ["eframe"] }
+# Translations (English and Czech): Fluent files embedded at compile time.
+fluent-templates = { version = "0.15.1", default-features = false, features = ["macros", "walkdir"] }
 # Desktop notifications: freedesktop over D-Bus (zbus, which accesskit already brings in),
 # Windows toasts and the macOS notification centre.
 notify-rust = "4.18.2"

@@ -500,7 +500,7 @@ impl Ticker {
             let script = match subscription.script.compiled() {
                 Ok(script) => script,
                 Err(e) => {
-                    failed(&format!("script {e}"));
+                    failed(&e.to_string());
                     continue;
                 }
             };

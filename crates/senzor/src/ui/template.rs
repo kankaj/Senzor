@@ -22,6 +22,7 @@ use crate::edits::{
     new_message, new_subscription, set_generator_kind, unique_name,
 };
 use crate::format;
+use crate::i18n::t;
 use crate::preview::{PreviewMessage, json_problem, preview};
 
 /// The editor for project template `index`.
@@ -37,20 +38,20 @@ pub fn show_user(
 ) {
     let original = &doc.file().templates[index];
     let mut template = original.clone();
-    ui.heading(format!("Template {}", original.id));
+    ui.heading(t!("template-heading", id = original.id.as_str()));
     let at = &Location::Template {
         id: original.id.clone(),
     };
     errors_at(ui, doc, at, shown_inline);
     ui.horizontal(|ui| {
-        if ui.button("Duplicate template").clicked() {
+        if ui.button(t!("template-duplicate")).clicked() {
             actions.push(Action::DuplicateTemplate(original.id.clone()));
         }
         if ui
-            .button("Delete template")
+            .button(t!("template-delete"))
             .on_hover_text(shortcuts::tip(
                 ui.ctx(),
-                "Delete the template",
+                &t!("template-delete-hint"),
                 &shortcuts::DELETE,
             ))
             .clicked()
@@ -87,12 +88,12 @@ pub fn show_builtin(
     actions: &mut Vec<Action>,
 ) {
     let Some(mut template) = builtin_template(id).cloned() else {
-        ui.label(format!("There is no built-in template `{id}`."));
+        ui.label(t!("template-builtin-missing", id = id));
         return;
     };
-    ui.heading(format!("Built-in template {id}"));
-    ui.label("Built-in templates are read-only. Copy one into the project to change it.");
-    if ui.button("Copy into project…").clicked() {
+    ui.heading(t!("template-builtin-heading", id = id));
+    ui.label(t!("template-builtin-read-only"));
+    if ui.button(t!("template-copy-into-project")).clicked() {
         actions.push(Action::AskCopyBuiltin(id.to_string()));
     }
     ui.separator();
@@ -118,7 +119,7 @@ fn preview_below(ui: &mut egui::Ui, key: &str, template: &TemplateSpec, doc: &Do
     section(
         ui,
         &format!("{key}/section/preview"),
-        |ui| title(ui, "Preview"),
+        |ui| title(ui, &t!("template-preview")),
         |ui| preview_section(ui, template, doc),
     );
 }
@@ -173,14 +174,18 @@ fn editor(
     section(
         ui,
         &format!("{key}/section/settings"),
-        |ui| title(ui, "Settings"),
+        |ui| title(ui, &t!("template-settings")),
         |ui| settings_grid(ui, template, key, project, mqtt5, ui_state, actions),
     );
     let variables = variables_for(TextKind::Message, template, project);
     section(
         ui,
         &format!("{key}/section/messages"),
-        |ui| cell(ui, project, "messages", |ui| title(ui, "Messages")),
+        |ui| {
+            cell(ui, project, "messages", |ui| {
+                title(ui, &t!("template-messages"))
+            })
+        },
         |ui| {
             messages_editor(
                 ui,
@@ -199,8 +204,9 @@ fn editor(
         |ui| {
             cell(ui, project, "fields", |ui| {
                 ui.horizontal(|ui| {
-                    let title = title(ui, "Fields");
-                    help::mark(ui, "Fields", help::FIELDS);
+                    let text = t!("template-fields");
+                    let title = title(ui, &text);
+                    help::mark(ui, &text, help::FIELDS);
                     title
                 })
                 .inner
@@ -214,8 +220,9 @@ fn editor(
         &format!("{key}/section/subscriptions"),
         |ui| {
             ui.horizontal(|ui| {
-                let title = title(ui, "Subscriptions");
-                help::mark(ui, "Subscriptions", help::SUBSCRIPTIONS);
+                let text = t!("template-subscriptions");
+                let title = title(ui, &text);
+                help::mark(ui, &text, help::SUBSCRIPTIONS);
                 title
             })
             .inner
@@ -262,7 +269,7 @@ fn title(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// The preview of the selected template, for the panel beside the editor on a wide window.
 pub fn preview_beside(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
     ui.add(egui::Label::new(
-        RichText::new("Preview").strong().size(15.0),
+        RichText::new(t!("template-preview")).strong().size(15.0),
     ));
     preview_section(ui, template, doc);
 }
@@ -337,17 +344,13 @@ fn discovery_note(template: &TemplateSpec, project: Option<ProjectTemplate>) -> 
         .instances()
         .find(|i| i.template_id == template.id)
     else {
-        return Some(RichText::new("No device uses this template yet.").weak());
+        return Some(RichText::new(t!("template-no-device")).weak());
     };
     let left_out = unannounced_fields(instance);
     Some(if left_out.is_empty() {
-        RichText::new("Every field is announced.").weak()
+        RichText::new(t!("template-every-field-announced")).weak()
     } else {
-        RichText::new(format!(
-            "Not announced, not in one place of a payload: {}",
-            left_out.join(", ")
-        ))
-        .color(WARNING)
+        RichText::new(t!("template-not-announced", fields = left_out.join(", "))).color(WARNING)
     })
 }
 
@@ -365,7 +368,7 @@ fn settings_grid(
     egui::Grid::new("template-form")
         .num_columns(2)
         .show(ui, |ui| {
-            let label = help::label(ui, "ID", help::TEMPLATE_ID);
+            let label = help::label(ui, &t!("template-id"), help::TEMPLATE_ID);
             cell(ui, project, "id", |ui| {
                 let id_box = name_or_label(
                     ui,
@@ -387,7 +390,7 @@ fn settings_grid(
             });
             ui.end_row();
 
-            let label = help::label(ui, "Interval", help::TEMPLATE_INTERVAL);
+            let label = help::label(ui, &t!("template-interval"), help::TEMPLATE_INTERVAL);
             cell(ui, project, "interval", |ui| {
                 duration_edit(
                     ui,
@@ -412,12 +415,15 @@ fn settings_grid(
             });
             ui.end_row();
 
-            help::label(ui, "Retain", help::RETAIN);
-            ui.checkbox(&mut template.retain, "retain data messages");
+            help::label(ui, &t!("template-retain"), help::RETAIN);
+            ui.checkbox(&mut template.retain, t!("template-retain-checkbox"));
             ui.end_row();
 
             help::label(ui, "Home Assistant", help::HOME_ASSISTANT);
-            ui.checkbox(&mut template.home_assistant, "announce over MQTT Discovery");
+            ui.checkbox(
+                &mut template.home_assistant,
+                t!("template-home-assistant-checkbox"),
+            );
             ui.end_row();
             if template.home_assistant
                 && let Some(note) = discovery_note(template, project)
@@ -427,10 +433,10 @@ fn settings_grid(
                 ui.end_row();
             }
 
-            help::label(ui, "Availability", help::AVAILABILITY);
+            help::label(ui, &t!("template-availability"), help::AVAILABILITY);
             let mut enabled = template.availability.is_some();
             if ui
-                .checkbox(&mut enabled, "online/offline topic with Last Will")
+                .checkbox(&mut enabled, t!("template-availability-checkbox"))
                 .changed()
             {
                 template.availability = enabled.then(new_availability);
@@ -440,7 +446,7 @@ fn settings_grid(
                 let id = egui::Id::new(format!("{key}/availability/topic"));
                 let label = text_label(
                     ui,
-                    "  Topic",
+                    &format!("  {}", t!("template-topic")),
                     help::TOPIC,
                     id,
                     &mut availability.topic,
@@ -453,10 +459,18 @@ fn settings_grid(
                 ui.end_row();
                 // The online and offline payloads are plain text, not templates.
                 for (label, text, salt) in [
-                    ("  Online payload", &mut availability.online, "online"),
-                    ("  Offline payload", &mut availability.offline, "offline"),
+                    (
+                        t!("template-online-payload"),
+                        &mut availability.online,
+                        "online",
+                    ),
+                    (
+                        t!("template-offline-payload"),
+                        &mut availability.offline,
+                        "offline",
+                    ),
                 ] {
-                    let label = ui.label(label);
+                    let label = ui.label(format!("  {label}"));
                     cell(ui, project, &format!("availability.{salt}"), |ui| {
                         ui.add(
                             TextEdit::singleline(text)
@@ -466,7 +480,11 @@ fn settings_grid(
                     });
                     ui.end_row();
                 }
-                let label = help::label(ui, "  Will delay", help::WILL_DELAY);
+                let label = help::label(
+                    ui,
+                    &format!("  {}", t!("template-will-delay")),
+                    help::WILL_DELAY,
+                );
                 let has_value = availability.will_delay.is_some();
                 cell(ui, project, "availability.will_delay", |ui| {
                     mqtt5_control(ui, mqtt5, has_value, |ui| {
@@ -497,15 +515,22 @@ fn messages_editor(
     for (i, message) in messages.iter_mut().enumerate() {
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(format!("Message {}", i + 1));
-                if ui.button("Remove").clicked() {
+                ui.label(t!("template-message-number", number = i + 1));
+                if ui.button(t!("template-remove")).clicked() {
                     remove = Some(i);
                 }
             });
             // Problems name messages from 1.
             let field = |name: &str| format!("messages[{}].{name}", i + 1);
             let id = egui::Id::new(format!("{key}/message/{i}/topic"));
-            let label = text_label(ui, "Topic", help::TOPIC, id, &mut message.topic, variables);
+            let label = text_label(
+                ui,
+                &t!("template-topic"),
+                help::TOPIC,
+                id,
+                &mut message.topic,
+                variables,
+            );
             cell(ui, project, &field("topic"), |ui| {
                 template_text::edit(ui, &mut message.topic, id, false, variables)
                     .labelled_by(label.id)
@@ -513,7 +538,7 @@ fn messages_editor(
             let id = egui::Id::new(format!("{key}/message/{i}/payload"));
             let label = text_label(
                 ui,
-                "Payload",
+                &t!("template-payload"),
                 help::PAYLOAD,
                 id,
                 &mut message.payload,
@@ -525,7 +550,7 @@ fn messages_editor(
             });
             encoding_editor(ui, message, &format!("{key}/message/{i}"), project, &field);
             let has_properties = message.has_properties();
-            egui::CollapsingHeader::new("MQTT 5 properties")
+            egui::CollapsingHeader::new(t!("template-mqtt5-properties"))
                 .id_salt(format!("{key}/message/{i}/properties"))
                 .default_open(has_properties)
                 .show(ui, |ui| {
@@ -547,7 +572,7 @@ fn messages_editor(
     if let Some(i) = remove {
         messages.remove(i);
     }
-    if ui.button("Add message").clicked() {
+    if ui.button(t!("template-add-message")).clicked() {
         messages.push(new_message());
     }
 }
@@ -564,7 +589,7 @@ fn encoding_editor(
     egui::Grid::new(format!("{key}/encoding"))
         .num_columns(2)
         .show(ui, |ui| {
-            let label = help::label(ui, "Encoding", help::ENCODING);
+            let label = help::label(ui, &t!("template-encoding"), help::ENCODING);
             let before = message.encoding;
             cell(ui, project, &field("encoding"), |ui| {
                 egui::ComboBox::from_id_salt(format!("{key}/encoding"))
@@ -589,19 +614,19 @@ fn encoding_editor(
             {
                 return;
             }
-            let label = help::label(ui, "Proto file", help::PROTO_FILE);
+            let label = help::label(ui, &t!("template-proto-file"), help::PROTO_FILE);
             cell(ui, project, &field("proto"), |ui| {
                 let mut path = message.proto.as_ref().map(|p| p.display().to_string());
-                let response = optional_text(ui, &mut path, "e.g. proto/sensor.proto");
+                let response = optional_text(ui, &mut path, &t!("template-proto-file-hint"));
                 if response.changed() {
                     message.proto = path.map(Into::into);
                 }
                 response.labelled_by(label.id)
             });
             ui.end_row();
-            let label = help::label(ui, "Message type", help::MESSAGE_TYPE);
+            let label = help::label(ui, &t!("template-message-type"), help::MESSAGE_TYPE);
             cell(ui, project, &field("message"), |ui| {
-                optional_text(ui, &mut message.message, "e.g. sensors.v1.Reading")
+                optional_text(ui, &mut message.message, &t!("template-message-type-hint"))
                     .labelled_by(label.id)
             });
             ui.end_row();
@@ -621,7 +646,7 @@ fn properties_editor(
     egui::Grid::new(format!("{key}/properties"))
         .num_columns(2)
         .show(ui, |ui| {
-            let label = help::label(ui, "Message expiry", help::MESSAGE_EXPIRY);
+            let label = help::label(ui, &t!("template-message-expiry"), help::MESSAGE_EXPIRY);
             cell(ui, project, &field("message_expiry"), |ui| {
                 optional_duration_edit(
                     ui,
@@ -633,14 +658,19 @@ fn properties_editor(
             });
             ui.end_row();
 
-            let label = help::label(ui, "Content type", help::CONTENT_TYPE);
+            let label = help::label(ui, &t!("template-content-type"), help::CONTENT_TYPE);
             cell(ui, project, &field("content_type"), |ui| {
-                optional_text(ui, &mut message.content_type, "none").labelled_by(label.id)
+                optional_text(
+                    ui,
+                    &mut message.content_type,
+                    &t!("template-content-type-hint"),
+                )
+                .labelled_by(label.id)
             });
             ui.end_row();
         });
     cell(ui, project, &field("user_properties"), |ui| {
-        help::label(ui, "User properties", help::USER_PROPERTIES)
+        help::label(ui, &t!("template-user-properties"), help::USER_PROPERTIES)
     });
     let names: Vec<String> = message.user_properties.keys().cloned().collect();
     let mut rename = None;
@@ -656,14 +686,14 @@ fn properties_editor(
             let response = ui.add(
                 TextEdit::singleline(&mut buffer.text)
                     .id_salt(&name_key)
-                    .hint_text("name")
+                    .hint_text(t!("template-property-name-hint"))
                     .desired_width(90.0),
             );
             let typed = buffer.text.trim();
             let problem = if typed.is_empty() {
-                Some("a name is required".to_string())
+                Some(t!("template-property-name-required"))
             } else if typed != name && names.iter().any(|n| n == typed) {
-                Some(format!("`{typed}` is used already"))
+                Some(t!("template-property-name-used", name = typed))
             } else {
                 None
             };
@@ -671,10 +701,10 @@ fn properties_editor(
             ui.add(
                 TextEdit::singleline(value)
                     .id_salt(format!("{id}/value"))
-                    .hint_text("value, e.g. {{ room }}")
+                    .hint_text(t!("template-property-value-hint"))
                     .desired_width(150.0),
             );
-            if ui.button("Remove property").clicked() {
+            if ui.button(t!("template-remove-property")).clicked() {
                 remove = Some(name.clone());
                 settled.push(name_key.clone());
             }
@@ -702,7 +732,7 @@ fn properties_editor(
     if let Some(name) = remove {
         message.user_properties.remove(&name);
     }
-    if ui.button("Add user property").clicked() {
+    if ui.button(t!("template-add-user-property")).clicked() {
         let name = unique_name("name", message.user_properties.keys());
         message.user_properties.insert(name, String::new());
     }
@@ -746,7 +776,7 @@ fn fields_editor(
                             }
                         });
                     set_generator_kind(spec, kind);
-                    if ui.button("Remove").clicked() {
+                    if ui.button(t!("template-remove")).clicked() {
                         fields.remove(&name);
                     }
                     name_box
@@ -756,12 +786,17 @@ fn fields_editor(
             if let Some(field) = fields.get_mut(&name) {
                 ui.horizontal(|ui| {
                     let key = format!("{key}/field/{name}");
-                    let label = help::label(ui, "Name", help::FIELD_NAME);
+                    let label = help::label(ui, &t!("template-name"), help::FIELD_NAME);
                     describe_edit(ui, &mut field.name, &format!("{key}/name"), &name)
                         .labelled_by(label.id);
-                    let label = help::label(ui, "Unit", help::FIELD_UNIT);
-                    describe_edit(ui, &mut field.unit, &format!("{key}/unit"), "e.g. ppm")
-                        .labelled_by(label.id);
+                    let label = help::label(ui, &t!("template-unit"), help::FIELD_UNIT);
+                    describe_edit(
+                        ui,
+                        &mut field.unit,
+                        &format!("{key}/unit"),
+                        &t!("template-unit-hint"),
+                    )
+                    .labelled_by(label.id);
                 });
             }
             if let Some(spec) = fields.get_mut(&name).map(|f| &mut f.generator) {
@@ -775,7 +810,7 @@ fn fields_editor(
             }
         });
     }
-    if ui.button("Add field").clicked() {
+    if ui.button(t!("template-add-field")).clicked() {
         let name = unique_name("field", fields.keys());
         fields.insert(name, default_generator(GeneratorKind::RandomWalk).into());
     }
@@ -794,13 +829,13 @@ fn subscriptions_editor(
         let number = i + 1;
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(format!("Subscription {number}"));
-                let button = ui.button("Remove");
+                ui.label(t!("template-subscription-number", number = number));
+                let button = ui.button(t!("template-remove"));
                 button.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         true,
-                        format!("Remove subscription {number}"),
+                        t!("template-remove-subscription", number = number),
                     )
                 });
                 if button.clicked() {
@@ -812,7 +847,7 @@ fn subscriptions_editor(
             let id = egui::Id::new(format!("{key}/subscription/{i}/topic"));
             let label = text_label(
                 ui,
-                "Topic",
+                &t!("template-topic"),
                 help::SUBSCRIPTION_TOPIC,
                 id,
                 &mut subscription.topic,
@@ -836,13 +871,13 @@ fn subscriptions_editor(
                         .labelled_by(label.id)
                 });
             });
-            help::label(ui, "Script", help::SUBSCRIPTION_SCRIPT);
+            help::label(ui, &t!("template-script"), help::SUBSCRIPTION_SCRIPT);
             cell(ui, project, &field("script"), |ui| {
                 script_edit(
                     ui,
                     &format!("{key}/subscription/{i}/script"),
                     &mut subscription.script,
-                    Some(&format!("Subscription {number} script")),
+                    Some(&t!("template-subscription-script", number = number)),
                 )
             });
         });
@@ -850,7 +885,7 @@ fn subscriptions_editor(
     if let Some(i) = remove {
         subscriptions.remove(i);
     }
-    if ui.button("Add subscription").clicked() {
+    if ui.button(t!("template-add-subscription")).clicked() {
         subscriptions.push(new_subscription());
     }
 }
@@ -975,10 +1010,8 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
         SystemTime::now(),
     );
     match &preview.instance {
-        Some(instance) => ui.weak(format!(
-            "Rendered as {instance} with its params and sample values."
-        )),
-        None => ui.weak("No valid device uses this template, so params are not available."),
+        Some(instance) => ui.weak(t!("template-rendered-as", instance = instance.as_str())),
+        None => ui.weak(t!("template-no-valid-device")),
     };
     if let Some(error) = &preview.compile_error {
         ui.colored_label(ERROR, error);
@@ -986,8 +1019,14 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
     }
     if let Some(topic) = &preview.availability_topic {
         match topic {
-            Ok(topic) => ui.label(RichText::new(format!("availability: {topic}")).monospace()),
-            Err(e) => ui.colored_label(ERROR, format!("availability topic: {e}")),
+            Ok(topic) => ui.label(
+                RichText::new(t!("template-preview-availability", topic = topic.as_str()))
+                    .monospace(),
+            ),
+            Err(e) => ui.colored_label(
+                ERROR,
+                t!("template-preview-availability-error", error = e.as_str()),
+            ),
         };
     }
     for ((i, message), spec) in preview.messages.iter().enumerate().zip(&template.messages) {
@@ -1015,23 +1054,41 @@ fn preview_section(ui: &mut egui::Ui, template: &TemplateSpec, doc: &Document) {
                     Some(Err(e)) if json.is_none() => {
                         ui.colored_label(
                             ERROR,
-                            format!("not encoded as {}: {e}", spec.encoding.name()),
+                            t!(
+                                "template-preview-not-encoded",
+                                encoding = spec.encoding.name(),
+                                error = e.as_str()
+                            ),
                         );
                     }
                     Some(Err(_)) | None => {}
                 }
                 if let Some(content_type) = &properties.content_type {
-                    ui.weak(format!("content type: {content_type}"));
+                    ui.weak(t!(
+                        "template-preview-content-type",
+                        value = content_type.as_str()
+                    ));
                 }
                 if let Some(expiry) = properties.message_expiry {
-                    ui.weak(format!("message expiry: {expiry} s"));
+                    ui.weak(t!("template-preview-message-expiry", seconds = expiry));
                 }
                 for (name, value) in &properties.user_properties {
-                    ui.weak(format!("user property: {name} = {value}"));
+                    ui.weak(t!(
+                        "template-preview-user-property",
+                        name = name.as_str(),
+                        value = value.as_str()
+                    ));
                 }
             }
             Err(e) => {
-                ui.colored_label(ERROR, format!("message {}: {e}", i + 1));
+                ui.colored_label(
+                    ERROR,
+                    t!(
+                        "template-preview-message-error",
+                        number = i + 1,
+                        error = e.as_str()
+                    ),
+                );
             }
         }
     }
@@ -1103,6 +1160,39 @@ template = "air"
              script = '''\nstate.on = payload == \"ON\";\n'''\n",
             src_replacing("\n\n[[devices]]\nid = \"office\"\ntemplate = \"air\"\n", "")
         )
+    }
+
+    #[test]
+    fn the_editor_and_its_preview_speak_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = user_harness();
+        for text in [
+            "Šablona air",
+            "Nastavení",
+            "Zprávy",
+            "Odběry",
+            "Přidat pole",
+            "Vykresleno jako office s jejími parametry a ukázkovými hodnotami.",
+        ] {
+            assert!(h.query_by_label(text).is_some(), "{text}");
+        }
+        h.get_by_label("Vložit proměnnou: Payload").click();
+        h.run();
+        h.get_by_label("seq").click();
+        h.run();
+        assert_eq!(payload(&h), "{{ co2 }}{{ seq }}");
+    }
+
+    #[test]
+    fn a_section_stays_folded_when_the_language_changes() {
+        let mut h = user_harness();
+        h.get_by_label("Messages").click();
+        h.run();
+        assert!(h.query_by_label("Topic").is_none());
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        h.run();
+        assert!(h.query_by_label("Zprávy").is_some());
+        assert!(h.query_by_label("Topic").is_none(), "Zprávy still folded");
     }
 
     #[test]

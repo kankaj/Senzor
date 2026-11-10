@@ -31,6 +31,7 @@ use senzor_core::value::Value;
 use crate::buffers::Buffers;
 use crate::document::Document;
 use crate::edits::{Removal, Rename, ValueKind, parse_sequence, parse_value, sequence_text};
+use crate::i18n::t;
 use crate::selection::{ProblemTarget, Selection};
 use crate::settings::Theme;
 
@@ -39,30 +40,60 @@ pub const WARNING: Color32 = Color32::from_rgb(220, 160, 40);
 pub const ONLINE: Color32 = Color32::from_rgb(60, 180, 90);
 pub const STOPPED: Color32 = Color32::from_gray(140);
 
-/// Hover hint of Stop, wherever it is offered.
+/// Hover hint of Stop in English, for tests (the window shows [`stop_hint`]).
+#[cfg(test)]
 pub const STOP_HINT: &str =
     "Disconnect cleanly, publishing offline first when the template has availability";
-/// Hover hint of Kill, wherever it is offered.
+/// Hover hint of Kill in English, for tests (the window shows [`kill_hint`]).
+#[cfg(test)]
 pub const KILL_HINT: &str = "Drop the connection without offline, like a device losing power: \
      the broker publishes the Last Will";
 
+/// Hover hint of Stop, wherever it is offered.
+pub fn stop_hint() -> String {
+    t!("ui-stop-hint")
+}
+
+/// Hover hint of Kill, wherever it is offered.
+pub fn kill_hint() -> String {
+    t!("ui-kill-hint")
+}
+
 /// Stop, with what it does on hover.
 pub fn stop_button(ui: &mut egui::Ui) -> egui::Response {
-    ui.button("Stop").on_hover_text(STOP_HINT)
+    ui.button(t!("ui-stop")).on_hover_text(stop_hint())
 }
 
 /// Kill, drawn as a warning (red, with a lightning bolt) so it is not taken for Stop. Screen
-/// readers and tests know it as "Kill".
+/// readers and tests know it by its name without the bolt.
 pub fn kill_button(ui: &mut egui::Ui) -> egui::Response {
+    let name = t!("ui-kill");
     let text =
-        egui::RichText::new(format!("{} Kill", egui_phosphor::regular::LIGHTNING)).color(ERROR);
-    let response = ui.button(text).on_hover_text(KILL_HINT);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Kill"));
+        egui::RichText::new(format!("{} {name}", egui_phosphor::regular::LIGHTNING)).color(ERROR);
+    let response = ui.button(text).on_hover_text(kill_hint());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     response
 }
 
-/// Hover hint of a disabled Start: the Problems tab lists what blocks the device.
+/// Hover hint of a disabled Start, in English (the window shows [`fix_problems_first`]).
+#[cfg(test)]
 pub const FIX_PROBLEMS_FIRST: &str = "Fix the problems in the Problems tab first";
+
+/// The project's file name, "untitled" in the window's language before its first save, with a
+/// `*` while it has unsaved changes.
+pub fn project_title(doc: &Document) -> String {
+    let name = doc.file_name().unwrap_or_else(|| t!("ui-untitled"));
+    if doc.is_dirty() {
+        format!("{name}*")
+    } else {
+        name
+    }
+}
+
+/// Hover hint of a disabled Start: the Problems tab lists what blocks the device.
+pub fn fix_problems_first() -> String {
+    t!("ui-fix-problems-first")
+}
 
 /// Something the user asked for this frame. The app applies a frame's actions in [`phase`]
 /// order, so a pending edit or rename always lands before a delete, New, Open or Save.
@@ -121,6 +152,7 @@ pub enum Action {
     OpenExample(usize),
     ClearRecent,
     SetTheme(Theme),
+    SetLanguage(crate::i18n::Language),
     GoTo(ProblemTarget),
     /// Turn the MCP endpoint on or off.
     ToggleMcp,
@@ -266,14 +298,6 @@ pub enum ClearRetained {
     Failed(String),
 }
 
-/// "1 retained topic", "3 retained topics".
-pub fn retained_topics_text(count: usize) -> String {
-    match count {
-        1 => "1 retained topic".to_string(),
-        n => format!("{n} retained topics"),
-    }
-}
-
 /// GUI-only state that is not part of the project.
 #[derive(Default)]
 pub struct UiState {
@@ -369,7 +393,7 @@ pub fn status_dot(ui: &mut egui::Ui, status: &InstanceStatus) {
 pub struct ParsedEdit<'a> {
     key: &'a str,
     width: f32,
-    hint: Option<&'static str>,
+    hint: Option<String>,
 }
 
 impl<'a> ParsedEdit<'a> {
@@ -382,9 +406,9 @@ impl<'a> ParsedEdit<'a> {
     }
 
     /// Text shown while the box is empty.
-    pub fn hint(self, hint: &'static str) -> Self {
+    pub fn hint(self, hint: impl Into<String>) -> Self {
         Self {
-            hint: Some(hint),
+            hint: Some(hint.into()),
             ..self
         }
     }
@@ -434,7 +458,7 @@ pub fn duration_edit(
         buffers,
         value,
         |value| humantime::format_duration(*value).to_string(),
-        |text| humantime::parse_duration(text).map_err(|_| "use e.g. 10s, 500ms, 1h".to_string()),
+        |text| humantime::parse_duration(text).map_err(|_| t!("ui-duration-hint")),
     )
 }
 
@@ -446,7 +470,7 @@ pub fn optional_duration_edit(
     key: &str,
     value: &mut Option<Duration>,
 ) -> egui::Response {
-    ParsedEdit::new(key, 90.0).hint("none").show(
+    ParsedEdit::new(key, 90.0).hint(t!("ui-none")).show(
         ui,
         buffers,
         value,
@@ -457,7 +481,7 @@ pub fn optional_duration_edit(
             }
             humantime::parse_duration(text)
                 .map(Some)
-                .map_err(|_| "use e.g. 10s, 1m, 1h".to_string())
+                .map_err(|_| t!("ui-optional-duration-hint"))
         },
     )
 }
@@ -479,13 +503,15 @@ pub fn sequence_edit(
     key: &str,
     values: &mut Vec<Value>,
 ) -> egui::Response {
-    ParsedEdit::new(key, 200.0).hint("open, closed").show(
-        ui,
-        buffers,
-        values,
-        |values| sequence_text(values),
-        |text| Ok(parse_sequence(text)),
-    )
+    ParsedEdit::new(key, 200.0)
+        .hint(t!("ui-sequence-hint"))
+        .show(
+            ui,
+            buffers,
+            values,
+            |values| sequence_text(values),
+            |text| Ok(parse_sequence(text)),
+        )
 }
 
 /// Names a text box for screen readers and tests when its visible label, such as `start`, is
@@ -608,6 +634,8 @@ pub fn name_edit(
     }
 }
 
+/// The MQTT 5 note in English, for tests (the window shows it in its language).
+#[cfg(test)]
 pub use senzor_core::project::NEEDS_MQTT5;
 
 /// Shows an MQTT 5-only control. On MQTT 3.1.1 it stays usable only while it holds a value, so the
@@ -621,8 +649,8 @@ pub fn mqtt5_control<R>(
     ui.horizontal(|ui| {
         let inner = ui.add_enabled_ui(mqtt5 || has_value, add);
         if !mqtt5 {
-            inner.response.on_disabled_hover_text(NEEDS_MQTT5);
-            ui.weak(NEEDS_MQTT5);
+            inner.response.on_disabled_hover_text(t!("ui-needs-mqtt5"));
+            ui.weak(t!("ui-needs-mqtt5"));
         }
         inner.inner
     })
@@ -658,7 +686,7 @@ pub fn errors_at(
             .filter(|e| &e.location == location)
         {
             if !error.field.as_deref().is_some_and(&inline) {
-                ui.colored_label(ERROR, &error.message);
+                ui.colored_label(ERROR, error.message_in(crate::i18n::language()));
             }
             any = true;
         }
@@ -717,7 +745,7 @@ pub fn checked(
                 egui::StrokeKind::Outside,
             );
             for problem in problems {
-                ui.colored_label(ERROR, &problem.message);
+                ui.colored_label(ERROR, problem.message_in(crate::i18n::language()));
             }
         }
         let asked = ui
@@ -760,8 +788,9 @@ pub fn drop_hint(ctx: &egui::Context) {
         screen.center(),
         egui::Align2::CENTER_CENTER,
         format!(
-            "{} Drop to open the project",
-            egui_phosphor::regular::FOLDER_OPEN
+            "{} {}",
+            egui_phosphor::regular::FOLDER_OPEN,
+            t!("ui-drop-hint")
         ),
         egui::FontId::proportional(24.0),
         Color32::WHITE,
@@ -829,6 +858,40 @@ mod font_tests {
                 assert!(fonts.font_data.contains_key(name), "{family:?} uses {name}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod czech_tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::i18n::{Language, set_language};
+
+    #[test]
+    fn stop_and_kill_speak_czech() {
+        set_language(Language::Czech);
+        let mut h = Harness::new_ui(|ui| {
+            stop_button(ui);
+            kill_button(ui);
+        });
+        h.run();
+        assert!(h.query_by_label("Zastavit").is_some());
+        assert!(
+            h.query_by_label("Kill").is_some(),
+            "screen readers say Kill"
+        );
+    }
+
+    /// The English texts match the constants other code and tests compare against.
+    #[test]
+    fn english_texts_match_the_constants() {
+        set_language(Language::English);
+        assert_eq!(crate::i18n::t!("ui-stop-hint"), STOP_HINT);
+        assert_eq!(crate::i18n::t!("ui-kill-hint"), KILL_HINT);
+        assert_eq!(crate::i18n::t!("ui-fix-problems-first"), FIX_PROBLEMS_FIRST);
+        assert_eq!(crate::i18n::t!("ui-needs-mqtt5"), NEEDS_MQTT5);
     }
 }
 

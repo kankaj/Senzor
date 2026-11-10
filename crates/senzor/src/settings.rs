@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{Language, t};
 use crate::update::Release;
 
 /// Light or dark colours, or whatever the operating system uses.
@@ -20,11 +21,11 @@ pub enum Theme {
 impl Theme {
     pub const ALL: [Theme; 3] = [Theme::System, Theme::Light, Theme::Dark];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Theme::System => "System",
-            Theme::Light => "Light",
-            Theme::Dark => "Dark",
+            Theme::System => t!("settings-theme-system"),
+            Theme::Light => t!("settings-theme-light"),
+            Theme::Dark => t!("settings-theme-dark"),
         }
     }
 
@@ -66,6 +67,8 @@ pub struct PanelTabs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
+    /// The language of the window's texts.
+    pub language: Language,
     pub theme: Theme,
     /// How large everything is drawn: 1.0 is 100 %.
     pub zoom: f32,
@@ -98,6 +101,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            language: Language::default(),
             theme: Theme::default(),
             zoom: 1.0,
             recent: Vec::new(),
@@ -147,6 +151,7 @@ impl AppSettings {
 
     /// Sets the theme and zoom of `ctx` to these settings.
     pub fn apply(&self, ctx: &egui::Context) {
+        crate::i18n::set_language(self.language);
         ctx.set_theme(self.theme.preference());
         ctx.set_zoom_factor(self.zoom);
     }
@@ -189,6 +194,7 @@ mod tests {
     fn saved_settings_load_back() {
         let mut storage = MemoryStorage::default();
         let settings = AppSettings {
+            language: crate::i18n::Language::Czech,
             theme: Theme::Light,
             zoom: 1.3,
             recent: vec![PathBuf::from("/projects/a.toml")],

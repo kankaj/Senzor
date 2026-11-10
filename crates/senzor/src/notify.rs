@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use senzor_core::engine::{InstanceState, InstanceStatus};
 
+use crate::i18n::t;
+
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::icon::APP_ID;
 
@@ -78,19 +80,17 @@ fn failed_ids(instances: &BTreeMap<String, InstanceState>) -> BTreeSet<String> {
 /// The lines a notification's body lists, at most.
 const BODY_LINES: usize = 3;
 
-/// The title and body of one notification about `failures`.
+/// The title and body of one notification about `failures`, in the language of this thread
+/// (the window's: [`FailureWatch::look`] runs where the window is drawn).
 pub fn message(failures: &[Failure]) -> (String, String) {
-    let title = match failures.len() {
-        1 => "Senzor: an instance failed".to_string(),
-        n => format!("Senzor: {n} instances failed"),
-    };
+    let title = t!("notify-title", count = failures.len());
     let mut lines: Vec<String> = failures
         .iter()
         .take(BODY_LINES)
         .map(|f| format!("{}: {}", f.instance, f.reason))
         .collect();
     if failures.len() > BODY_LINES {
-        lines.push(format!("and {} more", failures.len() - BODY_LINES));
+        lines.push(t!("notify-more", count = failures.len() - BODY_LINES));
     }
     (title, lines.join("\n"))
 }
@@ -244,6 +244,22 @@ mod tests {
             body,
             "office-0: refused\noffice-1: refused\noffice-2: refused"
         );
+    }
+
+    #[test]
+    fn the_message_counts_in_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let failures = |n: usize| -> Vec<_> {
+            (0..n)
+                .map(|i| failure(&format!("o-{i}"), "refused"))
+                .collect()
+        };
+        assert_eq!(message(&failures(1)).0, "Senzor: instance selhala");
+        assert_eq!(message(&failures(3)).0, "Senzor: 3 instance selhaly");
+        let (title, body) = message(&failures(8));
+        assert_eq!(title, "Senzor: 8 instancí selhalo");
+        assert!(body.ends_with("\na 5 dalších"), "{body}");
+        assert!(message(&failures(4)).1.ends_with("\na 1 další"));
     }
 
     /// A watch that has seen `a` and `b` online in engine 1.

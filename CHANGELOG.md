@@ -21,6 +21,7 @@ The first release.
 - Simulated devices can appear in Home Assistant by themselves, through MQTT Discovery.
 - Problems are shown next to the box they are about, and a device with problems does not start.
 - AI agents such as Claude Code can drive Senzor over MCP, headless or in the window.
+- The window speaks English or Czech: choose the language in the settings.
 
 ### Added
 
@@ -52,6 +53,7 @@ The first release.
 
 #### Window
 
+- The window in English or Czech, chosen under **Language** in the settings and switched at once; English is the default. Help texts, problems and What's new follow the language; the documentation, `senzor-cli` and MCP stay English.
 - A device tree with search, a status filter and "4/5 online" counts, an editor for devices, templates and the broker, and a live preview of every template.
 - A message log in columns with QoS and retained, filtered by topic or by clicking an instance, with each message's details and indented payload, export to CSV and a Clear button. Binary payloads show as hex, with their encoding and size.
 - A Problems tab, and a status bar with the broker state, instance counts and messages per second.

@@ -6,6 +6,7 @@ mod dialogs;
 mod edits;
 mod examples;
 mod format;
+pub mod i18n;
 pub mod icon;
 mod log_view;
 pub mod notify;

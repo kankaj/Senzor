@@ -1,6 +1,7 @@
 pub mod encoding;
 pub mod engine;
 pub mod generator;
+pub mod i18n;
 pub mod project;
 pub mod proto;
 pub mod render;

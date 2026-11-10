@@ -1,0 +1,36 @@
+# Dolní panel: záznam zpráv a karta Problémy.
+
+bottom-message-log = Záznam zpráv
+bottom-problems = Problémy
+bottom-problems-count = Problémy ({ $count })
+bottom-time = Čas
+bottom-instance = Instance
+bottom-topic = Topic
+bottom-column-payload = Payload
+bottom-filter = Filtr
+bottom-filter-placeholder = topic obsahuje…
+bottom-filter-hint = Zobrazit jen zprávy, jejichž topic obsahuje tento text
+bottom-show-every-instance = Zobrazit všechny instance
+bottom-pause = Pozastavit
+bottom-resume = Pokračovat
+bottom-clear = Vymazat
+bottom-clear-hint = Vyprázdnit záznam; nové zprávy se budou dál zobrazovat
+bottom-clear-name = Vymazat záznam
+bottom-export = Exportovat…
+bottom-export-hint = Uložit zde zobrazené zprávy jako soubor CSV
+bottom-show-only = Zobrazit jen zprávy instance { $instance }
+bottom-retained = Retained
+bottom-message = Zpráva
+bottom-close = Zavřít
+bottom-yes = ano
+bottom-no = ne
+bottom-content-type = Content type
+bottom-message-expiry = Message expiry
+bottom-user-property = User property
+bottom-payload = Payload
+bottom-copy-payload = Kopírovat payload
+bottom-copy-payload-hint = Zkopírovat payload tak, jak byl odeslán
+bottom-copy-hex = Kopírovat jako hex
+bottom-copy-hex-hint = Zkopírovat odeslané bajty jako hexadecimální číslice
+bottom-rendered-text = Vykreslený text
+bottom-no-problems = Žádné problémy.

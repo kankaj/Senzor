@@ -9,6 +9,8 @@ use senzor_core::project::{Project, TemplateSpec};
 use senzor_core::render::{InstanceTemplates, RenderedMessage, base_context, tick_context};
 use senzor_core::value::Value;
 
+use crate::i18n::t;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
     /// The instance whose params and overrides were used, if any device uses the template.
@@ -107,16 +109,19 @@ pub fn json_problem(
     if !looks_like_json && !declared && !needed {
         return None;
     }
-    let error = serde_json::from_str::<serde_json::Value>(payload).err()?;
+    let error = serde_json::from_str::<serde_json::Value>(payload)
+        .err()?
+        .to_string();
     Some(if needed {
-        format!(
-            "encoding {} needs JSON, but the payload is not valid JSON: {error}",
-            encoding.name()
+        t!(
+            "preview-json-needed",
+            encoding = encoding.name(),
+            error = error
         )
     } else if looks_like_json {
-        format!("looks like JSON but is not valid JSON: {error}")
+        t!("preview-json-looks", error = error)
     } else {
-        format!("the content type is JSON, but the payload is not valid JSON: {error}")
+        t!("preview-json-content-type", error = error)
     })
 }
 
@@ -134,6 +139,16 @@ mod tests {
             "{problem}"
         );
         assert!(json_problem("[1, 2", None, Encoding::Text).is_some());
+    }
+
+    #[test]
+    fn the_json_problem_is_told_in_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let problem = json_problem("co2=600", None, Encoding::Cbor).unwrap();
+        assert!(
+            problem.starts_with("kódování CBOR potřebuje JSON, ale payload není platný JSON: "),
+            "{problem}"
+        );
     }
 
     #[test]

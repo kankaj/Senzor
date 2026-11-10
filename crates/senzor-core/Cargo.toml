@@ -13,6 +13,7 @@ schema = ["dep:schemars"]
 [dependencies]
 base64.workspace = true
 ciborium.workspace = true
+fluent-templates.workspace = true
 humantime.workspace = true
 humantime-serde.workspace = true
 minijinja.workspace = true

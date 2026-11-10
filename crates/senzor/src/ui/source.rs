@@ -5,6 +5,7 @@ use senzor_core::project::ProjectFile;
 
 use super::{Action, ERROR, UiState, WARNING};
 use crate::document::Document;
+use crate::i18n::t;
 
 /// The text in the editor, and what the document's text was when the editor took it.
 #[derive(Debug, Clone, Default)]
@@ -43,36 +44,30 @@ impl SourceBuffer {
 pub fn show(ui: &mut egui::Ui, doc: &Document, ui_state: &mut UiState, actions: &mut Vec<Action>) {
     let buffer = ui_state.source.get_or_insert_with(SourceBuffer::default);
     buffer.follow(doc);
-    ui.heading("Project file");
-    ui.label(
-        RichText::new(
-            "What Save writes. Apply takes your text as one edit (Ctrl+Z undoes it); its comments \
-             are saved with it.",
-        )
-        .weak(),
-    );
+    ui.heading(t!("source-title"));
+    ui.label(RichText::new(t!("source-intro")).weak());
     let edited = buffer.is_edited();
     let mut apply = false;
     ui.horizontal(|ui| {
         apply = ui
-            .add_enabled(edited, egui::Button::new("Apply"))
+            .add_enabled(edited, egui::Button::new(t!("source-apply")))
             .on_hover_text("Ctrl+Enter")
             .clicked();
         if ui
-            .add_enabled(edited, egui::Button::new("Revert"))
+            .add_enabled(edited, egui::Button::new(t!("source-revert")))
             .clicked()
         {
             buffer.text.clone_from(&buffer.origin);
             buffer.errors.clear();
         }
         if edited {
-            ui.label(RichText::new("Not applied yet").color(WARNING));
+            ui.label(RichText::new(t!("source-not-applied")).color(WARNING));
         }
     });
     for error in &buffer.errors {
         ui.label(RichText::new(error).color(ERROR));
     }
-    let label = ui.label("Text");
+    let label = ui.label(t!("source-text"));
     let editor = ui
         .add(
             TextEdit::multiline(&mut buffer.text)
@@ -176,6 +171,19 @@ mod tests {
                 .unwrap()
                 .contains("# A note.")
         );
+    }
+
+    #[test]
+    fn the_project_file_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = harness();
+        assert!(h.query_by_label("Soubor projektu").is_some());
+        type_text(&mut h, "nonsense");
+        assert!(h.query_by_label("Zatím nepoužito").is_some());
+        h.get_by_label("Vrátit změny").click();
+        h.run();
+        assert!(h.query_by_label("Zatím nepoužito").is_none());
+        assert!(h.query_by_label("Použít").is_some());
     }
 
     #[test]

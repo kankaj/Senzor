@@ -16,6 +16,7 @@ screenshots = ["test-support", "egui_kittest/wgpu", "dep:image"]
 clap.workspace = true
 eframe.workspace = true
 egui-phosphor.workspace = true
+fluent-templates.workspace = true
 egui_kittest = { workspace = true, optional = true }
 http-body-util.workspace = true
 humantime.workspace = true

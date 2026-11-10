@@ -7,9 +7,9 @@ use senzor_core::project::{DeviceSpec, FieldSpec, Location};
 use senzor_core::value::Value;
 
 use super::{
-    Action, BoxOrRow, ERROR, FIX_PROBLEMS_FIRST, UiState, checked, duration_edit, errors_at, help,
-    name_edit, noise_edit, number_edit, replace_if_unchanged, script_edit, sequence_edit,
-    shortcuts, value_edit,
+    Action, BoxOrRow, ERROR, UiState, checked, duration_edit, errors_at, help, name_edit,
+    noise_edit, number_edit, replace_if_unchanged, script_edit, sequence_edit, shortcuts,
+    value_edit,
 };
 use crate::buffers::Buffers;
 use crate::document::Document;
@@ -18,6 +18,7 @@ use crate::edits::{
     override_settings, override_summary, set_count, set_override_kind, store_override_edits,
     template_interval, unique_name,
 };
+use crate::i18n::t;
 
 pub fn show(
     ui: &mut egui::Ui,
@@ -28,7 +29,7 @@ pub fn show(
 ) {
     let original = &doc.file().devices[index];
     let mut device = original.clone();
-    ui.heading(format!("Device {}", original.id));
+    ui.heading(t!("device-heading", id = original.id.as_str()));
     let at = &Location::Device {
         id: original.id.clone(),
     };
@@ -37,14 +38,14 @@ pub fn show(
         // A blocked device cannot start; its own errors are on this page, a broken template's or
         // broker's are only in the Problems tab.
         let hint = if has_errors {
-            FIX_PROBLEMS_HERE
+            fix_problems_here()
         } else {
-            FIX_PROBLEMS_FIRST
+            super::fix_problems_first()
         };
         if ui
             .add_enabled(
                 !doc.validated().blocked.contains(&original.id),
-                Button::new("Start device"),
+                Button::new(t!("device-start")),
             )
             .on_disabled_hover_text(hint)
             .clicked()
@@ -53,14 +54,14 @@ pub fn show(
                 original.id.clone(),
             ))));
         }
-        if ui.button("Duplicate device").clicked() {
+        if ui.button(t!("device-duplicate")).clicked() {
             actions.push(Action::DuplicateDevice(original.id.clone()));
         }
         if ui
-            .button("Delete device")
+            .button(t!("device-delete"))
             .on_hover_text(shortcuts::tip(
                 ui.ctx(),
-                "Delete the device",
+                &t!("device-delete-hint"),
                 &shortcuts::DELETE,
             ))
             .clicked()
@@ -74,7 +75,7 @@ pub fn show(
     egui::Grid::new("device-form")
         .num_columns(2)
         .show(ui, |ui| {
-            let label = help::label(ui, "ID", help::DEVICE_ID);
+            let label = help::label(ui, &t!("device-id"), help::DEVICE_ID);
             checked(ui, doc, at, "id", |ui| {
                 let (response, rename) = name_edit(
                     ui,
@@ -93,7 +94,7 @@ pub fn show(
             });
             ui.end_row();
 
-            help::label(ui, "Template", help::TEMPLATE);
+            help::label(ui, &t!("device-template"), help::TEMPLATE);
             checked(ui, doc, at, "template", |ui| {
                 egui::ComboBox::from_id_salt("device-template")
                     .selected_text(device.template.clone())
@@ -106,7 +107,7 @@ pub fn show(
             });
             ui.end_row();
 
-            let label = help::label(ui, "Count", help::COUNT);
+            let label = help::label(ui, &t!("device-count"), help::COUNT);
             let mut count = device.count;
             checked(ui, doc, at, "count", |ui| {
                 ui.add(DragValue::new(&mut count).range(1..=10_000))
@@ -115,12 +116,12 @@ pub fn show(
             set_count(&mut device, count);
             ui.end_row();
 
-            let label = help::label(ui, "Instance IDs", help::INSTANCE_IDS);
+            let label = help::label(ui, &t!("device-instance-ids"), help::INSTANCE_IDS);
             checked(ui, doc, at, "instance_id", |ui| {
                 ui.horizontal(|ui| {
                     let mut custom = device.instance_id.is_some();
                     // Starting from the pattern in use keeps the instance IDs until the user types.
-                    if ui.checkbox(&mut custom, "custom").changed() {
+                    if ui.checkbox(&mut custom, t!("device-custom")).changed() {
                         device.instance_id =
                             custom.then(|| default_instance_id_pattern(device.count).to_string());
                     }
@@ -151,15 +152,18 @@ pub fn show(
             });
             ui.end_row();
 
-            help::label(ui, "Autostart", help::AUTOSTART);
-            ui.checkbox(&mut device.autostart, "start when the project opens");
+            help::label(ui, &t!("device-autostart"), help::AUTOSTART);
+            ui.checkbox(&mut device.autostart, t!("device-autostart-checkbox"));
             ui.end_row();
 
-            let label = help::label(ui, "Interval", help::DEVICE_INTERVAL);
+            let label = help::label(ui, &t!("device-interval"), help::DEVICE_INTERVAL);
             checked(ui, doc, at, "interval", |ui| {
                 ui.horizontal(|ui| {
                     let mut custom = device.interval.is_some();
-                    if ui.checkbox(&mut custom, "override").changed() {
+                    if ui
+                        .checkbox(&mut custom, t!("device-interval-override"))
+                        .changed()
+                    {
                         device.interval = custom.then(|| {
                             template_interval(doc.file(), &device.template)
                                 .unwrap_or(DEFAULT_INTERVAL)
@@ -191,7 +195,9 @@ pub fn show(
 }
 
 /// Hover hint of a disabled Start device whose own problems are on its page.
-const FIX_PROBLEMS_HERE: &str = "Fix the problems marked in red first";
+fn fix_problems_here() -> String {
+    t!("device-fix-problems-here")
+}
 
 /// The device fields the form shows its problems next to.
 fn shown_inline(field: &str) -> bool {
@@ -219,7 +225,7 @@ fn params(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    help::heading(ui, "Params", help::PARAMS);
+    help::heading(ui, &t!("device-params"), help::PARAMS);
     let file = doc.file();
     let at = &Location::Device {
         id: file.devices[index].id.clone(),
@@ -250,7 +256,7 @@ fn params(
                         value,
                     );
                 }
-                if ui.button("Remove").clicked() {
+                if ui.button(t!("device-remove")).clicked() {
                     device.params.remove(&key);
                 }
                 Some(name_box)
@@ -258,7 +264,7 @@ fn params(
             .box_or_row()
         });
     }
-    if ui.button("Add param").clicked() {
+    if ui.button(t!("device-add-param")).clicked() {
         let name = unique_name("param", device.params.keys());
         device.params.insert(name, Value::String(String::new()));
     }
@@ -277,8 +283,8 @@ fn overrides(
     let at = &Location::Device {
         id: doc.file().devices[index].id.clone(),
     };
-    help::heading(ui, "Field overrides", help::FIELD_OVERRIDES);
-    ui.weak(OVERRIDES_NOTE);
+    help::heading(ui, &t!("device-field-overrides"), help::FIELD_OVERRIDES);
+    ui.weak(t!("device-overrides-note"));
     let fields: Vec<(String, FieldSpec)> = find_template(doc.file(), &device.template)
         .map(|t| t.fields.clone().into_iter().collect())
         .unwrap_or_default();
@@ -305,18 +311,14 @@ fn overrides(
     for field in stranded {
         ui.horizontal(|ui| {
             checked(ui, doc, at, &format!("fields.{field}"), |ui| {
-                ui.colored_label(ERROR, format!("{field} (not in the template)"))
+                ui.colored_label(ERROR, t!("device-not-in-template", field = field.as_str()))
             });
-            if ui.button("Remove override").clicked() {
+            if ui.button(t!("device-remove-override")).clicked() {
                 device.fields.remove(&field);
             }
         });
     }
 }
-
-/// The note under the Field overrides heading.
-const OVERRIDES_NOTE: &str =
-    "Tick a setting to change it for this device; the others show the template's value.";
 
 /// The block of one template field in Field overrides.
 struct OverrideBlock<'a> {
@@ -402,9 +404,13 @@ impl OverrideBlock<'_> {
                     let locked = on && view.is_required(setting);
                     let checkbox = ui
                         .add_enabled(!locked, egui::Checkbox::without_text(&mut tick))
-                        .on_hover_text("Override for this device")
-                        .on_disabled_hover_text("Needed while the generator is overridden");
-                    let accessible = format!("override {} {setting}", self.name);
+                        .on_hover_text(t!("device-override-hint"))
+                        .on_disabled_hover_text(t!("device-override-locked"));
+                    let accessible = t!(
+                        "device-override-setting-name",
+                        field = self.name,
+                        setting = setting
+                    );
                     checkbox.widget_info(|| {
                         egui::WidgetInfo::selected(
                             egui::WidgetType::Checkbox,
@@ -435,7 +441,10 @@ impl OverrideBlock<'_> {
                             if view.unreadable.contains(setting)
                                 && let Some(value) = table.get(setting)
                             {
-                                ui.colored_label(ERROR, format!("cannot read {value}"));
+                                ui.colored_label(
+                                    ERROR,
+                                    t!("device-cannot-read", value = value.to_string()),
+                                );
                             }
                         });
                     });
@@ -447,10 +456,18 @@ impl OverrideBlock<'_> {
                     ui.horizontal(|ui| {
                         ui.colored_label(
                             ERROR,
-                            format!("{key} is not a setting of {}", view.kind.label()),
+                            t!(
+                                "device-not-a-setting",
+                                key = key.as_str(),
+                                generator = view.kind.label()
+                            ),
                         );
-                        let button = ui.button("Remove");
-                        let accessible = format!("Remove {} {key}", self.name);
+                        let button = ui.button(t!("device-remove"));
+                        let accessible = t!(
+                            "device-remove-setting-name",
+                            field = self.name,
+                            key = key.as_str()
+                        );
                         button.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &accessible)
                         });
@@ -498,13 +515,13 @@ impl OverrideBlock<'_> {
                     })
                     .response
             }
-            ("unit", _) => label_edit(ui, key, &mut field.unit, "none"),
+            ("unit", _) => label_edit(ui, key, &mut field.unit, &t!("device-unit-none")),
             // Without a name, people see the field's key.
             ("name", _) => label_edit(ui, key, &mut field.name, self.name),
             ("noise", spec) => match noise_mut(spec) {
                 Some(noise) => noise_edit(ui, noise),
                 None => {
-                    ui.weak("none");
+                    ui.weak(t!("device-noise-none"));
                     return None;
                 }
             },
@@ -648,6 +665,25 @@ fields.co2 = { start = 1200 }
     }
 
     #[test]
+    fn the_form_and_its_overrides_speak_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = harness_for(PLAIN);
+        for text in [
+            "Zařízení office",
+            "Spustit zařízení",
+            "Autostart",
+            "Přepsání polí",
+            "nepřepsáno",
+        ] {
+            assert!(h.query_by_label(text).is_some(), "{text}");
+        }
+        click(&mut h, CO2);
+        click(&mut h, "přepsat co2 start");
+        assert_eq!(co2_override(&h), Some(table("start = 600.0")));
+        assert!(h.query_by_label("přepsáno: start").is_some());
+    }
+
+    #[test]
     fn add_param_adds_an_empty_param() {
         let mut h = harness();
         h.get_by_label("Add param").click();
@@ -687,7 +723,11 @@ fields.co2 = { start = 1200 }
     #[test]
     fn start_device_is_disabled_while_the_device_has_problems() {
         let mut h = harness_for("[[devices]]\nid = \"office\"\ntemplate = \"gone\"\n");
-        assert_disabled_with_hint(&mut h, "Start device", FIX_PROBLEMS_HERE);
+        assert_disabled_with_hint(
+            &mut h,
+            "Start device",
+            "Fix the problems marked in red first",
+        );
     }
 
     #[test]

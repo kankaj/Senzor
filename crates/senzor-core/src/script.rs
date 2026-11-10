@@ -15,6 +15,7 @@ use rhai::packages::{Package, StandardPackage};
 use rhai::{AST, Dynamic, Engine, EvalAltResult, FLOAT, INT, ImmutableString, Map, Module, Scope};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::i18n::{Text, text};
 use crate::value::Value;
 
 /// How many operations one run of a script may take before it is stopped.
@@ -32,7 +33,7 @@ pub struct Script {
     source: String,
     /// Shared by every clone, so a script compiles once however often a project is copied into
     /// instances.
-    compiled: Arc<OnceLock<Result<Arc<AST>, String>>>,
+    compiled: Arc<OnceLock<Result<Arc<AST>, Text>>>,
 }
 
 impl Script {
@@ -47,17 +48,18 @@ impl Script {
         &self.source
     }
 
-    /// The compiled script, or what is wrong with it: `is empty` or `does not compile: <reason>`.
-    pub fn compiled(&self) -> Result<Arc<AST>, String> {
+    /// The compiled script, or what is wrong with it: `script is empty` or
+    /// `script does not compile: <reason>`, where the reason is Rhai's (English) text.
+    pub fn compiled(&self) -> Result<Arc<AST>, Text> {
         self.compiled
             .get_or_init(|| {
                 if self.source.trim().is_empty() {
-                    return Err("is empty".into());
+                    return Err(text!("script-empty"));
                 }
                 compiler()
                     .compile(&self.source)
                     .map(Arc::new)
-                    .map_err(|e| format!("does not compile: {e}"))
+                    .map_err(|e| text!("script-does-not-compile", reason = e.to_string()))
             })
             .clone()
     }
@@ -526,9 +528,10 @@ mod tests {
 
     #[test]
     fn an_empty_or_broken_script_says_what_is_wrong() {
-        assert_eq!(Script::new(" \n").compiled().err(), Some("is empty".into()));
-        let err = Script::new("value +").compiled().err().unwrap();
-        assert!(err.starts_with("does not compile: "), "{err}");
+        let problem = |source: &str| Script::new(source).compiled().err().unwrap().to_string();
+        assert_eq!(problem(" \n"), "script is empty");
+        let err = problem("value +");
+        assert!(err.starts_with("script does not compile: "), "{err}");
         assert!(err.contains("line 1"), "{err}");
     }
 

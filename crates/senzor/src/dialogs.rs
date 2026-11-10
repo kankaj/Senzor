@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use senzor_core::project::edit::PROJECT_EXTENSION;
+
+use crate::i18n::t;
 /// Where to save a project the user named in the save dialog (Linux portals return the name as
 /// typed, so `.toml` may be missing).
 pub use senzor_core::project::edit::project_file_path;
@@ -16,7 +18,7 @@ pub trait FileDialogs {
 }
 
 fn project_dialog() -> rfd::FileDialog {
-    rfd::FileDialog::new().add_filter("Senzor project", &[PROJECT_EXTENSION])
+    rfd::FileDialog::new().add_filter(t!("dialogs-project-filter"), &[PROJECT_EXTENSION])
 }
 
 /// The operating system's dialogs (xdg-desktop-portal on Linux).

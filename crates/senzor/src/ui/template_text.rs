@@ -5,6 +5,8 @@ use std::ops::Range;
 
 use eframe::egui;
 
+use crate::i18n::t;
+
 /// What a piece of a topic or payload is, for its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Span {
@@ -103,38 +105,35 @@ pub struct Variable {
 /// and the `params` its devices set.
 pub fn variables(kind: TextKind, fields: &[String], params: &[String]) -> Vec<Variable> {
     let mut variables: Vec<Variable> = [
-        ("device_id", "The instance ID, such as office-3"),
-        ("index", "The instance's position in its device: 0, 1, 2, …"),
-        ("template_id", "This template's ID"),
+        ("device_id", t!("template-text-device-id")),
+        ("index", t!("template-text-index")),
+        ("template_id", t!("template-text-template-id")),
     ]
     .into_iter()
     .map(|(name, about)| Variable {
         name: name.into(),
-        about: about.into(),
+        about,
     })
     .collect();
     if kind == TextKind::Message {
         for (name, about) in [
-            ("seq", "The number of the tick in this run, from 0"),
-            ("now_ms", "The time of the tick, in milliseconds since 1970"),
-            (
-                "now_iso",
-                "The time of the tick, such as 2026-11-07T12:00:00.000Z",
-            ),
+            ("seq", t!("template-text-seq")),
+            ("now_ms", t!("template-text-now-ms")),
+            ("now_iso", t!("template-text-now-iso")),
         ] {
             variables.push(Variable {
                 name: name.into(),
-                about: about.into(),
+                about,
             });
         }
         variables.extend(fields.iter().map(|field| Variable {
             name: field.clone(),
-            about: "A field's value on this tick".into(),
+            about: t!("template-text-field"),
         }));
     }
     variables.extend(params.iter().map(|param| Variable {
         name: param.clone(),
-        about: "A param that devices using this template set".into(),
+        about: t!("template-text-param"),
     }));
     variables
 }
@@ -284,12 +283,12 @@ pub fn insert_menu(
             }
         },
     );
-    let response = menu.response.on_hover_text("Insert a variable");
+    let response = menu.response.on_hover_text(t!("template-text-insert-hint"));
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             true,
-            format!("Insert variable: {name}"),
+            t!("template-text-insert-name", name = name),
         )
     });
 }
@@ -433,6 +432,17 @@ mod tests {
         assert_eq!(
             names(TextKind::AvailabilityTopic),
             ["device_id", "index", "template_id", "room"]
+        );
+    }
+
+    #[test]
+    fn variables_are_described_in_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let variables = variables(TextKind::Message, &["co2".into()], &[]);
+        assert_eq!(variables[0].about, "ID instance, například office-3");
+        assert_eq!(
+            variables.last().unwrap().about,
+            "Hodnota pole v tomto ticku"
         );
     }
 

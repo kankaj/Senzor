@@ -6,6 +6,8 @@ use senzor_core::engine::InstanceStatus;
 use senzor_core::render::Payload;
 use senzor_core::value::Value;
 
+use crate::i18n::t;
+
 /// A field value as shown in the instance view: integral numbers plain (below 9e15, see
 /// [`Value::as_integer`]), others with 2 decimals.
 pub fn value(value: &Value) -> String {
@@ -16,19 +18,23 @@ pub fn value(value: &Value) -> String {
 }
 
 /// One word per status, plus the error or reason where there is one.
-pub fn status(status: &InstanceStatus) -> (&'static str, Option<String>) {
+pub fn status(status: &InstanceStatus) -> (String, Option<String>) {
     match status {
-        InstanceStatus::Stopped => ("Stopped", None),
-        InstanceStatus::Connecting => ("Connecting", None),
-        InstanceStatus::Online => ("Online", None),
+        InstanceStatus::Stopped => (t!("status-stopped"), None),
+        InstanceStatus::Connecting => (t!("status-connecting"), None),
+        InstanceStatus::Online => (t!("status-online"), None),
         InstanceStatus::Reconnecting {
             attempt,
             last_error,
         } => (
-            "Reconnecting",
-            Some(format!("attempt {attempt}: {last_error}")),
+            t!("status-reconnecting"),
+            Some(t!(
+                "status-reconnecting-attempt",
+                attempt = *attempt,
+                error = last_error.as_str()
+            )),
         ),
-        InstanceStatus::Failed { reason } => ("Failed", Some(reason.clone())),
+        InstanceStatus::Failed { reason } => (t!("status-failed"), Some(reason.clone())),
     }
 }
 
@@ -36,10 +42,10 @@ pub fn status(status: &InstanceStatus) -> (&'static str, Option<String>) {
 pub fn ago(then: SystemTime, now: SystemTime) -> String {
     let elapsed = now.duration_since(then).unwrap_or(Duration::ZERO).as_secs();
     match elapsed {
-        0 => "just now".to_string(),
-        1..=119 => format!("{elapsed} s ago"),
-        120..=7199 => format!("{} min ago", elapsed / 60),
-        _ => format!("{} h ago", elapsed / 3600),
+        0 => t!("format-just-now"),
+        1..=119 => t!("format-seconds-ago", seconds = elapsed),
+        120..=7199 => t!("format-minutes-ago", minutes = elapsed / 60),
+        _ => t!("format-hours-ago", hours = elapsed / 3600),
     }
 }
 
@@ -127,11 +133,7 @@ pub fn spaced_hex(bytes: &[u8]) -> String {
 
 /// `n` bytes, as "1 byte" or "20 bytes".
 pub fn byte_count(n: usize) -> String {
-    if n == 1 {
-        "1 byte".into()
-    } else {
-        format!("{n} bytes")
-    }
+    t!("format-bytes", count = n)
 }
 
 #[cfg(test)]
@@ -149,19 +151,19 @@ mod tests {
 
     #[test]
     fn statuses_carry_their_detail() {
-        assert_eq!(status(&InstanceStatus::Online), ("Online", None));
+        assert_eq!(status(&InstanceStatus::Online), ("Online".into(), None));
         assert_eq!(
             status(&InstanceStatus::Reconnecting {
                 attempt: 2,
                 last_error: "refused".into()
             }),
-            ("Reconnecting", Some("attempt 2: refused".into()))
+            ("Reconnecting".into(), Some("attempt 2: refused".into()))
         );
         assert_eq!(
             status(&InstanceStatus::Failed {
                 reason: "bad credentials".into()
             }),
-            ("Failed", Some("bad credentials".into()))
+            ("Failed".into(), Some("bad credentials".into()))
         );
     }
 

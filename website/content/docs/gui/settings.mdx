@@ -1,11 +1,17 @@
 ---
 title: Settings
-description: The app's own settings, its theme, zoom, notifications, the MCP endpoint and update checks, and where Senzor keeps them.
+description: The app's own settings, its language, theme, zoom, notifications, the MCP endpoint and update checks, and where Senzor keeps them.
 ---
 
 The settings belong to the app, not to a project: they are the same whichever project you open, and they are never written to a project file. To open them, click the gear at the right end of the top bar; hovering over it reads **Settings**. The **Settings** window opens in the middle of the window. Close it with the **×** in its title bar.
 
 ![The Settings window with MCP on, showing the address agents connect to](/screenshots/settings.png)
+
+## Language
+
+**Language** chooses the language of the window: **English**, the default, or **Čeština** (Czech). Each is named in its own language, so you can find your way back from either. The window switches as soon as you click, and Senzor starts in the same language the next time.
+
+The language covers everything the window shows: menus, forms, the `?` help texts, the Problems tab and the problems next to a box, notifications and What's new. A few texts stay English: TOML keys and values, generator and encoding names, and the error texts other components report, such as a TOML parse error or a broker's reason for refusing a connection, which appear inside a translated sentence. This documentation, `senzor-cli` and MCP are in English only.
 
 ## Theme
 

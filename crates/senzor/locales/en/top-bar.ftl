@@ -1,0 +1,31 @@
+# The bar along the top of the window.
+
+top-bar-broker = Broker: { $address }
+top-bar-settings = Settings
+top-bar-new = New
+top-bar-new-hint = New project
+top-bar-open = Open
+top-bar-open-hint = Open a project
+top-bar-save = Save
+top-bar-save-hint-dirty = Save the unsaved changes
+top-bar-save-as = Save as
+top-bar-save-as-hint = Save under another name
+top-bar-toml-hint = Edit the project file as text
+top-bar-start-all = Start all
+top-bar-start-all-hint = Start every device, regardless of autostart
+top-bar-stop-all = Stop all
+top-bar-stop-all-hint = Stop every device
+top-bar-starting = starting devices…
+top-bar-starting-hint = Waiting for the previous project's devices to go offline
+top-bar-mcp-hint = AI agents can control this window at http://{ $address }/mcp. Click for the settings.
+top-bar-mcp-on = MCP on
+top-bar-recent = Recent
+top-bar-recent-hint = Recent projects
+top-bar-no-recent = No recent projects
+top-bar-clear-list = Clear list
+top-bar-examples = Examples
+top-bar-examples-hint = Open an example project
+top-bar-undo = Undo
+top-bar-redo = Redo
+top-bar-nothing-to-undo = Nothing to undo
+top-bar-nothing-to-redo = Nothing to redo

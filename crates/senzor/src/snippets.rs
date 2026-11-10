@@ -3,6 +3,8 @@
 
 use senzor_core::project::ProjectFile;
 
+use crate::i18n::t;
+
 /// Which snippet to copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Snippet {
@@ -12,10 +14,10 @@ pub enum Snippet {
 
 impl Snippet {
     /// What the copy button and the palette call it.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Snippet::GitHubActions => "Copy as a GitHub Actions step",
-            Snippet::DockerCompose => "Copy as a docker-compose service",
+            Snippet::GitHubActions => t!("snippets-github-actions"),
+            Snippet::DockerCompose => t!("snippets-docker-compose"),
         }
     }
 }
@@ -83,6 +85,25 @@ mod tests {
             "[broker]\n{broker}\n\n[[devices]]\nid = \"d\"\ntemplate = \"co2\"\n"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn the_buttons_speak_czech_but_the_snippets_stay() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        assert_eq!(
+            Snippet::GitHubActions.label(),
+            "Kopírovat jako step GitHub Actions"
+        );
+        assert_eq!(
+            Snippet::DockerCompose.label(),
+            "Kopírovat jako službu docker-compose"
+        );
+        let step = text(
+            Snippet::GitHubActions,
+            "plant.toml",
+            &project("host = \"mqtt\""),
+        );
+        assert!(step.starts_with("- name: Run the simulated sensors beside the tests\n"));
     }
 
     #[test]

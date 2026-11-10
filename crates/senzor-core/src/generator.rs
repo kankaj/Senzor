@@ -7,6 +7,7 @@ use rand::RngExt;
 use rand::rngs::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{Text, text};
 use crate::script::{FieldInput, Runtime, Script};
 use crate::value::Value;
 
@@ -100,14 +101,14 @@ pub trait ValueSource: Send {
 }
 
 impl GeneratorSpec {
-    /// Checks parameter constraints. The message names the offending parameter.
-    pub fn validate(&self) -> Result<(), String> {
+    /// Checks parameter constraints. The text names the offending parameter.
+    pub fn validate(&self) -> Result<(), Text> {
         if self.numbers().iter().any(|n| !n.is_finite()) {
-            return Err("numbers must be finite".into());
+            return Err(text!("numbers-not-finite"));
         }
         if let Some(noise) = self.noise() {
             if noise <= 0.0 {
-                return Err("noise must be greater than 0".into());
+                return Err(text!("greater-than-zero", key = "noise"));
             }
             // A script's noise applies only when its result is a number.
             let numeric = match self {
@@ -116,7 +117,7 @@ impl GeneratorSpec {
                 _ => true,
             };
             if !numeric {
-                return Err("noise requires numeric values".into());
+                return Err(text!("noise-needs-numbers"));
             }
         }
         match self {
@@ -128,23 +129,23 @@ impl GeneratorSpec {
                 ..
             } => {
                 if min >= max {
-                    Err("min must be less than max".into())
+                    Err(text!("min-not-below-max"))
                 } else if !(*min..=*max).contains(start) {
-                    Err("start must be between min and max".into())
+                    Err(text!("start-outside-bounds"))
                 } else if *step <= 0.0 {
-                    Err("step must be greater than 0".into())
+                    Err(text!("greater-than-zero", key = "step"))
                 } else {
                     Ok(())
                 }
             }
             GeneratorSpec::Sine { period, .. } if period.is_zero() => {
-                Err("period must be greater than 0".into())
+                Err(text!("greater-than-zero", key = "period"))
             }
             GeneratorSpec::Uniform { min, max, .. } if min >= max => {
-                Err("min must be less than max".into())
+                Err(text!("min-not-below-max"))
             }
             GeneratorSpec::Sequence { values, .. } if values.is_empty() => {
-                Err("values must not be empty".into())
+                Err(text!("must-not-be-empty", key = "values"))
             }
             _ => Ok(()),
         }
@@ -233,7 +234,7 @@ impl GeneratorSpec {
                     script,
                     value: start.clone(),
                 }),
-                Err(problem) => Box::new(BrokenScript(format!("script {problem}"))),
+                Err(problem) => Box::new(BrokenScript(problem.to_string())),
             },
         };
         match self.noise() {
@@ -587,7 +588,11 @@ noise = 0.5"#,
             ),
         ];
         for (src, message) in cases {
-            assert_eq!(spec(src).validate(), Err(message.to_string()), "for {src}");
+            assert_eq!(
+                spec(src).validate().map_err(|e| e.to_string()),
+                Err(message.to_string()),
+                "for {src}"
+            );
         }
     }
 
@@ -697,9 +702,10 @@ noise = 0.5"#,
     #[test]
     fn a_script_start_must_be_finite_and_its_noise_positive() {
         let s = spec("generator = \"script\"\nstart = nan\nscript = \"value\"");
-        assert_eq!(s.validate(), Err("numbers must be finite".into()));
+        let problem = |s: GeneratorSpec| s.validate().map_err(|e| e.to_string());
+        assert_eq!(problem(s), Err("numbers must be finite".into()));
         let s = spec("generator = \"script\"\nnoise = 0\nscript = \"value\"");
-        assert_eq!(s.validate(), Err("noise must be greater than 0".into()));
+        assert_eq!(problem(s), Err("noise must be greater than 0".into()));
         let s = spec("generator = \"script\"\nstart = \"x\"\nnoise = 1\nscript = \"value\"");
         assert_eq!(
             s.validate(),

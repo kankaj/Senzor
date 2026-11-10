@@ -2,10 +2,9 @@ use eframe::egui::{self, Button};
 use senzor_core::engine::{Command, EngineState, Target};
 use senzor_core::project::builtin::builtin_templates;
 
-use super::{
-    Action, FIX_PROBLEMS_FIRST, LeftTab, UiState, WARNING, kill_button, status_dot, stop_button,
-};
+use super::{Action, LeftTab, UiState, WARNING, kill_button, status_dot, stop_button};
 use crate::document::Document;
+use crate::i18n::t;
 use crate::selection::{InstanceClick, Selection};
 use crate::tree::{
     DeviceNode, InstanceNode, OrphanCause, StatusFilter, TreeFilter, device_tree, filter_tree,
@@ -24,8 +23,16 @@ pub fn show(
     actions: &mut Vec<Action>,
 ) {
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut ui_state.left_tab, LeftTab::Devices, "Devices");
-        ui.selectable_value(&mut ui_state.left_tab, LeftTab::Templates, "Templates");
+        ui.selectable_value(
+            &mut ui_state.left_tab,
+            LeftTab::Devices,
+            t!("left-panel-devices"),
+        );
+        ui.selectable_value(
+            &mut ui_state.left_tab,
+            LeftTab::Templates,
+            t!("left-panel-templates"),
+        );
     });
     ui.separator();
     if ui_state.left_tab == LeftTab::Devices {
@@ -44,9 +51,8 @@ pub fn show(
 fn filter_row(ui: &mut egui::Ui, filter: &mut TreeFilter) {
     ui.horizontal(|ui| {
         let icon = ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
-        icon.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Find devices")
-        });
+        let find = t!("left-panel-find");
+        icon.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &find));
         let status = egui::ComboBox::from_id_salt("tree-status")
             .selected_text(filter.status.label())
             .width(80.0);
@@ -54,7 +60,7 @@ fn filter_row(ui: &mut egui::Ui, filter: &mut TreeFilter) {
         let box_width = (ui.available_width() - 100.0).max(60.0);
         ui.add(
             egui::TextEdit::singleline(&mut filter.text)
-                .hint_text("device or instance")
+                .hint_text(t!("left-panel-find-hint"))
                 .desired_width(box_width),
         )
         .labelled_by(icon.id);
@@ -65,9 +71,9 @@ fn filter_row(ui: &mut egui::Ui, filter: &mut TreeFilter) {
                 }
             })
             .response;
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Status"));
-        response.on_hover_text("Show only instances in this state");
+        let name = t!("left-panel-status");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, &name));
+        response.on_hover_text(t!("left-panel-status-hint"));
     });
 }
 
@@ -79,7 +85,7 @@ fn devices(
     filter: &TreeFilter,
     actions: &mut Vec<Action>,
 ) {
-    if ui.button("Add device").clicked() {
+    if ui.button(t!("left-panel-add-device")).clicked() {
         actions.push(Action::AddDevice);
     }
     let tree = device_tree(doc.file(), doc.validated(), state);
@@ -101,7 +107,7 @@ fn devices(
         tree.into_iter().zip(online).collect()
     };
     if filtering && shown.is_empty() {
-        ui.weak("No device or instance matches.");
+        ui.weak(t!("left-panel-no-match"));
     }
     for (node, badge) in shown {
         // A filtered tree opens what it found, without changing what stays open afterwards.
@@ -113,10 +119,13 @@ fn devices(
             default_open,
         )
         .show_header(ui, |ui| {
+            let (id, count) = (node.id.as_str(), node.count);
             let label = match node.index {
-                Some(_) if node.blocked => format!("{} ×{} (has errors)", node.id, node.count),
-                Some(_) => format!("{} ×{}", node.id, node.count),
-                None => format!("{} (removed)", node.id),
+                Some(_) if node.blocked => {
+                    t!("left-panel-device-has-errors", id = id, count = count)
+                }
+                Some(_) => format!("{id} ×{count}"),
+                None => t!("left-panel-device-removed", id = id),
             };
             let selected = node
                 .index
@@ -147,7 +156,8 @@ fn online_badge(node: &DeviceNode) -> Option<String> {
         .instances
         .iter()
         .any(|i| i.status != senzor_core::engine::InstanceStatus::Stopped);
-    active.then(|| format!("{}/{} online", node.online(), node.instances.len()))
+    let (online, total) = (node.online(), node.instances.len());
+    active.then(|| t!("left-panel-online", online = online, total = total))
 }
 
 /// One instance under its device; `orphan_cause` is what its badge says if it is an orphan.
@@ -182,12 +192,12 @@ fn instance_row(
         }
         response.context_menu(|ui| instance_menu(ui, instance, actions));
         if instance.needs_restart {
-            ui.small(egui::RichText::new("restart to apply").color(WARNING));
+            ui.small(egui::RichText::new(t!("left-panel-restart-to-apply")).color(WARNING));
         }
         if instance.orphaned {
             let badge = match orphan_cause {
-                OrphanCause::DeviceHasErrors => "device has errors",
-                OrphanCause::DeviceRemoved => "removed",
+                OrphanCause::DeviceHasErrors => t!("left-panel-orphan-device-has-errors"),
+                OrphanCause::DeviceRemoved => t!("left-panel-orphan-removed"),
             };
             ui.small(egui::RichText::new(badge).color(WARNING));
         }
@@ -197,8 +207,8 @@ fn instance_row(
 fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) {
     if node.index.is_some()
         && ui
-            .add_enabled(!node.blocked, Button::new("Start"))
-            .on_disabled_hover_text(FIX_PROBLEMS_FIRST)
+            .add_enabled(!node.blocked, Button::new(t!("left-panel-start")))
+            .on_disabled_hover_text(super::fix_problems_first())
             .clicked()
     {
         actions.push(Action::Engine(Command::Start(Target::Device(
@@ -220,8 +230,8 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
             .filter(|i| is_restartable(&i.status, i.orphaned))
             .collect();
         if ui
-            .add_enabled(!running.is_empty(), Button::new("Restart"))
-            .on_disabled_hover_text("No running instances to restart")
+            .add_enabled(!running.is_empty(), Button::new(t!("left-panel-restart")))
+            .on_disabled_hover_text(t!("left-panel-no-running"))
             .clicked()
         {
             for instance in running {
@@ -241,7 +251,7 @@ fn device_menu(ui: &mut egui::Ui, node: &DeviceNode, actions: &mut Vec<Action>) 
     // An orphan's device is gone; there is nothing to copy.
     if node.index.is_some() {
         ui.separator();
-        if ui.button("Duplicate").clicked() {
+        if ui.button(t!("left-panel-duplicate")).clicked() {
             actions.push(Action::DuplicateDevice(node.id.clone()));
             ui.close();
         }
@@ -252,8 +262,8 @@ fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<A
     let target = || Target::Instance(instance.id.clone());
     // An orphan has no settings to start with; it is already running anyway.
     if ui
-        .add_enabled(!instance.orphaned, Button::new("Start"))
-        .on_disabled_hover_text("This instance is no longer in the project")
+        .add_enabled(!instance.orphaned, Button::new(t!("left-panel-start")))
+        .on_disabled_hover_text(t!("left-panel-orphan-start-hint"))
         .clicked()
     {
         actions.push(Action::Engine(Command::Start(target())));
@@ -265,7 +275,7 @@ fn instance_menu(ui: &mut egui::Ui, instance: &InstanceNode, actions: &mut Vec<A
     }
     // Not for an orphan: the engine only stops it on Restart, as it has no settings to start
     // with. Unlike the device menu, this also offers Restart on a stopped instance, which starts it.
-    if !instance.orphaned && ui.button("Restart").clicked() {
+    if !instance.orphaned && ui.button(t!("left-panel-restart")).clicked() {
         actions.push(Action::Engine(Command::Restart(target())));
         ui.close();
     }
@@ -281,11 +291,11 @@ fn templates(
     selection: Option<&Selection>,
     actions: &mut Vec<Action>,
 ) {
-    if ui.button("Add template").clicked() {
+    if ui.button(t!("left-panel-add-template")).clicked() {
         actions.push(Action::AddTemplate);
     }
     ui.add_space(4.0);
-    ui.weak("Built-in");
+    ui.weak(t!("left-panel-builtin"));
     for template in builtin_templates() {
         let selected = selection == Some(&Selection::Builtin(template.id.clone()));
         if ui.selectable_label(selected, &template.id).clicked() {
@@ -295,7 +305,7 @@ fn templates(
         }
     }
     ui.add_space(4.0);
-    ui.weak("Project");
+    ui.weak(t!("left-panel-project"));
     for (index, template) in doc.file().templates.iter().enumerate() {
         let selected = selection == Some(&Selection::Template(index));
         let response = ui.selectable_label(selected, &template.id);
@@ -303,7 +313,7 @@ fn templates(
             actions.push(Action::Select(Some(Selection::Template(index))));
         }
         response.context_menu(|ui| {
-            if ui.button("Duplicate").clicked() {
+            if ui.button(t!("left-panel-duplicate")).clicked() {
                 actions.push(Action::DuplicateTemplate(template.id.clone()));
                 ui.close();
             }
@@ -586,6 +596,48 @@ count = 3
             h.query_by_label("0/60 online").is_none(),
             "a stopped device shows no count"
         );
+    }
+
+    #[test]
+    fn the_device_tree_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = harness_with(BLOCKED, EngineState::default());
+        for name in [
+            "Zařízení",
+            "Šablony",
+            "Přidat zařízení",
+            "Hledat zařízení",
+            "Stav",
+            "bad ×1 (obsahuje chyby)",
+        ] {
+            assert!(h.query_by_label(name).is_some(), "{name}");
+        }
+        h.get_by_label("bad ×1 (obsahuje chyby)").click_secondary();
+        h.run();
+        assert!(h.get_by_label("Spustit").accesskit_node().is_disabled());
+        assert!(h.query_by_label("Duplikovat").is_some());
+    }
+
+    #[test]
+    fn the_status_filter_lists_czech_states() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = harness();
+        h.get_by_label("Stav").click();
+        h.run();
+        h.get_by_label("Zastavené").click();
+        h.run();
+        assert!(h.query_by_label("small-0").is_some());
+        assert_eq!(h.state().ui.tree_filter.status, StatusFilter::Stopped);
+    }
+
+    #[test]
+    fn the_templates_tab_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut h = harness();
+        h.get_by_label("Šablony").click();
+        h.run();
+        assert!(h.query_by_label("Přidat šablonu").is_some());
+        assert!(h.query_by_label("Vestavěné").is_some());
     }
 
     #[test]

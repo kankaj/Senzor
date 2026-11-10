@@ -5,6 +5,7 @@ use serde::de::{self, DeserializeSeed, IntoDeserializer, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::generator::GeneratorSpec;
+use crate::i18n::{Text, text};
 
 /// One template field as written in the project file: its generator and, optionally, the unit
 /// and readable name people see (`unit = "ppm"`, `name = "CO2"`), in one flat table.
@@ -30,12 +31,12 @@ impl FieldSpec {
         }
     }
 
-    /// Every problem with the field; each message names the offending key.
-    pub fn problems(&self) -> Vec<String> {
-        let mut problems: Vec<String> = self.generator.validate().err().into_iter().collect();
+    /// Every problem with the field; each text names the offending key.
+    pub fn problems(&self) -> Vec<Text> {
+        let mut problems: Vec<Text> = self.generator.validate().err().into_iter().collect();
         for (key, label) in [("unit", &self.unit), ("name", &self.name)] {
             if label.as_deref() == Some("") {
-                problems.push(format!("{key} must not be empty"));
+                problems.push(text!("must-not-be-empty", key = key));
             }
         }
         problems
@@ -44,11 +45,9 @@ impl FieldSpec {
     /// What is wrong with the field's script, if it has one: `script is empty` or
     /// `script does not compile: <reason>`. Checking it compiles the script once for every copy
     /// of the field.
-    pub fn script_problem(&self) -> Option<String> {
+    pub fn script_problem(&self) -> Option<Text> {
         match &self.generator {
-            GeneratorSpec::Script { script, .. } => {
-                script.compiled().err().map(|e| format!("script {e}"))
-            }
+            GeneratorSpec::Script { script, .. } => script.compiled().err(),
             _ => None,
         }
     }

@@ -8,6 +8,7 @@ use senzor_core::value::Value;
 use super::{Action, ERROR, UiState, WARNING, kill_button, status_dot, stop_button};
 use crate::document::Document;
 use crate::format;
+use crate::i18n::t;
 use crate::tree::{OrphanCause, is_restartable, orphan_cause};
 
 pub fn show(
@@ -18,9 +19,9 @@ pub fn show(
     ui_state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
-    ui.heading(format!("Instance {id}"));
+    ui.heading(t!("instance-heading", id = id));
     let Some(instance) = state.instances.get(id) else {
-        ui.label("This instance is no longer part of the project.");
+        ui.label(t!("instance-gone"));
         return;
     };
     show_status(ui, id, doc, instance);
@@ -39,9 +40,9 @@ fn show_status(ui: &mut egui::Ui, id: &str, doc: &Document, instance: &InstanceS
             ui.colored_label(ERROR, detail);
         }
     });
-    ui.label(format!("Device: {}", instance.device));
+    ui.label(t!("instance-device", device = instance.device.as_str()));
     ui.horizontal(|ui| {
-        ui.label(format!("Published: {}", instance.published));
+        ui.label(t!("instance-published", count = instance.published));
         ui.separator();
         // Only an instance that subscribes receives anything.
         let subscribes = doc
@@ -50,32 +51,25 @@ fn show_status(ui: &mut egui::Ui, id: &str, doc: &Document, instance: &InstanceS
             .instance(id)
             .is_some_and(|config| !config.subscriptions.is_empty());
         if subscribes {
-            ui.label(format!("Received: {}", instance.received))
-                .on_hover_text("Messages that arrived on the template's subscriptions");
+            ui.label(t!("instance-received", count = instance.received))
+                .on_hover_text(t!("instance-received-hint"));
             ui.separator();
         }
-        ui.label(format!("Errors: {}", instance.errors));
+        ui.label(t!("instance-errors", count = instance.errors));
         ui.separator();
         let last = instance.last_publish.map_or_else(
-            || "never".to_string(),
+            || t!("instance-never"),
             |t| format::ago(t, SystemTime::now()),
         );
-        ui.label(format!("Last publish: {last}"));
+        ui.label(t!("instance-last-publish", when = last));
     });
     if instance.needs_restart {
-        ui.colored_label(
-            WARNING,
-            "The project changed; restart this instance to apply it.",
-        );
+        ui.colored_label(WARNING, t!("instance-needs-restart"));
     }
     if instance.orphaned {
         let text = match orphan_cause(doc.validated(), &instance.device) {
-            OrphanCause::DeviceHasErrors => {
-                "Its device has problems (see the Problems tab); it keeps running with its last valid settings."
-            }
-            OrphanCause::DeviceRemoved => {
-                "This instance is no longer in the project; it disappears when stopped."
-            }
+            OrphanCause::DeviceHasErrors => t!("instance-orphan-device-has-errors"),
+            OrphanCause::DeviceRemoved => t!("instance-orphan-device-removed"),
         };
         ui.colored_label(WARNING, text);
     }
@@ -86,7 +80,7 @@ fn show_controls(ui: &mut egui::Ui, id: &str, instance: &InstanceState, actions:
     let target = || Target::Instance(id.to_string());
     ui.horizontal(|ui| {
         if !instance.status.is_running() {
-            if ui.button("Start").clicked() {
+            if ui.button(t!("instance-start")).clicked() {
                 actions.push(Action::Engine(Command::Start(target())));
             }
             return;
@@ -96,8 +90,8 @@ fn show_controls(ui: &mut egui::Ui, id: &str, instance: &InstanceState, actions:
         }
         if is_restartable(&instance.status, instance.orphaned)
             && ui
-                .button("Restart")
-                .on_hover_text("Stop, then start again with the project's current settings")
+                .button(t!("instance-restart"))
+                .on_hover_text(t!("instance-restart-hint"))
                 .clicked()
         {
             actions.push(Action::Engine(Command::Restart(target())));
@@ -137,9 +131,9 @@ fn show_fields(
         .num_columns(4)
         .striped(true)
         .show(ui, |ui| {
-            ui.strong("Field");
-            ui.strong("Value");
-            ui.strong("Pin to");
+            ui.strong(t!("instance-field"));
+            ui.strong(t!("instance-value"));
+            ui.strong(t!("instance-pin-to"));
             ui.label("");
             ui.end_row();
             let config = doc.validated().project.instance(id);
@@ -165,7 +159,8 @@ fn show_field(
     let display = spec.map_or(field, |s| s.display_name(field));
     let name = ui.label(display);
     if display != field {
-        name.clone().on_hover_text(format!("Field {field}"));
+        name.clone()
+            .on_hover_text(t!("instance-field-hint", field = field));
     }
     let pinned = instance.pinned.contains(field);
     let unit = spec.and_then(|s| s.unit.as_deref());
@@ -177,7 +172,7 @@ fn show_field(
         },
     );
     ui.label(if pinned {
-        format!("{value} (pinned)")
+        t!("instance-pinned", value = value)
     } else {
         value
     });
@@ -188,7 +183,10 @@ fn show_field(
     ui.add_sized([140.0, 20.0], TextEdit::singleline(input))
         .labelled_by(name.id);
     if pinned {
-        if ui.add_enabled(running, Button::new("Unpin")).clicked() {
+        if ui
+            .add_enabled(running, Button::new(t!("instance-unpin")))
+            .clicked()
+        {
             actions.push(Action::Engine(Command::Unpin {
                 instance: id.to_string(),
                 field: field.to_string(),
@@ -196,7 +194,10 @@ fn show_field(
         }
     } else if ui
         // Pinning "" is a slip: templates that format the field fail on it every tick.
-        .add_enabled(running && !input.trim().is_empty(), Button::new("Pin"))
+        .add_enabled(
+            running && !input.trim().is_empty(),
+            Button::new(t!("instance-pin")),
+        )
         .clicked()
     {
         actions.push(Action::Engine(Command::Pin {
@@ -269,6 +270,25 @@ template = "air"
         let h = harness(SRC, "old-0", orphan("old"));
         assert!(h.query_by_label(REMOVED).is_some());
         assert!(h.query_by_label(DEVICE_HAS_ERRORS).is_none());
+    }
+
+    #[test]
+    fn the_view_speaks_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let mut on = running("office");
+        on.published = 12;
+        let h = harness(SRC, "office", on);
+        for text in [
+            "Instance office",
+            "Zařízení: office",
+            "Odesláno: 12",
+            "Poslední odeslání: nikdy",
+            "Restartovat",
+            "Připnout na",
+        ] {
+            assert!(h.query_by_label(text).is_some(), "{text}");
+        }
+        assert!(h.get_by_label("Připnout").accesskit_node().is_disabled());
     }
 
     #[test]

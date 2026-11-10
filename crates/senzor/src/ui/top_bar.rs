@@ -6,6 +6,7 @@ use egui_phosphor::regular as icons;
 
 use super::{Action, shortcuts};
 use crate::document::Document;
+use crate::i18n::t;
 
 /// From the left: the project, the broker, the file buttons and the run buttons with the
 /// starting hint; on the right, the MCP sign and the settings.
@@ -28,16 +29,12 @@ pub fn show(
         ui,
         |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.strong(doc.title());
+                ui.strong(super::project_title(doc));
                 ui.separator();
                 let broker = &doc.file().broker;
-                if icon_button(
-                    ui,
-                    icons::PLUGS_CONNECTED,
-                    &format!("Broker: {}:{}", broker.host, broker.port),
-                )
-                .clicked()
-                {
+                let address = format!("{}:{}", broker.host, broker.port);
+                let name = t!("top-bar-broker", address = address);
+                if icon_button(ui, icons::PLUGS_CONNECTED, &name).clicked() {
                     actions.push(Action::OpenBroker);
                 }
                 ui.separator();
@@ -47,13 +44,12 @@ pub fn show(
             });
         },
         |ui| {
+            let name = t!("top-bar-settings");
             let cog = ui
                 .button(egui::RichText::new(icons::GEAR_SIX).size(16.0))
-                .on_hover_text(shortcuts::tip(ui.ctx(), "Settings", &shortcuts::SETTINGS));
+                .on_hover_text(shortcuts::tip(ui.ctx(), &name, &shortcuts::SETTINGS));
             // Screen readers and tests find it by name, not by the glyph.
-            cog.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Settings")
-            });
+            cog.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
             if cog.clicked() {
                 right.push(Action::OpenSettings);
             }
@@ -69,14 +65,22 @@ pub fn show(
 
 /// New, Open, the recent and example projects, Save, Save as, TOML, Undo and Redo.
 fn file_buttons(ui: &mut egui::Ui, doc: &Document, recent: &[PathBuf], actions: &mut Vec<Action>) {
-    if icon_button(ui, icons::FILE_PLUS, "New")
-        .on_hover_text(shortcuts::tip(ui.ctx(), "New project", &shortcuts::NEW))
+    if icon_button(ui, icons::FILE_PLUS, &t!("top-bar-new"))
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            &t!("top-bar-new-hint"),
+            &shortcuts::NEW,
+        ))
         .clicked()
     {
         actions.push(Action::New);
     }
-    if icon_button(ui, icons::FOLDER_OPEN, "Open")
-        .on_hover_text(shortcuts::tip(ui.ctx(), "Open a project", &shortcuts::OPEN))
+    if icon_button(ui, icons::FOLDER_OPEN, &t!("top-bar-open"))
+        .on_hover_text(shortcuts::tip(
+            ui.ctx(),
+            &t!("top-bar-open-hint"),
+            &shortcuts::OPEN,
+        ))
         .clicked()
     {
         actions.push(Action::Open);
@@ -86,10 +90,10 @@ fn file_buttons(ui: &mut egui::Ui, doc: &Document, recent: &[PathBuf], actions: 
     if save_button(ui, doc.is_dirty()).clicked() {
         actions.push(Action::Save);
     }
-    if icon_button(ui, icons::FLOPPY_DISK_BACK, "Save as")
+    if icon_button(ui, icons::FLOPPY_DISK_BACK, &t!("top-bar-save-as"))
         .on_hover_text(shortcuts::tip(
             ui.ctx(),
-            "Save under another name",
+            &t!("top-bar-save-as-hint"),
             &shortcuts::SAVE_AS,
         ))
         .clicked()
@@ -97,7 +101,7 @@ fn file_buttons(ui: &mut egui::Ui, doc: &Document, recent: &[PathBuf], actions: 
         actions.push(Action::SaveAs);
     }
     if icon_button(ui, icons::FILE_CODE, "TOML")
-        .on_hover_text("Edit the project file as text")
+        .on_hover_text(t!("top-bar-toml-hint"))
         .clicked()
     {
         actions.push(Action::Select(Some(crate::selection::Selection::Source)));
@@ -107,20 +111,20 @@ fn file_buttons(ui: &mut egui::Ui, doc: &Document, recent: &[PathBuf], actions: 
 
 /// Start all and Stop all, and the hint while devices wait to start.
 fn run_buttons(ui: &mut egui::Ui, starting: bool, actions: &mut Vec<Action>) {
-    if icon_button(ui, icons::PLAY, "Start all")
+    if icon_button(ui, icons::PLAY, &t!("top-bar-start-all"))
         .on_hover_text(shortcuts::tip(
             ui.ctx(),
-            "Start every device, regardless of autostart",
+            &t!("top-bar-start-all-hint"),
             &shortcuts::START_ALL,
         ))
         .clicked()
     {
         actions.push(Action::StartAll);
     }
-    if icon_button(ui, icons::STOP, "Stop all")
+    if icon_button(ui, icons::STOP, &t!("top-bar-stop-all"))
         .on_hover_text(shortcuts::tip(
             ui.ctx(),
-            "Stop every device",
+            &t!("top-bar-stop-all-hint"),
             &shortcuts::STOP_ALL,
         ))
         .clicked()
@@ -128,25 +132,26 @@ fn run_buttons(ui: &mut egui::Ui, starting: bool, actions: &mut Vec<Action>) {
         actions.push(Action::StopAll);
     }
     if starting {
-        ui.weak("starting devices…")
-            .on_hover_text("Waiting for the previous project's devices to go offline");
+        ui.weak(t!("top-bar-starting"))
+            .on_hover_text(t!("top-bar-starting-hint"));
     }
 }
 
 /// Save, filled with the accent colour while the project has unsaved changes.
 fn save_button(ui: &mut egui::Ui, dirty: bool) -> egui::Response {
-    let mut button = egui::Button::new(format!("{} Save", icons::FLOPPY_DISK));
+    let name = t!("top-bar-save");
+    let mut button = egui::Button::new(format!("{} {name}", icons::FLOPPY_DISK));
     if dirty {
         button = button.fill(ui.visuals().selection.bg_fill);
     }
     let response = ui.add(button);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Save"));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     let text = if dirty {
-        "Save the unsaved changes"
+        t!("top-bar-save-hint-dirty")
     } else {
-        "Save"
+        name
     };
-    response.on_hover_text(shortcuts::tip(ui.ctx(), text, &shortcuts::SAVE))
+    response.on_hover_text(shortcuts::tip(ui.ctx(), &text, &shortcuts::SAVE))
 }
 
 /// A robot in the accent colour while AI agents can control the window; it opens the settings,
@@ -155,10 +160,12 @@ fn mcp_sign(ui: &mut egui::Ui, address: SocketAddr) -> egui::Response {
     let robot = egui::RichText::new(icons::ROBOT)
         .size(16.0)
         .color(ui.visuals().selection.stroke.color);
-    let response = ui.button(robot).on_hover_text(format!(
-        "AI agents can control this window at http://{address}/mcp. Click for the settings."
-    ));
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "MCP on"));
+    let address = address.to_string();
+    let response = ui
+        .button(robot)
+        .on_hover_text(t!("top-bar-mcp-hint", address = address));
+    let name = t!("top-bar-mcp-on");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     response
 }
 
@@ -173,7 +180,7 @@ fn icon_button(ui: &mut egui::Ui, icon: &str, label: &str) -> egui::Response {
 fn recent_menu(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>) {
     let menu = ui.menu_button(icons::CLOCK_COUNTER_CLOCKWISE, |ui| {
         if recent.is_empty() {
-            ui.weak("No recent projects");
+            ui.weak(t!("top-bar-no-recent"));
             return;
         }
         for path in recent {
@@ -182,12 +189,13 @@ fn recent_menu(ui: &mut egui::Ui, recent: &[PathBuf], actions: &mut Vec<Action>)
             }
         }
         ui.separator();
-        if ui.button("Clear list").clicked() {
+        if ui.button(t!("top-bar-clear-list")).clicked() {
             actions.push(Action::ClearRecent);
         }
     });
-    let response = menu.response.on_hover_text("Recent projects");
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Recent"));
+    let response = menu.response.on_hover_text(t!("top-bar-recent-hint"));
+    let name = t!("top-bar-recent");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
 }
 
 /// The Examples menu, books next to Recent, listing the example projects.
@@ -195,22 +203,24 @@ fn examples_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     let menu = ui.menu_button(icons::BOOKS, |ui| {
         for (index, example) in crate::examples::EXAMPLES.iter().enumerate() {
             if ui
-                .button(example.name)
-                .on_hover_text(example.summary)
+                .button(example.title())
+                .on_hover_text(example.description())
                 .clicked()
             {
                 actions.push(Action::OpenExample(index));
             }
         }
     });
-    let response = menu.response.on_hover_text("Open an example project");
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Examples"));
+    let response = menu.response.on_hover_text(t!("top-bar-examples-hint"));
+    let name = t!("top-bar-examples");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
 }
 
-/// An Undo or Redo button: icon, name, enabled, shortcut and action.
+/// An Undo or Redo button: icon, name, the hint while it is off, enabled, shortcut and action.
 type HistoryButton = (
     &'static str,
-    &'static str,
+    String,
+    String,
     bool,
     &'static egui::KeyboardShortcut,
     fn() -> Action,
@@ -221,27 +231,61 @@ fn undo_redo(ui: &mut egui::Ui, doc: &Document, actions: &mut Vec<Action>) {
     let buttons: [HistoryButton; 2] = [
         (
             icons::ARROW_COUNTER_CLOCKWISE,
-            "Undo",
+            t!("top-bar-undo"),
+            t!("top-bar-nothing-to-undo"),
             doc.can_undo(),
             &shortcuts::UNDO,
             || Action::Undo,
         ),
         (
             icons::ARROW_CLOCKWISE,
-            "Redo",
+            t!("top-bar-redo"),
+            t!("top-bar-nothing-to-redo"),
             doc.can_redo(),
             &shortcuts::REDO,
             || Action::Redo,
         ),
     ];
-    for (icon, name, enabled, shortcut, action) in buttons {
+    for (icon, name, nothing, enabled, shortcut, action) in buttons {
         let response = ui
             .add_enabled(enabled, egui::Button::new(icon))
-            .on_hover_text(shortcuts::tip(ui.ctx(), name, shortcut))
-            .on_disabled_hover_text(format!("Nothing to {}", name.to_lowercase()));
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+            .on_hover_text(shortcuts::tip(ui.ctx(), &name, shortcut))
+            .on_disabled_hover_text(nothing);
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &name));
         if response.clicked() {
             actions.push(action());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::i18n::{Language, set_language};
+    use crate::ui::test_support::Fixture;
+
+    #[test]
+    fn the_top_bar_speaks_czech() {
+        set_language(Language::Czech);
+        let mut h = Fixture::new("").harness(|ui, fx| {
+            show(ui, &fx.doc, &[], false, None, &mut fx.actions);
+        });
+        for name in [
+            "Nový",
+            "Otevřít",
+            "Uložit",
+            "Uložit jako",
+            "Spustit vše",
+            "Nastavení",
+            "Zpět",
+        ] {
+            assert!(h.query_by_label(name).is_some(), "{name}");
+        }
+        h.get_by_label("Zastavit vše").click();
+        h.run();
+        assert!(h.state().other.iter().any(|a| matches!(a, Action::StopAll)));
     }
 }

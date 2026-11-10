@@ -10,7 +10,7 @@ pub mod model;
 mod resolve;
 
 pub(crate) use broker::mqtt_seconds;
-pub use broker::{EnvLookup, NEEDS_MQTT5};
+pub use broker::{EnvLookup, NEEDS_MQTT5, needs_mqtt5_note};
 pub use document::{Document, OpenError};
 pub use error::{Location, ProjectError};
 pub use field::FieldSpec;

@@ -1,0 +1,36 @@
+# The bottom panel: the message log and the Problems tab.
+
+bottom-message-log = Message log
+bottom-problems = Problems
+bottom-problems-count = Problems ({ $count })
+bottom-time = Time
+bottom-instance = Instance
+bottom-topic = Topic
+bottom-column-payload = Payload
+bottom-filter = Filter
+bottom-filter-placeholder = topic contains…
+bottom-filter-hint = Show only messages whose topic contains this
+bottom-show-every-instance = Show every instance
+bottom-pause = Pause
+bottom-resume = Resume
+bottom-clear = Clear
+bottom-clear-hint = Empty the log; new messages still show
+bottom-clear-name = Clear the log
+bottom-export = Export…
+bottom-export-hint = Save the messages shown here as a CSV file
+bottom-show-only = Show only { $instance }'s messages
+bottom-retained = Retained
+bottom-message = Message
+bottom-close = Close
+bottom-yes = yes
+bottom-no = no
+bottom-content-type = Content type
+bottom-message-expiry = Message expiry
+bottom-user-property = User property
+bottom-payload = Payload
+bottom-copy-payload = Copy payload
+bottom-copy-payload-hint = Copy the payload as it was sent
+bottom-copy-hex = Copy as hex
+bottom-copy-hex-hint = Copy the bytes sent, as hex digits
+bottom-rendered-text = Rendered text
+bottom-no-problems = No problems.

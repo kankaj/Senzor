@@ -1,0 +1,31 @@
+# Lišta v horní části okna.
+
+top-bar-broker = Broker: { $address }
+top-bar-settings = Nastavení
+top-bar-new = Nový
+top-bar-new-hint = Nový projekt
+top-bar-open = Otevřít
+top-bar-open-hint = Otevřít projekt
+top-bar-save = Uložit
+top-bar-save-hint-dirty = Uložit neuložené změny
+top-bar-save-as = Uložit jako
+top-bar-save-as-hint = Uložit pod jiným názvem
+top-bar-toml-hint = Upravit soubor projektu jako text
+top-bar-start-all = Spustit vše
+top-bar-start-all-hint = Spustit všechna zařízení, i ta bez autostartu
+top-bar-stop-all = Zastavit vše
+top-bar-stop-all-hint = Zastavit všechna zařízení
+top-bar-starting = zařízení se spouštějí…
+top-bar-starting-hint = Čeká se, až budou zařízení předchozího projektu offline
+top-bar-mcp-hint = AI agenti mohou ovládat toto okno na http://{ $address }/mcp. Kliknutím otevřete nastavení.
+top-bar-mcp-on = MCP zapnuto
+top-bar-recent = Nedávné
+top-bar-recent-hint = Nedávné projekty
+top-bar-no-recent = Žádné nedávné projekty
+top-bar-clear-list = Vymazat seznam
+top-bar-examples = Příklady
+top-bar-examples-hint = Otevřít ukázkový projekt
+top-bar-undo = Zpět
+top-bar-redo = Znovu
+top-bar-nothing-to-undo = Není co vrátit
+top-bar-nothing-to-redo = Není co zopakovat

@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::SenzorApp;
+use crate::i18n::t;
 use crate::selection::Selection;
 use crate::ui::Modal;
 
@@ -107,10 +108,16 @@ impl SenzorApp {
         let (address, listener) = match bound {
             Ok(bound) => bound,
             Err(e) => {
-                let reason = format!("cannot listen on {ip}:{port}: {e}");
+                let reason = t!(
+                    "app-mcp-cannot-listen",
+                    address = format!("{ip}:{port}"),
+                    error = e.to_string()
+                );
                 if self.ui.modal.is_none() {
-                    self.ui.modal =
-                        Some(Modal::Error(format!("AI agents cannot connect: {reason}")));
+                    self.ui.modal = Some(Modal::Error(t!(
+                        "app-mcp-cannot-connect",
+                        reason = reason.as_str()
+                    )));
                 }
                 self.mcp_error = Some(reason);
                 return;
@@ -888,6 +895,35 @@ mod tests {
             3,
             "the project opened"
         );
+    }
+
+    #[test]
+    fn why_mcp_did_not_start_is_said_in_czech() {
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = taken.local_addr().unwrap().port();
+        let mut h = window_builder().build_eframe(move |cc| {
+            let settings = crate::settings::AppSettings {
+                language: crate::i18n::Language::Czech,
+                ..Default::default()
+            };
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+                .with_mcp(port)
+        });
+        h.run_steps(2);
+        let McpStatus::Off {
+            error: Some(error), ..
+        } = h.state().mcp_status()
+        else {
+            panic!("not off with an error: {:?}", h.state().mcp_status());
+        };
+        assert!(
+            error.starts_with(&format!("nelze naslouchat na 127.0.0.1:{port}: ")),
+            "{error}"
+        );
+        let Some(Modal::Error(message)) = &h.state().ui.modal else {
+            panic!("no error dialog");
+        };
+        assert_eq!(message, &format!("AI agenti se nemohou připojit: {error}"));
     }
 
     #[test]

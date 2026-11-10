@@ -2,13 +2,30 @@
 
 use senzor_core::project::{Document, ProjectFile};
 
-/// An example project: its name in the window, what it shows, its file's text, and the files
-/// it reads, by their path relative to it.
+use crate::i18n::t;
+
+/// An example project: its name, what it shows, its file's text, and the files it reads, by
+/// their path relative to it. The name is English in every language (it also names the
+/// example's folder); the window shows [`Example::title`] and
+/// [`Example::description`].
 pub struct Example {
     pub name: &'static str,
-    pub summary: &'static str,
+    title: fn() -> String,
+    description: fn() -> String,
     text: &'static str,
     files: &'static [(&'static str, &'static str)],
+}
+
+impl Example {
+    /// The example's name in the window's language.
+    pub fn title(&self) -> String {
+        (self.title)()
+    }
+
+    /// What the example shows, in the window's language.
+    pub fn description(&self) -> String {
+        (self.description)()
+    }
 }
 
 impl Example {
@@ -44,37 +61,43 @@ impl Example {
 pub const EXAMPLES: [Example; 8] = [
     Example {
         name: "Quick start",
-        summary: "Two CO2 sensors and a thermometer on the built-in templates",
+        title: || t!("examples-quick-start"),
+        description: || t!("examples-quick-start-summary"),
         text: include_str!("../../../examples/quick-start.toml"),
         files: &[],
     },
     Example {
         name: "IKEA Zigbee2MQTT",
-        summary: "IKEA Zigbee air sensors as Zigbee2MQTT publishes them",
+        title: || t!("examples-ikea"),
+        description: || t!("examples-ikea-summary"),
         text: include_str!("../../../examples/ikea-zigbee2mqtt.toml"),
         files: &[],
     },
     Example {
         name: "Home Assistant Statestream",
-        summary: "A sensor as Home Assistant's MQTT Statestream republishes it",
+        title: || t!("examples-statestream"),
+        description: || t!("examples-statestream-summary"),
         text: include_str!("../../../examples/home-assistant-statestream.toml"),
         files: &[],
     },
     Example {
         name: "Home Assistant Discovery",
-        summary: "An air sensor and a door contact that appear in Home Assistant by themselves",
+        title: || t!("examples-discovery"),
+        description: || t!("examples-discovery-summary"),
         text: include_str!("../../../examples/home-assistant-discovery.toml"),
         files: &[],
     },
     Example {
         name: "Thermostat",
-        summary: "A thermostat with scripts that takes setpoint and mode commands over MQTT",
+        title: || t!("examples-thermostat"),
+        description: || t!("examples-thermostat-summary"),
         text: include_str!("../../../examples/thermostat.toml"),
         files: &[],
     },
     Example {
         name: "Binary payloads",
-        summary: "One reading as a hex frame, as CBOR and as protobuf",
+        title: || t!("examples-binary"),
+        description: || t!("examples-binary-summary"),
         text: include_str!("../../../examples/binary-payloads.toml"),
         files: &[(
             "proto/sensor.proto",
@@ -83,13 +106,15 @@ pub const EXAMPLES: [Example; 8] = [
     },
     Example {
         name: "Fleet",
-        summary: "Two floors with 100 sensors each, reproducible with a seed",
+        title: || t!("examples-fleet"),
+        description: || t!("examples-fleet-summary"),
         text: include_str!("../../../examples/fleet.toml"),
         files: &[],
     },
     Example {
         name: "Showcase",
-        summary: "The demo project of the documentation's screenshots",
+        title: || t!("examples-showcase"),
+        description: || t!("examples-showcase-summary"),
         text: include_str!("../../../examples/showcase.toml"),
         files: &[],
     },
@@ -121,6 +146,27 @@ mod tests {
                 ("lab".to_string(), 3),
             ]
         );
+    }
+
+    #[test]
+    fn examples_are_named_in_the_windows_language() {
+        let quick_start = &EXAMPLES[0];
+        assert_eq!(quick_start.title(), "Quick start");
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        assert_eq!(quick_start.title(), "Rychlý start");
+        assert_eq!(
+            quick_start.description(),
+            "Dva senzory CO2 a teploměr na vestavěných šablonách"
+        );
+        assert_eq!(quick_start.name, "Quick start", "the ID stays");
+    }
+
+    /// The English title is the name, which also names the example's folder.
+    #[test]
+    fn english_titles_are_the_names() {
+        for example in &EXAMPLES {
+            assert_eq!(example.title(), example.name);
+        }
     }
 
     #[test]

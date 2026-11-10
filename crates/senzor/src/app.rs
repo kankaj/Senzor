@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use crate::dialogs::{FileDialogs, project_file_path};
 use crate::document::Document;
 use crate::edits;
+use crate::i18n::t;
 use crate::notify::{DesktopNotifier, FailureWatch, Notifier};
 use crate::rate::MessageRate;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
@@ -542,9 +543,10 @@ impl SenzorApp {
             .filter(|e| self.ui.log_filter.matches(e))
             .collect();
         if let Err(error) = std::fs::write(&path, crate::log_view::csv(&shown)) {
-            self.ui.modal = Some(Modal::Error(format!(
-                "Could not save {}: {error}",
-                path.display()
+            self.ui.modal = Some(Modal::Error(t!(
+                "app-could-not-save",
+                path = path.display().to_string(),
+                error = error.to_string()
             )));
         }
     }
@@ -590,7 +592,9 @@ impl SenzorApp {
         {
             run.state = match outcome {
                 Ok(count) => ui::ClearRetained::Cleared(count),
-                Err(reason) => ui::ClearRetained::Failed(format!("Could not clear: {reason}")),
+                Err(reason) => {
+                    ui::ClearRetained::Failed(t!("app-could-not-clear", reason = reason))
+                }
             };
             run.result = None;
         }
@@ -696,6 +700,10 @@ impl SenzorApp {
             Action::OpenExample(index) => self.guard(Pending::OpenExample(index)),
             Action::OpenDropped(path) => self.guard(Pending::OpenPath(path)),
             Action::ClearRecent => self.settings.recent.clear(),
+            Action::SetLanguage(language) => {
+                self.settings.language = language;
+                crate::i18n::set_language(language);
+            }
             Action::SetTheme(theme) => {
                 self.settings.theme = theme;
                 self.ctx.set_theme(theme.preference());
@@ -763,9 +771,7 @@ impl SenzorApp {
                 self.ui.snippet_copied = Some(snippet);
             }
             None => {
-                self.ui.modal = Some(Modal::Error(
-                    "Save the project first: the snippet names its file.".into(),
-                ));
+                self.ui.modal = Some(Modal::Error(t!("app-snippet-needs-save")));
             }
         }
     }
@@ -775,9 +781,9 @@ impl SenzorApp {
             self.guard(Pending::OpenPath(path));
         } else {
             self.settings.forget(&path);
-            self.ui.modal = Some(Modal::Error(format!(
-                "{} no longer exists, so it was taken off the recent projects.",
-                path.display()
+            self.ui.modal = Some(Modal::Error(t!(
+                "app-recent-gone",
+                path = path.display().to_string()
             )));
         }
     }
@@ -917,7 +923,7 @@ impl eframe::App for SenzorApp {
         // The panels record a rename still being typed again while they draw.
         self.ui.pending_rename = None;
 
-        let title = format!("Senzor — {}", self.doc.title());
+        let title = format!("Senzor — {}", ui::project_title(&self.doc));
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = title;
@@ -1040,7 +1046,7 @@ impl eframe::App for SenzorApp {
                     }
                     None => {
                         ui.heading("Senzor");
-                        ui.label("Select a device, an instance or a template on the left.");
+                        ui.label(t!("app-select-something"));
                     }
                 });
         });
@@ -1246,6 +1252,37 @@ mod tests {
         wait_until(&mut h, "d running", |h| status(h, "d").is_running());
         keep_stepping(&mut h, Duration::from_millis(300));
         assert_eq!(status(&h, "e"), InstanceStatus::Stopped);
+    }
+
+    /// The window's own texts follow the language of the settings.
+    #[test]
+    fn the_window_speaks_the_language_of_its_settings() {
+        let path = write_project(
+            "czech-window",
+            AUTOSTART_D.replace("true", "false").as_str(),
+        );
+        let mut h = window_builder().build_eframe(move |cc| {
+            let settings = AppSettings {
+                language: crate::i18n::Language::Czech,
+                ..AppSettings::default()
+            };
+            SenzorApp::with_settings(cc, Some(path), Box::new(FakeDialogs::default()), settings)
+        });
+        h.run();
+        assert!(
+            h.query_by_label("Vlevo vyberte zařízení, instanci nebo šablonu.")
+                .is_some()
+        );
+
+        let gone = std::env::temp_dir().join("senzor-czech-window-gone.toml");
+        h.state_mut().apply(Action::OpenRecent(gone.clone()));
+        h.run();
+        let text = format!(
+            "{} už neexistuje, a proto zmizel z nedávných projektů.",
+            gone.display()
+        );
+        assert!(h.query_by_label(&text).is_some(), "{text}");
+        assert!(h.query_by_label("Něco se pokazilo").is_some());
     }
 
     const STARTING: &str = "starting devices…";

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{Location, ProjectError, line_column};
 use super::field::FieldSpec;
+use crate::i18n::text;
 use crate::script::Script;
 use crate::value::Value;
 
@@ -413,7 +414,11 @@ impl ProjectFile {
                 }
                 None => Location::File,
             };
-            vec![ProjectError::new(location, err.message())]
+            // The TOML parser's own text, in English.
+            vec![ProjectError::new(
+                location,
+                text!("verbatim", text = err.message()),
+            )]
         })
     }
 

@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use senzor_core::engine::{EngineState, InstanceStatus};
 use senzor_core::project::{DeviceConfig, ProjectFile, Validated};
 
+use crate::i18n::t;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceNode {
     /// Index in the project file; `None` for a device that was removed while its instances still run.
@@ -143,12 +145,12 @@ impl StatusFilter {
         StatusFilter::Stopped,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            StatusFilter::All => "All",
-            StatusFilter::Online => "Online",
-            StatusFilter::Problems => "Problems",
-            StatusFilter::Stopped => "Stopped",
+            StatusFilter::All => t!("tree-status-all"),
+            StatusFilter::Online => t!("tree-status-online"),
+            StatusFilter::Problems => t!("tree-status-problems"),
+            StatusFilter::Stopped => t!("tree-status-stopped"),
         }
     }
 

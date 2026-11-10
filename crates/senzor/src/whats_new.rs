@@ -1,8 +1,14 @@
 //! "What's new": the Highlights of `CHANGELOG.md`, shown the first time the window opens after an
-//! update.
+//! update. A Czech window shows them from `locales/cs/whats-new.md`, which has the same versions
+//! and Highlights in Czech.
+
+use crate::i18n::{self, Language};
 
 /// The changelog the window was built with.
 const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+
+/// The Highlights of `CHANGELOG.md` in Czech, laid out like it.
+const CHANGELOG_CS: &str = include_str!("../locales/cs/whats-new.md");
 
 /// One version's Highlights, as plain text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +41,31 @@ fn releases(changelog: &str) -> Vec<Release> {
     releases
 }
 
+/// `english` with the Highlights of `translation` for each version it has; the others stay in
+/// English.
+fn translated(english: Vec<Release>, translation: &str) -> Vec<Release> {
+    let translation = releases(translation);
+    english
+        .into_iter()
+        .map(|release| {
+            translation
+                .iter()
+                .find(|t| t.version == release.version)
+                .cloned()
+                .unwrap_or(release)
+        })
+        .collect()
+}
+
+/// Every release with Highlights, in the window's language.
+fn shown_releases() -> Vec<Release> {
+    let english = releases(CHANGELOG);
+    match i18n::language() {
+        Language::English => english,
+        Language::Czech => translated(english, CHANGELOG_CS),
+    }
+}
+
 /// `text` without Markdown: no `**`, no backticks, and links as their text.
 fn plain_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -61,28 +92,29 @@ pub(crate) fn version_number(version: &str) -> Option<(u64, u64, u64)> {
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
-/// The releases after `previous` up to `current`, the newest first: what changed since the version
-/// that ran before. A `previous` that is not a version counts as older than every release.
-fn since(changelog: &str, previous: &str, current: &str) -> Vec<Release> {
+/// Those of `releases` after `previous` up to `current`, the newest first: what changed since the
+/// version that ran before. A `previous` that is not a version counts as older than every release.
+fn since(releases: Vec<Release>, previous: &str, current: &str) -> Vec<Release> {
     let previous = version_number(previous).unwrap_or_default();
     let Some(current) = version_number(current) else {
         return Vec::new();
     };
-    releases(changelog)
+    releases
         .into_iter()
         .filter(|r| version_number(&r.version).is_some_and(|v| v > previous && v <= current))
         .collect()
 }
 
-/// What is new since `previous`, the version that last ran, for this build's changelog.
+/// What is new since `previous`, the version that last ran, for this build's changelog, in the
+/// window's language.
 pub fn since_version(previous: &str) -> Vec<Release> {
-    since(CHANGELOG, previous, env!("CARGO_PKG_VERSION"))
+    since(shown_releases(), previous, env!("CARGO_PKG_VERSION"))
 }
 
-/// The Highlights of this version, for the settings' What's new.
+/// The Highlights of this version, for the settings' What's new, in the window's language.
 pub fn this_version() -> Vec<Release> {
     let current = env!("CARGO_PKG_VERSION");
-    releases(CHANGELOG)
+    shown_releases()
         .into_iter()
         .filter(|r| r.version == current)
         .collect()
@@ -145,7 +177,7 @@ Intro text.
     #[test]
     fn what_is_new_lists_the_versions_after_the_previous_one() {
         let versions = |previous, current| -> Vec<String> {
-            since(SAMPLE, previous, current)
+            since(releases(SAMPLE), previous, current)
                 .into_iter()
                 .map(|r| r.version)
                 .collect()
@@ -159,6 +191,50 @@ Intro text.
         );
         assert_eq!(versions("1.2.0", "1.2.0"), Vec::<String>::new());
         assert_eq!(versions("not a version", "1.0.0"), ["1.0.0"]);
+    }
+
+    #[test]
+    fn a_version_without_czech_highlights_keeps_the_english_ones() {
+        let czech = "## [1.2.0]\n\n### Highlights\n\n- Grafy hodnot pole v **pohledu instance**.\n";
+        let shown = translated(releases(SAMPLE), czech);
+        assert_eq!(shown[0].version, "1.2.0");
+        assert_eq!(
+            shown[0].highlights,
+            ["Grafy hodnot pole v pohledu instance."]
+        );
+        assert_eq!(shown[1].version, "1.0.0");
+        assert_eq!(shown[1].highlights, ["The first release."]);
+    }
+
+    /// Each release's Highlights are translated with it, item by item.
+    #[test]
+    fn czech_has_the_highlights_of_every_version() {
+        let czech = releases(CHANGELOG_CS);
+        for english in releases(CHANGELOG) {
+            let translation = czech.iter().find(|r| r.version == english.version);
+            let Some(translation) = translation else {
+                panic!(
+                    "locales/cs/whats-new.md has no Highlights for {}",
+                    english.version
+                );
+            };
+            assert_eq!(
+                translation.highlights.len(),
+                english.highlights.len(),
+                "the Highlights of {}",
+                english.version
+            );
+        }
+    }
+
+    #[test]
+    fn a_czech_window_shows_the_czech_highlights() {
+        let english = this_version();
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let czech = this_version();
+        assert_eq!(czech[0].version, english[0].version);
+        assert!(czech[0].highlights[0].starts_with("Simulace senzorů MQTT"));
+        assert_ne!(czech[0].highlights, english[0].highlights);
     }
 
     /// The release step adds this version to the changelog; the window would show nothing.

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, RichText};
 
 use super::{ERROR, Modal, Pending};
+use crate::i18n::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsavedChoice {
@@ -67,7 +68,7 @@ pub fn show(ctx: &egui::Context, modal: &mut Modal) -> Option<Outcome> {
 /// A row of buttons; returns the outcome of the one clicked.
 fn buttons(
     ui: &mut egui::Ui,
-    choices: impl IntoIterator<Item = (&'static str, Outcome)>,
+    choices: impl IntoIterator<Item = (String, Outcome)>,
 ) -> Option<Outcome> {
     let mut clicked = None;
     ui.horizontal(|ui| {
@@ -81,32 +82,33 @@ fn buttons(
 }
 
 fn ok(ui: &mut egui::Ui) -> Option<Outcome> {
-    ui.button("OK").clicked().then_some(Outcome::Dismissed)
+    ui.button(t!("modals-ok"))
+        .clicked()
+        .then_some(Outcome::Dismissed)
 }
 
 fn unsaved(ui: &mut egui::Ui, pending: &Pending) -> Option<Outcome> {
-    ui.heading("Unsaved changes");
-    let what = match pending {
-        Pending::New => "starting a new project",
-        Pending::Open | Pending::OpenPath(_) => "opening another project",
-        Pending::OpenExample(_) => "opening the example",
-        Pending::Close => "closing",
-    };
-    ui.label(format!("Save the changes to this project before {what}?"));
+    ui.heading(t!("modals-unsaved-title"));
+    ui.label(match pending {
+        Pending::New => t!("modals-unsaved-new"),
+        Pending::Open | Pending::OpenPath(_) => t!("modals-unsaved-open"),
+        Pending::OpenExample(_) => t!("modals-unsaved-example"),
+        Pending::Close => t!("modals-unsaved-close"),
+    });
     buttons(
         ui,
         [
-            ("Save", UnsavedChoice::Save),
-            ("Discard", UnsavedChoice::Discard),
-            ("Cancel", UnsavedChoice::Cancel),
+            (t!("modals-save"), UnsavedChoice::Save),
+            (t!("modals-discard"), UnsavedChoice::Discard),
+            (t!("modals-cancel"), UnsavedChoice::Cancel),
         ]
         .map(|(label, choice)| (label, Outcome::Unsaved(pending.clone(), choice))),
     )
 }
 
 fn open_failed(ui: &mut egui::Ui, path: &str, message: &str) -> Option<Outcome> {
-    ui.heading(format!("Cannot open {path}"));
-    ui.label("Fix the file in a text editor, then open it again.");
+    ui.heading(t!("modals-open-failed-title", path = path));
+    ui.label(t!("modals-open-failed-text"));
     ui.label(RichText::new(message).monospace().color(ERROR));
     ok(ui)
 }
@@ -117,8 +119,8 @@ fn copy_builtin(
     new_id: &mut String,
     error: Option<&str>,
 ) -> Option<Outcome> {
-    ui.heading(format!("Copy built-in template {builtin}"));
-    let label = ui.label("New template ID");
+    ui.heading(t!("modals-copy-builtin-title", builtin = builtin));
+    let label = ui.label(t!("modals-new-template-id"));
     ui.text_edit_singleline(new_id).labelled_by(label.id);
     if let Some(error) = error {
         ui.colored_label(ERROR, error);
@@ -127,13 +129,13 @@ fn copy_builtin(
         ui,
         [
             (
-                "Copy",
+                t!("modals-copy"),
                 Outcome::CopyBuiltin {
                     builtin: builtin.to_string(),
                     new_id: new_id.clone(),
                 },
             ),
-            ("Cancel", Outcome::Dismissed),
+            (t!("modals-cancel"), Outcome::Dismissed),
         ],
     )
 }
@@ -141,36 +143,26 @@ fn copy_builtin(
 fn confirm_replace(ui: &mut egui::Ui, path: &Path, then: Option<&Pending>) -> Option<Outcome> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let folder = path.parent().unwrap_or(Path::new("")).display();
-    ui.heading(format!("Replace {name}?"));
-    ui.label(format!(
-        "A file with that name already exists in {folder}. \
-         Replacing it overwrites its contents."
-    ));
+    ui.heading(t!("modals-replace-title", name = name.as_ref()));
+    ui.label(t!("modals-replace-text", folder = folder.to_string()));
     buttons(
         ui,
         [
             (
-                "Replace",
+                t!("modals-replace"),
                 Outcome::Replace {
                     path: path.to_path_buf(),
                     then: then.cloned(),
                 },
             ),
-            ("Cancel", Outcome::Dismissed),
+            (t!("modals-cancel"), Outcome::Dismissed),
         ],
     )
 }
 
 fn clear_retained(ui: &mut egui::Ui, topics: &[String], broker: &str) -> Option<Outcome> {
-    ui.heading(format!(
-        "Clear {}?",
-        super::retained_topics_text(topics.len())
-    ));
-    ui.label(format!(
-        "Senzor publishes an empty retained message to each topic on {broker}, which makes \
-         the broker forget the message it keeps there. Subscribers then get nothing until the \
-         devices publish again."
-    ));
+    ui.heading(t!("modals-clear-title", count = topics.len()));
+    ui.label(t!("modals-clear-text", broker = broker));
     egui::ScrollArea::vertical()
         .max_height(200.0)
         .show(ui, |ui| {
@@ -181,17 +173,18 @@ fn clear_retained(ui: &mut egui::Ui, topics: &[String], broker: &str) -> Option<
     buttons(
         ui,
         [
-            ("Clear", Outcome::ClearRetained(topics.to_vec())),
-            ("Cancel", Outcome::Dismissed),
+            (t!("modals-clear"), Outcome::ClearRetained(topics.to_vec())),
+            (t!("modals-cancel"), Outcome::Dismissed),
         ],
     )
 }
 
 /// The Highlights of each release, the newest first; the version is named when there are several.
+/// The Highlights come from the changelog, which is in English.
 fn whats_new(ui: &mut egui::Ui, releases: &[crate::whats_new::Release]) -> Option<Outcome> {
-    ui.heading(format!(
-        "What's new in Senzor {}",
-        env!("CARGO_PKG_VERSION")
+    ui.heading(t!(
+        "modals-whats-new-title",
+        version = env!("CARGO_PKG_VERSION")
     ));
     egui::ScrollArea::vertical()
         .max_height(360.0)
@@ -212,31 +205,134 @@ fn whats_new(ui: &mut egui::Ui, releases: &[crate::whats_new::Release]) -> Optio
         });
     ui.add_space(4.0);
     ui.hyperlink_to(
-        "Full changelog",
+        t!("modals-full-changelog"),
         format!("{}/blob/main/CHANGELOG.md", super::SOURCE_URL),
     );
     ok(ui)
 }
 
 fn error(ui: &mut egui::Ui, message: &str) -> Option<Outcome> {
-    ui.heading("Something went wrong");
+    ui.heading(t!("modals-error-title"));
     ui.label(message);
     ok(ui)
 }
 
 fn file_changed(ui: &mut egui::Ui, name: &str, unsaved: bool) -> Option<Outcome> {
-    ui.heading(format!("{name} changed on disk"));
+    ui.heading(t!("modals-file-changed-title", name = name));
     ui.label(if unsaved {
-        "Another program changed the file. Reload it to see its version; your \
-         unsaved changes are replaced, and Undo brings them back."
+        t!("modals-file-changed-unsaved")
     } else {
-        "Another program changed the file. Reload it to see its version."
+        t!("modals-file-changed-text")
     });
     buttons(
         ui,
         [
-            ("Reload", Outcome::Reload),
-            ("Keep my version", Outcome::KeepMine),
+            (t!("modals-reload"), Outcome::Reload),
+            (t!("modals-keep-mine"), Outcome::KeepMine),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::i18n::{Language, set_language};
+
+    /// `modal`, drawn in Czech, after its first frames.
+    fn czech(modal: Modal) -> Harness<'static, Modal> {
+        set_language(Language::Czech);
+        let mut harness = Harness::new_ui_state(
+            |ui, modal: &mut Modal| {
+                let ctx = ui.ctx().clone();
+                show(&ctx, modal);
+            },
+            modal,
+        );
+        harness.run();
+        harness
+    }
+
+    fn shows(harness: &Harness<'static, Modal>, texts: &[&str]) {
+        for text in texts {
+            assert!(harness.query_by_label(text).is_some(), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_unsaved_changes_dialog_speaks_czech() {
+        let h = czech(Modal::Unsaved(Pending::Close));
+        shows(
+            &h,
+            &[
+                "Neuložené změny",
+                "Uložit změny v tomto projektu před zavřením?",
+                "Uložit",
+                "Zahodit",
+                "Zrušit",
+            ],
+        );
+    }
+
+    #[test]
+    fn clearing_retained_messages_counts_the_topics_in_czech() {
+        let topics = |n: usize| (0..n).map(|i| format!("t/{i}")).collect::<Vec<_>>();
+        let clear = |n| Modal::ClearRetained {
+            topics: topics(n),
+            broker: "localhost:1883".into(),
+        };
+        shows(&czech(clear(1)), &["Smazat retained zprávu (1 topic)?"]);
+        shows(&czech(clear(3)), &["Smazat retained zprávy (3 topiky)?"]);
+        shows(
+            &czech(clear(5)),
+            &["Smazat retained zprávy (5 topiků)?", "Smazat", "Zrušit"],
+        );
+    }
+
+    #[test]
+    fn the_other_dialogs_speak_czech() {
+        shows(
+            &czech(Modal::FileChanged {
+                name: "plant.toml".into(),
+                unsaved: true,
+            }),
+            &[
+                "Soubor plant.toml se na disku změnil",
+                "Načíst znovu",
+                "Ponechat mou verzi",
+            ],
+        );
+        shows(
+            &czech(Modal::ConfirmReplace {
+                path: PathBuf::from("/projects/x.toml"),
+                then: None,
+            }),
+            &["Nahradit x.toml?", "Nahradit"],
+        );
+        shows(
+            &czech(Modal::CopyBuiltin {
+                builtin: "co2".into(),
+                new_id: "co2-copy".into(),
+                error: None,
+            }),
+            &[
+                "Kopírovat vestavěnou šablonu co2",
+                "ID nové šablony",
+                "Kopírovat",
+            ],
+        );
+        shows(
+            &czech(Modal::Error("disk full".into())),
+            &["Něco se pokazilo", "OK"],
+        );
+        shows(
+            &czech(Modal::OpenFailed {
+                path: "x.toml".into(),
+                message: "bad".into(),
+            }),
+            &["Nelze otevřít x.toml"],
+        );
+    }
 }

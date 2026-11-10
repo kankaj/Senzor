@@ -8,6 +8,7 @@ use senzor_core::engine::{EngineState, InstanceStatus};
 use senzor_core::project::BrokerSpec;
 
 use super::{Action, ERROR, ONLINE, STOPPED, WARNING};
+use crate::i18n::t;
 use crate::update::Release;
 
 /// How many instances are in each state.
@@ -35,15 +36,15 @@ impl Counts {
     }
 
     /// How the broker looks from the instances: reachable once one is online.
-    fn broker(&self) -> (&'static str, egui::Color32) {
+    fn broker(&self) -> (String, egui::Color32) {
         if self.online > 0 {
-            ("connected", ONLINE)
+            (t!("status-bar-connected"), ONLINE)
         } else if self.reconnecting + self.failed > 0 {
-            ("cannot connect", ERROR)
+            (t!("status-bar-cannot-connect"), ERROR)
         } else if self.connecting > 0 {
-            ("connecting…", WARNING)
+            (t!("status-bar-connecting"), WARNING)
         } else {
-            ("not connected", STOPPED)
+            (t!("status-bar-not-connected"), STOPPED)
         }
     }
 }
@@ -78,41 +79,55 @@ pub fn show(
                     )
                     .sense(egui::Sense::click()),
                 )
-                .on_hover_text("Broker settings");
+                .on_hover_text(t!("status-bar-broker-hint"));
             if link.clicked() {
                 actions.push(Action::OpenBroker);
             }
             ui.separator();
+            let Counts {
+                online,
+                connecting,
+                reconnecting,
+                failed,
+            } = counts;
             let parts: Vec<(String, egui::Color32)> = [
-                (counts.online, "online", ONLINE),
-                (counts.connecting, "connecting", WARNING),
-                (counts.reconnecting, "reconnecting", WARNING),
-                (counts.failed, "failed", ERROR),
+                (online, t!("status-bar-online", count = online), ONLINE),
+                (
+                    connecting,
+                    t!("status-bar-connecting-count", count = connecting),
+                    WARNING,
+                ),
+                (
+                    reconnecting,
+                    t!("status-bar-reconnecting-count", count = reconnecting),
+                    WARNING,
+                ),
+                (failed, t!("status-bar-failed-count", count = failed), ERROR),
             ]
             .into_iter()
             .filter(|(count, _, _)| *count > 0)
-            .map(|(count, word, color)| (format!("{count} {word}"), color))
+            .map(|(_, text, color)| (text, color))
             .collect();
             if parts.is_empty() {
-                ui.weak("nothing running");
+                ui.weak(t!("status-bar-nothing-running"));
             }
             for (text, color) in parts {
                 ui.colored_label(color, text);
             }
             ui.separator();
             ui.label(format_rate(rate))
-                .on_hover_text("Messages published per second, over the last 5 seconds");
+                .on_hover_text(t!("status-bar-rate-hint"));
         },
         |ui| {
             let (text, hint) = match mcp {
                 Some(address) => (
-                    RichText::new(format!("MCP on :{}", address.port()))
+                    RichText::new(t!("status-bar-mcp-on", port = address.port().to_string()))
                         .color(ui.visuals().selection.stroke.color),
-                    format!("AI agents can control this window at http://{address}/mcp"),
+                    t!("status-bar-mcp-on-hint", address = address.to_string()),
                 ),
                 None => (
-                    RichText::new("MCP off").weak(),
-                    "AI agents cannot control this window; turn MCP on in the settings".into(),
+                    RichText::new(t!("status-bar-mcp-off")).weak(),
+                    t!("status-bar-mcp-off-hint"),
                 ),
             };
             let sign = ui
@@ -124,14 +139,14 @@ pub fn show(
             // The right side is laid out from the right, so this comes before the MCP sign.
             if let Some(release) = newer {
                 let text = format!(
-                    "{} Senzor {} is out",
+                    "{} {}",
                     egui_phosphor::regular::ARROW_CIRCLE_UP,
-                    release.version
+                    t!("status-bar-release", version = release.version.as_str())
                 );
                 // In the links' colour, like the release link in the settings.
                 let link = ui
                     .add(egui::Link::new(text))
-                    .on_hover_text("See what's new and download it");
+                    .on_hover_text(t!("status-bar-release-hint"));
                 if link.clicked() {
                     right.push(Action::OpenNewRelease);
                 }
@@ -144,11 +159,12 @@ pub fn show(
 
 /// `12 msg/s`, with one decimal below 10.
 fn format_rate(rate: f64) -> String {
-    if rate < 10.0 {
-        format!("{rate:.1} msg/s")
+    let rate = if rate < 10.0 {
+        format!("{rate:.1}")
     } else {
-        format!("{rate:.0} msg/s")
-    }
+        format!("{rate:.0}")
+    };
+    t!("status-bar-rate", rate = rate)
 }
 
 #[cfg(test)]
@@ -228,5 +244,38 @@ mod tests {
             None,
         );
         assert!(h.query_by_label_contains("cannot connect").is_some());
+    }
+
+    #[test]
+    fn the_status_bar_speaks_czech_with_czech_plurals() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let h = harness(EngineState::default(), 0.0, None);
+        assert!(h.query_by_label("nic neběží").is_some());
+        assert!(h.query_by_label_contains("nepřipojeno").is_some());
+        assert!(h.query_by_label("0.0 zpr./s").is_some());
+        assert!(h.query_by_label("MCP vypnuto").is_some());
+
+        let failed = InstanceStatus::Failed {
+            reason: "refused".into(),
+        };
+        let h = harness(
+            running(&[
+                InstanceStatus::Online,
+                InstanceStatus::Connecting,
+                InstanceStatus::Connecting,
+                failed.clone(),
+                failed.clone(),
+                failed.clone(),
+                failed.clone(),
+                failed,
+            ]),
+            12.0,
+            Some("127.0.0.1:18830".parse().unwrap()),
+        );
+        assert!(h.query_by_label("1 online").is_some());
+        assert!(h.query_by_label("2 se připojují").is_some());
+        assert!(h.query_by_label("5 selhalo").is_some());
+        assert!(h.query_by_label_contains("připojeno").is_some());
+        assert!(h.query_by_label("MCP zapnuto :18830").is_some());
     }
 }

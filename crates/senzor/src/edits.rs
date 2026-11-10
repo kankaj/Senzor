@@ -17,6 +17,8 @@ use senzor_core::project::{
 use senzor_core::script::Script;
 use senzor_core::value::Value;
 
+use crate::i18n::t;
+
 /// The topic new messages publish on.
 const NEW_MESSAGE_TOPIC: &str = "senzor/{{ device_id }}/value";
 
@@ -217,11 +219,11 @@ impl ValueKind {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            ValueKind::Text => "text",
-            ValueKind::Number => "number",
-            ValueKind::Bool => "bool",
+            ValueKind::Text => t!("edits-value-text"),
+            ValueKind::Number => t!("edits-value-number"),
+            ValueKind::Bool => t!("edits-value-bool"),
         }
     }
 }
@@ -237,11 +239,11 @@ pub fn parse_value(kind: ValueKind, text: &str) -> Result<Value, String> {
             .ok()
             .filter(|n| n.is_finite())
             .map(Value::Number)
-            .ok_or_else(|| "use a number, e.g. 42 or 22.5".to_string()),
+            .ok_or_else(|| t!("edits-use-number")),
         ValueKind::Bool => match text.trim() {
             "true" => Ok(Value::Bool(true)),
             "false" => Ok(Value::Bool(false)),
-            _ => Err("use true or false".to_string()),
+            _ => Err(t!("edits-use-bool")),
         },
     }
 }
@@ -455,7 +457,7 @@ pub fn store_override_edits(table: &mut toml::Table, before: &FieldSpec, after: 
 /// What a field's override changes, e.g. `start, max overridden`.
 pub fn override_summary(table: &toml::Table, kind: GeneratorKind) -> String {
     if table.is_empty() {
-        return "not overridden".to_string();
+        return t!("edits-not-overridden");
     }
     let settings = override_settings(kind);
     let mut keys: Vec<&str> = settings
@@ -469,7 +471,7 @@ pub fn override_summary(table: &toml::Table, kind: GeneratorKind) -> String {
             .map(String::as_str)
             .filter(|k| !settings.contains(k)),
     );
-    format!("{} overridden", keys.join(", "))
+    t!("edits-overridden", settings = keys.join(", "))
 }
 
 /// Where the broker password comes from: `password` or `password_env`, at most one of them.
@@ -496,11 +498,11 @@ impl PasswordSource {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            PasswordSource::None => "none",
-            PasswordSource::Literal => "in the file",
-            PasswordSource::Environment => "from env var",
+            PasswordSource::None => t!("edits-password-none"),
+            PasswordSource::Literal => t!("edits-password-literal"),
+            PasswordSource::Environment => t!("edits-password-env"),
         }
     }
 }
@@ -519,6 +521,21 @@ pub fn set_password_source(broker: &mut BrokerSpec, source: PasswordSource) {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn value_types_hints_and_summaries_speak_czech() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        assert_eq!(ValueKind::Number.label(), "číslo");
+        assert_eq!(
+            parse_value(ValueKind::Number, "x"),
+            Err("zadejte číslo, např. 42 nebo 22.5".into())
+        );
+        let kind = GeneratorKind::RandomWalk;
+        assert_eq!(override_summary(&toml::Table::new(), kind), "nepřepsáno");
+        let table: toml::Table = toml::from_str("start = 1\nmax = 2").unwrap();
+        assert_eq!(override_summary(&table, kind), "přepsáno: start, max");
+        assert_eq!(PasswordSource::Literal.label(), "v souboru");
+    }
 
     #[test]
     fn added_device_and_template_are_valid() {
@@ -614,7 +631,7 @@ mod tests {
         assert_eq!(ValueKind::of(&Value::String("007".into())), ValueKind::Text);
         assert_eq!(ValueKind::of(&Value::Number(7.0)), ValueKind::Number);
         assert_eq!(ValueKind::of(&Value::Bool(true)), ValueKind::Bool);
-        let labels: Vec<&str> = ValueKind::ALL.iter().map(|k| k.label()).collect();
+        let labels: Vec<String> = ValueKind::ALL.iter().map(|k| k.label()).collect();
         assert_eq!(labels, ["text", "number", "bool"]);
     }
 
@@ -714,7 +731,7 @@ mod tests {
             PasswordSource::Literal,
             "a literal password wins"
         );
-        let labels: Vec<&str> = PasswordSource::ALL.iter().map(|s| s.label()).collect();
+        let labels: Vec<String> = PasswordSource::ALL.iter().map(|s| s.label()).collect();
         assert_eq!(labels, ["none", "in the file", "from env var"]);
     }
 

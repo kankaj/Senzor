@@ -8,6 +8,7 @@ use senzor_core::project::builtin::builtin_templates;
 use super::Action;
 use crate::document::Document;
 use crate::examples::EXAMPLES;
+use crate::i18n::t;
 use crate::selection::Selection;
 use crate::update::Release;
 
@@ -26,7 +27,7 @@ pub enum Target {
 #[derive(Clone)]
 pub struct Entry {
     pub label: String,
-    pub kind: &'static str,
+    pub kind: String,
     pub target: Target,
 }
 
@@ -44,102 +45,115 @@ impl Entry {
 }
 
 /// An action as the palette lists it: its name and how to make it.
-type NamedAction = (&'static str, fn() -> Action);
+type NamedAction = (String, fn() -> Action);
 
-/// The window's actions, by the name the palette shows.
-const ACTIONS: &[NamedAction] = &[
-    ("New project", || Action::New),
-    ("Open a project…", || Action::Open),
-    ("Save", || Action::Save),
-    ("Save as…", || Action::SaveAs),
-    ("Start all", || Action::StartAll),
-    ("Stop all", || Action::StopAll),
-    ("Undo", || Action::Undo),
-    ("Redo", || Action::Redo),
-    ("Add device", || Action::AddDevice),
-    ("Add template", || Action::AddTemplate),
-    ("Project settings", || Action::OpenBroker),
-    ("Edit the project file as text", || {
-        Action::Select(Some(crate::selection::Selection::Source))
-    }),
-    ("Test the broker connection", || Action::TestConnection),
-    ("Clear retained messages…", || Action::AskClearRetained),
-    ("Find in the message log", || Action::FindInLog),
-    ("Export the message log…", || Action::ExportLog),
-    ("Clear the message log", || Action::ClearLog),
-    ("Settings", || Action::OpenSettings),
-    ("Copy as a GitHub Actions step", || {
-        Action::CopySnippet(crate::snippets::Snippet::GitHubActions)
-    }),
-    ("Copy as a docker-compose service", || {
-        Action::CopySnippet(crate::snippets::Snippet::DockerCompose)
-    }),
-    ("Turn MCP on or off", || Action::ToggleMcp),
-    ("What's new", || Action::ShowWhatsNew),
-];
+/// The window's actions, by the name the palette shows in the window's language.
+fn actions() -> [NamedAction; 22] {
+    [
+        (t!("palette-new-project"), || Action::New),
+        (t!("palette-open"), || Action::Open),
+        (t!("palette-save"), || Action::Save),
+        (t!("palette-save-as"), || Action::SaveAs),
+        (t!("palette-start-all"), || Action::StartAll),
+        (t!("palette-stop-all"), || Action::StopAll),
+        (t!("palette-undo"), || Action::Undo),
+        (t!("palette-redo"), || Action::Redo),
+        (t!("palette-add-device"), || Action::AddDevice),
+        (t!("palette-add-template"), || Action::AddTemplate),
+        (t!("palette-project-settings"), || Action::OpenBroker),
+        (t!("palette-edit-source"), || {
+            Action::Select(Some(crate::selection::Selection::Source))
+        }),
+        (t!("palette-test-connection"), || Action::TestConnection),
+        (t!("palette-clear-retained"), || Action::AskClearRetained),
+        (t!("palette-find-in-log"), || Action::FindInLog),
+        (t!("palette-export-log"), || Action::ExportLog),
+        (t!("palette-clear-log"), || Action::ClearLog),
+        (t!("palette-settings"), || Action::OpenSettings),
+        (t!("palette-copy-github"), || {
+            Action::CopySnippet(crate::snippets::Snippet::GitHubActions)
+        }),
+        (t!("palette-copy-compose"), || {
+            Action::CopySnippet(crate::snippets::Snippet::DockerCompose)
+        }),
+        (t!("palette-toggle-mcp"), || Action::ToggleMcp),
+        (t!("palette-whats-new"), || Action::ShowWhatsNew),
+    ]
+}
 
 /// Everything the palette can find: the actions (with the newer release, when there is one),
 /// then the project's devices, instances and templates, the built-in templates and the examples.
 pub fn entries(doc: &Document, state: &EngineState, newer: Option<&Release>) -> Vec<Entry> {
-    let entry = |label: &str, kind, target| Entry {
+    let entry = |label: &str, kind: &str, target| Entry {
         label: label.to_string(),
-        kind,
+        kind: kind.to_string(),
         target,
     };
-    let mut entries: Vec<Entry> = ACTIONS
-        .iter()
-        .map(|(label, make)| entry(label, "Action", Target::Run(*make)))
+    let action = t!("palette-kind-action");
+    let mut entries: Vec<Entry> = actions()
+        .into_iter()
+        .map(|(label, make)| entry(&label, &action, Target::Run(make)))
         .collect();
     if let Some(release) = newer {
-        let label = format!("Update: Senzor {} is out", release.version);
+        let label = t!("palette-update", version = release.version.as_str());
         entries.push(entry(
             &label,
-            "Action",
+            &action,
             Target::Run(|| Action::OpenNewRelease),
         ));
     }
     let file = doc.file();
-    for (index, device) in file.devices.iter().enumerate() {
+    let device = t!("palette-kind-device");
+    for (index, config) in file.devices.iter().enumerate() {
         entries.push(entry(
-            &device.id,
-            "Device",
+            &config.id,
+            &device,
             Target::Go(Selection::Device(index)),
         ));
     }
     // The tree's instances, orphans included, in its order.
+    let instance_kind = t!("palette-kind-instance");
     for node in crate::tree::device_tree(file, doc.validated(), state) {
         for instance in node.instances {
             let target = Target::Go(Selection::Instance(instance.id.clone()));
-            entries.push(entry(&instance.id, "Instance", target));
+            entries.push(entry(&instance.id, &instance_kind, target));
         }
     }
+    let template_kind = t!("palette-kind-template");
     for (index, template) in file.templates.iter().enumerate() {
         entries.push(entry(
             &template.id,
-            "Template",
+            &template_kind,
             Target::Go(Selection::Template(index)),
         ));
     }
+    let builtin = t!("palette-kind-builtin");
     for template in builtin_templates() {
         let target = Target::Go(Selection::Builtin(template.id.clone()));
-        entries.push(entry(&template.id, "Built-in template", target));
+        entries.push(entry(&template.id, &builtin, target));
     }
+    let example_kind = t!("palette-kind-example");
     for (index, example) in EXAMPLES.iter().enumerate() {
-        entries.push(entry(example.name, "Example", Target::Example(index)));
+        entries.push(entry(
+            &example.title(),
+            &example_kind,
+            Target::Example(index),
+        ));
     }
     entries
 }
 
 /// The entries matching `query`, the best first, at most [`SHOWN`]: every word of the query must
-/// appear in the name, in any case. Names that start with the query come first, then names with a
-/// word that starts with one of the query's words.
+/// appear in the name, in any case and with or without diacritics (`ulozit` finds `Uložit`).
+/// Names that start with the query come first, then names with a word that starts with one of the
+/// query's words.
 pub fn matches<'a>(entries: &'a [Entry], query: &str) -> Vec<&'a Entry> {
-    let query = query.trim().to_lowercase();
+    let query = folded(query.trim());
     let words: Vec<&str> = query.split_whitespace().collect();
     let mut found: Vec<(u8, &Entry)> = entries
         .iter()
         .filter_map(|entry| {
-            let label = entry.label.to_lowercase();
+            let label = folded(&entry.label);
             if !words.iter().all(|word| label.contains(word)) {
                 return None;
             }
@@ -163,6 +177,30 @@ pub fn matches<'a>(entries: &'a [Entry], query: &str) -> Vec<&'a Entry> {
     // A stable sort keeps the order of `entries` within a rank.
     found.sort_by_key(|(rank, _)| *rank);
     found.into_iter().take(SHOWN).map(|(_, e)| e).collect()
+}
+
+/// `text` in lower case and without the diacritics of Czech letters, for matching what is typed
+/// on a keyboard without them.
+fn folded(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' => 'a',
+            'č' => 'c',
+            'ď' => 'd',
+            'é' | 'ě' => 'e',
+            'í' => 'i',
+            'ň' => 'n',
+            'ó' => 'o',
+            'ř' => 'r',
+            'š' => 's',
+            'ť' => 't',
+            'ú' | 'ů' => 'u',
+            'ý' => 'y',
+            'ž' => 'z',
+            other => other,
+        })
+        .collect()
 }
 
 /// What is typed into the open palette, and which match Enter runs.
@@ -206,25 +244,24 @@ pub fn show(ctx: &egui::Context, state: &mut PaletteState, all: &[Entry]) -> Opt
         ui.set_width(460.0);
         let input = ui.add(
             egui::TextEdit::singleline(&mut state.query)
-                .hint_text("Type an action or the name of a device, instance or template")
+                .hint_text(t!("palette-hint"))
                 .desired_width(f32::INFINITY),
         );
-        input.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Command palette")
-        });
+        let name = t!("palette-name");
+        input.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, &name));
         // The box keeps the keyboard while the palette is open.
         input.request_focus();
         if input.changed() {
             state.selected = 0;
         }
         if found.is_empty() {
-            ui.weak("Nothing matches.");
+            ui.weak(t!("palette-nothing"));
         }
         for (index, entry) in found.iter().enumerate() {
             let text = egui::RichText::new(&entry.label);
             let row = ui.add(
                 egui::Button::selectable(index == state.selected, text)
-                    .right_text(egui::RichText::new(entry.kind).weak())
+                    .right_text(egui::RichText::new(&entry.kind).weak())
                     .min_size(egui::vec2(ui.available_width(), 0.0)),
             );
             if row.clicked() {
@@ -312,6 +349,40 @@ mod tests {
         assert!(matches!(found[0].action(), Action::OpenNewRelease));
         let without = entries(&document(), &EngineState::default(), None);
         assert!(matches(&without, "update").is_empty());
+    }
+
+    #[test]
+    fn in_czech_the_palette_lists_and_finds_czech_names() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let all = entries(&document(), &EngineState::default(), None);
+        let listed = labels(&all.iter().collect::<Vec<_>>());
+        for wanted in [
+            "Akce: Zastavit vše",
+            "Zařízení: office",
+            "Šablona: door",
+            "Vestavěná šablona: co2",
+        ] {
+            assert!(
+                listed.contains(&wanted.to_string()),
+                "{wanted} in {listed:?}"
+            );
+        }
+        assert_eq!(labels(&matches(&all, "zastav"))[0], "Akce: Zastavit vše");
+        assert!(
+            matches(&all, "stop all").is_empty(),
+            "not by the English name"
+        );
+    }
+
+    #[test]
+    fn the_palette_finds_names_typed_without_diacritics() {
+        crate::i18n::set_language(crate::i18n::Language::Czech);
+        let all = entries(&document(), &EngineState::default(), None);
+        assert_eq!(labels(&matches(&all, "ulozit"))[0], "Akce: Uložit");
+        assert_eq!(
+            labels(&matches(&all, "SABLON pridat")),
+            ["Akce: Přidat šablonu"]
+        );
     }
 
     #[test]

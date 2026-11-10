@@ -13,10 +13,11 @@ use super::model::{
     DeviceConfig, InstanceConfig, Project, SharedTemplates, Subscription, Validated,
 };
 use crate::encoding::{Encoder, message_encoder_located};
+use crate::i18n::{Text, text};
 use crate::render::{
     CompiledTemplate, TemplateError, base_context, instance_id_context, is_reserved, tick_context,
 };
-use crate::topic::check_filter;
+use crate::topic::{FilterProblem, check_filter};
 use crate::value::Value;
 
 /// A template's messages and subscription topics, compiled once for all the devices that use it.
@@ -90,20 +91,13 @@ impl ProjectFile {
             .collect();
         for template in &self.templates {
             if is_builtin(&template.id) {
-                errors.push(
-                    ProjectError::template(
-                        &template.id,
-                        format!(
-                            "`{}` is a built-in template id; choose another id",
-                            template.id
-                        ),
-                    )
-                    .at("id"),
-                );
+                let text = text!("template-builtin-id", id = &template.id);
+                errors.push(ProjectError::template(&template.id, text).at("id"));
                 continue;
             }
             if templates.contains_key(&template.id) {
-                errors.push(ProjectError::template(&template.id, "duplicate template id").at("id"));
+                let text = text!("template-duplicate-id");
+                errors.push(ProjectError::template(&template.id, text).at("id"));
                 templates.insert(template.id.clone(), TemplateStatus::Broken);
                 continue;
             }
@@ -142,7 +136,7 @@ impl ProjectFile {
                 Err(Vec::new())
             } else {
                 Err(vec![
-                    ProjectError::device(&spec.id, "duplicate device id").at("id"),
+                    ProjectError::device(&spec.id, text!("device-duplicate-id")).at("id"),
                 ])
             };
             match resolved {
@@ -175,10 +169,8 @@ fn resolve_entry(
         Some(TemplateStatus::Usable(template, compiled)) => (*template, compiled),
         Some(TemplateStatus::Broken) => return Err(Vec::new()),
         None => {
-            return Err(vec![
-                ProjectError::device(&spec.id, format!("unknown template `{}`", spec.template))
-                    .at("template"),
-            ]);
+            let text = text!("device-unknown-template", template = &spec.template);
+            return Err(vec![ProjectError::device(&spec.id, text).at("template")]);
         }
     };
     let device = resolve_device(spec, template, compiled, seed)?;
@@ -191,14 +183,11 @@ fn resolve_entry(
 }
 
 /// The error for the first instance of `device` whose ID another device already uses.
-fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Option<String> {
+fn instance_clash(device: &DeviceConfig, owners: &HashMap<String, String>) -> Option<Text> {
     device.instances.iter().find_map(|instance| {
-        owners.get(&instance.id).map(|owner| {
-            format!(
-                "instance id `{}` is already used by device `{owner}`",
-                instance.id
-            )
-        })
+        owners
+            .get(&instance.id)
+            .map(|owner| text!("instance-id-taken", id = &instance.id, device = owner))
     })
 }
 
@@ -209,36 +198,31 @@ fn check_template(
     broker: &BrokerSpec,
     base_dir: &Path,
 ) -> Result<Compiled, Vec<ProjectError>> {
-    let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
+    let at = |field: &str, text: Text| ProjectError::template(&template.id, text).at(field);
     let mut problems = check_properties(template, broker);
     if template.messages.is_empty() {
-        problems.push(at("messages", "at least one message is required".into()));
+        problems.push(at("messages", text!("template-no-messages")));
     }
     if template.fields.is_empty() {
-        problems.push(at("fields", "at least one field is required".into()));
+        problems.push(at("fields", text!("template-no-fields")));
     }
     if template.qos > 2 {
-        problems.push(at(
-            "qos",
-            format!("qos must be 0, 1 or 2, got {}", template.qos),
-        ));
+        problems.push(at("qos", text!("qos-range", qos = template.qos)));
     }
     if template.interval.is_zero() {
-        problems.push(at("interval", "interval must be greater than 0".into()));
+        problems.push(at("interval", text!("greater-than-zero", key = "interval")));
     }
     for (name, spec) in &template.fields {
         let field = format!("fields.{name}");
         if is_reserved(name) {
-            problems.push(at(&field, format!("field `{name}` uses a reserved name")));
+            problems.push(at(&field, text!("field-reserved-name", name = name)));
         }
+        let field_problem = |problem: Text| text!("field-problem", name = name, problem = problem);
         for e in spec.problems() {
-            problems.push(at(&field, format!("field `{name}`: {e}")));
+            problems.push(at(&field, field_problem(e)));
         }
         if let Some(e) = spec.script_problem() {
-            problems.push(at(
-                &format!("{field}.script"),
-                format!("field `{name}`: {e}"),
-            ));
+            problems.push(at(&format!("{field}.script"), field_problem(e)));
         }
     }
     let subscription_topics = check_subscriptions(template, &mut problems);
@@ -279,27 +263,24 @@ fn check_subscriptions(
     let mut topics = Vec::with_capacity(template.subscriptions.len());
     for (i, subscription) in template.subscriptions.iter().enumerate() {
         let n = i + 1;
-        let mut at = |key: &str, message: String| {
+        let mut at = |key: &str, text: Text| {
             problems.push(
-                ProjectError::template(&template.id, message)
-                    .at(format!("subscriptions[{n}].{key}")),
+                ProjectError::template(&template.id, text).at(format!("subscriptions[{n}].{key}")),
             );
         };
+        let subscription_problem =
+            |problem: Text| text!("subscription-problem", n = n, problem = problem);
         match CompiledTemplate::compile_named(&topic_key(i), &subscription.topic) {
             Ok(topic) => topics.push(topic),
-            Err(e) => at("topic", e),
+            // MiniJinja's syntax error, which names the topic's key path.
+            Err(e) => at("topic", text!("verbatim", text = e)),
         }
         if subscription.qos > 2 {
-            at(
-                "qos",
-                format!(
-                    "subscription {n}: qos must be 0, 1 or 2, got {}",
-                    subscription.qos
-                ),
-            );
+            let qos = text!("qos-range", qos = subscription.qos);
+            at("qos", subscription_problem(qos));
         }
         if let Err(e) = subscription.script.compiled() {
-            at("script", format!("subscription {n}: script {e}"));
+            at("script", subscription_problem(e));
         }
     }
     topics
@@ -363,23 +344,20 @@ fn resolve_device(
 
 /// Checks the device's count, interval and param names.
 fn check_device(spec: &DeviceSpec, template: &TemplateSpec) -> Vec<ProjectError> {
-    let at = |field: &str, message: String| ProjectError::device(&spec.id, message).at(field);
+    let at = |field: &str, text: Text| ProjectError::device(&spec.id, text).at(field);
     let mut problems = Vec::new();
     if spec.count == 0 {
-        problems.push(at("count", "count must be at least 1".into()));
+        problems.push(at("count", text!("count-zero")));
     }
     if spec.interval.is_some_and(|i| i.is_zero()) {
-        problems.push(at("interval", "interval must be greater than 0".into()));
+        problems.push(at("interval", text!("greater-than-zero", key = "interval")));
     }
     for name in spec.params.keys() {
         let field = format!("params.{name}");
         if is_reserved(name) {
-            problems.push(at(&field, format!("param `{name}` uses a reserved name")));
+            problems.push(at(&field, text!("param-reserved-name", name = name)));
         } else if template.fields.contains_key(name) {
-            problems.push(at(
-                &field,
-                format!("param `{name}` has the same name as a field"),
-            ));
+            problems.push(at(&field, text!("param-field-name", name = name)));
         }
     }
     problems
@@ -387,14 +365,14 @@ fn check_device(spec: &DeviceSpec, template: &TemplateSpec) -> Vec<ProjectError>
 
 /// Renders `instance_id` (or the default pattern) for every index. Fails on the first ID that is
 /// empty or repeats.
-pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
+pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, Text> {
     let pattern = spec
         .instance_id
         .as_deref()
         .unwrap_or(default_instance_id_pattern(spec.count));
     // Compiled once and rendered per index: validation runs on every edit in the GUI and a
     // device may have thousands of instances.
-    let id_error = |e: String| format!("instance_id: {e}");
+    let id_error = |e: String| text!("instance-id-template", error = e);
     let pattern = CompiledTemplate::compile(pattern).map_err(id_error)?;
     let mut ctx = instance_id_context(&spec.id, &spec.params);
     let mut ids = Vec::new();
@@ -403,12 +381,10 @@ pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
         ctx.insert("index".into(), index.into());
         let id = pattern.render(&ctx).map_err(id_error)?;
         if id.is_empty() {
-            return Err("instance_id renders to an empty string".to_string());
+            return Err(text!("instance-id-empty"));
         }
         if !seen.insert(id.clone()) {
-            return Err(format!(
-                "instance id `{id}` repeats; include {{{{ index }}}} in instance_id"
-            ));
+            return Err(text!("instance-id-repeats", id = id));
         }
         ids.push(id);
     }
@@ -417,7 +393,7 @@ pub(crate) fn instance_ids(spec: &DeviceSpec) -> Result<Vec<String>, String> {
 
 /// Checks the MQTT 5 properties of `template`'s messages and availability against `broker`.
 fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<ProjectError> {
-    let at = |field: &str, message: String| ProjectError::template(&template.id, message).at(field);
+    let at = |field: &str, text: Text| ProjectError::template(&template.id, text).at(field);
     let mut problems = Vec::new();
     let mqtt5 = broker.mqtt_version == MqttVersion::V5;
     for (i, message) in template.messages.iter().enumerate() {
@@ -426,13 +402,13 @@ fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<Project
             let field = key("message_expiry");
             match whole_seconds(&field, expiry) {
                 Err(e) => problems.push(at(&field, e)),
-                Ok(0) => problems.push(at(&field, format!("{field} must be at least 1s"))),
+                Ok(0) => problems.push(at(&field, text!("at-least-1s", key = &field))),
                 Ok(_) => {}
             }
         }
         if message.content_type.as_deref() == Some("") {
             let field = key("content_type");
-            problems.push(at(&field, format!("{field} must not be empty")));
+            problems.push(at(&field, text!("must-not-be-empty", key = &field)));
         }
         if !mqtt5 {
             let mut needs = |field: String| problems.push(at(&field, needs_mqtt5(&field)));
@@ -457,16 +433,12 @@ fn check_properties(template: &TemplateSpec, broker: &BrokerSpec) -> Vec<Project
         problems.push(at(WILL_DELAY, needs_mqtt5(WILL_DELAY)));
     } else if delay > broker.session_expiry {
         let show = |d| humantime::format_duration(d).to_string();
-        problems.push(at(
-            WILL_DELAY,
-            format!(
-                "availability.will_delay {} is longer than the broker's session_expiry {}; \
-                 set session_expiry to at least {}",
-                show(delay),
-                show(broker.session_expiry),
-                show(delay)
-            ),
-        ));
+        let text = text!(
+            "will-delay-after-session-expiry",
+            delay = show(delay),
+            expiry = show(broker.session_expiry)
+        );
+        problems.push(at(WILL_DELAY, text));
     }
     problems
 }
@@ -497,13 +469,24 @@ fn subscriptions(
                 field: topic_key(i),
                 message,
             };
-            let filter = topic.render(&base).map_err(failed)?;
+            let n = i + 1;
+            // MiniJinja's render error.
+            let filter = topic
+                .render(&base)
+                .map_err(|e| failed(text!("verbatim", text = e)))?;
             check_filter(&filter).map_err(|e| {
-                let n = i + 1;
-                failed(if filter.is_empty() {
-                    format!("subscription {n} topic {e}")
-                } else {
-                    format!("subscription {n} topic `{filter}`: {e}")
+                let invalid = |problem: Text| {
+                    text!(
+                        "subscription-topic-invalid",
+                        n = n,
+                        filter = &filter,
+                        problem = problem
+                    )
+                };
+                failed(match e {
+                    FilterProblem::Empty => text!("subscription-topic-empty", n = n),
+                    FilterProblem::HashNotLast => invalid(text!("filter-hash-not-last")),
+                    FilterProblem::PlusNotWhole => invalid(text!("filter-plus-not-whole")),
                 })
             })?;
             Ok(Subscription {
@@ -522,16 +505,17 @@ fn merge_fields(
     spec: &DeviceSpec,
     template: &TemplateSpec,
 ) -> Result<BTreeMap<String, FieldSpec>, Vec<ProjectError>> {
-    let at = |name: &str, message: String| {
-        ProjectError::device(&spec.id, message).at(format!("fields.{name}"))
-    };
+    let at =
+        |name: &str, text: Text| ProjectError::device(&spec.id, text).at(format!("fields.{name}"));
     let mut fields = template.fields.clone();
     let mut problems = Vec::new();
     for (name, table) in &spec.fields {
         let Some(base) = fields.get(name) else {
-            problems.push(at(name, format!("override of unknown field `{name}`")));
+            problems.push(at(name, text!("field-override-unknown", name = name)));
             continue;
         };
+        let override_problem =
+            |problem: Text| text!("field-override-problem", name = name, problem = problem);
         let mut merged = toml::Table::try_from(base).expect("a field serializes to a table");
         if table.contains_key("generator") {
             merged.retain(|key, _| FieldSpec::LABEL_KEYS.contains(&key));
@@ -541,22 +525,24 @@ fn merge_fields(
             Ok(field) => {
                 let field_problems = field.problems();
                 let script_problem = field.script_problem();
-                for e in &field_problems {
-                    problems.push(at(name, format!("field `{name}` override: {e}")));
+                let valid = field_problems.is_empty() && script_problem.is_none();
+                for e in field_problems {
+                    problems.push(at(name, override_problem(e)));
                 }
-                if let Some(e) = &script_problem {
+                if let Some(e) = script_problem {
                     problems.push(
-                        ProjectError::device(&spec.id, format!("field `{name}` override: {e}"))
+                        ProjectError::device(&spec.id, override_problem(e))
                             .at(format!("fields.{name}.script")),
                     );
                 }
-                if field_problems.is_empty() && script_problem.is_none() {
+                if valid {
                     fields.insert(name.clone(), field);
                 }
             }
+            // The TOML deserializer's own text, such as ``missing field `max` ``.
             Err(e) => problems.push(at(
                 name,
-                format!("field `{name}` override: {}", e.message()),
+                override_problem(text!("verbatim", text = e.message())),
             )),
         }
     }
@@ -594,6 +580,7 @@ mod tests {
     use super::*;
     use crate::encoding::Encoding;
     use crate::generator::GeneratorSpec;
+    use crate::i18n::Language;
     use crate::project::error::Location;
     use std::time::Duration;
 
@@ -1005,6 +992,47 @@ params = {{ room = "r" }}
     }
 
     #[test]
+    fn problems_show_in_czech_with_library_texts_left_as_they_are() {
+        let validated = validate(&format!("[broker]\nport = 0\n{}", every_error_class()));
+        let czech: Vec<String> = validated
+            .errors
+            .iter()
+            .map(|e| e.to_string_in(Language::Czech))
+            .collect();
+        assert_eq!(
+            czech,
+            [
+                "broker: port nesmí být 0",
+                "šablona `co2`: `co2` je ID vestavěné šablony; zvolte jiné ID",
+                "šablona `broken`: pole `seq` používá vyhrazený název",
+                "šablona `broken`: pole `v`: step musí být větší než 0",
+                "šablona `broken`: syntax error: unexpected end of input, \
+                 expected end of variable block (in messages[1].payload:1)",
+                "zařízení `unknown`: neznámá šablona `nope`",
+                "zařízení `dup`: duplicitní ID zařízení",
+                "zařízení `clash`: ID instance `a` už používá zařízení `a`",
+                "zařízení `bad-override`: parametr `index` používá vyhrazený název",
+                "zařízení `bad-override`: přepsání neznámého pole `temp`",
+                "zařízení `typo`: undefined value: `room` is undefined (in availability.topic:1)",
+                "zařízení `zero`: count musí být alespoň 1",
+            ]
+        );
+        for error in &validated.errors {
+            assert_eq!(error.message_in(Language::English), error.message);
+        }
+    }
+
+    #[test]
+    fn a_toml_error_keeps_the_parser_text_after_a_czech_location() {
+        let errors = ProjectFile::parse("[broker]\nport = \"x\"\n").unwrap_err();
+        let czech = errors[0].to_string_in(Language::Czech);
+        assert!(
+            czech.starts_with("řádek 2, sloupec 8: invalid type"),
+            "{czech}"
+        );
+    }
+
+    #[test]
     fn param_with_field_name_is_an_error() {
         let src = format!(
             "{TEMPLATE}
@@ -1036,6 +1064,45 @@ params = {{ room = \"+\" }}
                 "device `d`: availability topic: topic `b/+/d/status` contains a wildcard"
             ),
             "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_message_topic_that_renders_empty_or_with_a_wildcard_names_its_message() {
+        let template = |topic: &str| {
+            format!(
+                "[[templates]]\nid = \"t\"\nmessages = [{{ topic = \"a\", payload = \"1\" }}, \
+                 {{ topic = \"{topic}\", payload = \"1\" }}]\n\
+                 fields.v = {{ generator = \"constant\", value = 1 }}\n\
+                 [[devices]]\nid = \"d\"\ntemplate = \"t\"\nparams = {{ p = \"+\" }}\n"
+            )
+        };
+        let errors = |topic: &str| {
+            let validated = validate(&template(topic));
+            let english = error_strings(&validated);
+            let czech: Vec<String> = validated
+                .errors
+                .iter()
+                .map(|e| e.message_in(Language::Czech))
+                .collect();
+            (english, czech)
+        };
+        assert_eq!(
+            errors("{{ '' }}"),
+            (
+                vec!["device `d`: message 2 topic: topic is empty".to_string()],
+                vec!["topic zprávy 2: topic je prázdný".to_string()]
+            )
+        );
+        assert_eq!(
+            errors("x/{{ p }}"),
+            (
+                vec![
+                    "device `d`: message 2 topic: topic `x/+` contains a wildcard (+ or #)"
+                        .to_string()
+                ],
+                vec!["topic zprávy 2: topic `x/+` obsahuje wildcard (+ nebo #)".to_string()]
+            )
         );
     }
 
