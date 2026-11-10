@@ -56,7 +56,8 @@ build, for judging speed: a debug build lays out the window about ten times slow
 
 `release.sh` prepares a release and `release-check.sh` checks one; `macos-app.sh` turns the
 window's macOS archive into `Senzor.app` (the release workflow runs it on a Mac), and
-`homebrew-cask.sh` writes the window's Homebrew cask for a release. The `*.test.sh`
+`homebrew-cask.sh` writes the window's Homebrew cask for a release, and `winget.sh` and
+`winget-submit.sh` write its winget manifests and submit them to winget-pkgs. The `*.test.sh`
 scripts test them in throwaway folders and repositories, on any system; CI runs them all.
 
 ```bash

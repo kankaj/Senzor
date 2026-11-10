@@ -43,12 +43,13 @@ global-artifacts-jobs = ["./macos-app", "./docs-archive"]
 # After the GitHub Release exists, side by side so one failing does not hold back another: the
 # production docs follow the release (the `release` branch), and the Homebrew tap gets dist's
 # formula for senzor-cli and our cask for the window (Senzor.app), which dist does not make; both
-# Homebrew jobs push with the HOMEBREW_TAP_TOKEN secret.
+# Homebrew jobs push with the HOMEBREW_TAP_TOKEN secret; and winget gets a pull request per
+# package in microsoft/winget-pkgs (winget.yml, with the WINGET_TOKEN secret).
 tap = "kankaj/homebrew-tap"
-publish-jobs = ["./publish-docs", "homebrew", "./homebrew-cask"]
+publish-jobs = ["./publish-docs", "homebrew", "./homebrew-cask", "./winget"]
 # What the custom jobs may do beyond reading: the app job attests its zips as dist does its files;
 # the docs job pushes the `release` branch.
-github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-cask" = { contents = "read" } }
+github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-cask" = { contents = "read" }, "winget" = { contents = "read" } }
 
 [dist.github-custom-runners]
 # Linux on the older Ubuntu, so the binaries need only glibc 2.35; ARM natively on GitHub's ARM

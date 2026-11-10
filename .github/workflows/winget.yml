@@ -1,0 +1,41 @@
+# Submits a release to winget: Kankaj.Senzor (the window's MSI) and Kankaj.SenzorCLI (the CLI's
+# zip, as a portable command). dev/winget.sh writes the manifests from the release's checksums and
+# dev/winget-submit.sh opens a pull request per package in microsoft/winget-pkgs from the token
+# owner's fork; Microsoft's bots validate and merge it (a new package's first one is reviewed by
+# people). dist runs this as a publish job once the GitHub Release exists (dist-workspace.toml); a
+# pre-release leaves winget alone. Needs WINGET_TOKEN: a classic token of the fork's owner with
+# the public_repo scope.
+name: winget
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  winget:
+    name: Submit to winget
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'senzor*-pc-windows-msvc.*.sha256' --dir sums
+          sha() { cut -d' ' -f1 "sums/$1.sha256"; }
+          dev/winget.sh Kankaj.Senzor "${TAG#v}" \
+            "$(sha senzor-x86_64-pc-windows-msvc.msi)" "$(sha senzor-aarch64-pc-windows-msvc.msi)" out
+          dev/winget.sh Kankaj.SenzorCLI "${TAG#v}" \
+            "$(sha senzor-cli-x86_64-pc-windows-msvc.zip)" "$(sha senzor-cli-aarch64-pc-windows-msvc.zip)" out
+      - name: Submit to winget-pkgs
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: dev/winget-submit.sh out "${TAG#v}" Kankaj.Senzor Kankaj.SenzorCLI
