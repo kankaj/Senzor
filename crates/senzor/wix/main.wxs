@@ -86,7 +86,8 @@
         <Property Id='DiskPrompt' Value='Senzor Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
-            <!-- Senzor: the Start menu entry (all users, like the install). -->
+            <!-- Senzor: the Start menu entry (all users, like the install). Its KeyPath is a registry
+                 value under HKCU, as the validation of a non-advertised shortcut asks (ICE43). -->
             <Directory Id='ProgramMenuFolder'>
                 <Component Id='StartMenuShortcut' Guid='A587F673-C837-4435-BF03-56F385DB2E43'>
                     <Shortcut
@@ -96,7 +97,7 @@
                         Target='[Bin]senzor.exe'
                         WorkingDirectory='Bin'
                         Icon='ProductICO'/>
-                    <RegistryValue Root='HKLM' Key='Software\Senzor' Name='StartMenuShortcut' Type='integer' Value='1' KeyPath='yes'/>
+                    <RegistryValue Root='HKCU' Key='Software\Senzor' Name='StartMenuShortcut' Type='integer' Value='1' KeyPath='yes'/>
                 </Component>
             </Directory>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
