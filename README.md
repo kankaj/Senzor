@@ -1,5 +1,15 @@
 # Senzor
 
+<a href="https://sonarcloud.io/summary/new_code?id=kankaj_Senzor"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://sonarcloud.io/images/project_badges/sonarcloud-dark.svg">
+  <img alt="SonarQube Cloud" src="https://sonarcloud.io/images/project_badges/sonarcloud-light.svg">
+</picture></a>
+
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=kankaj_Senzor&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=kankaj_Senzor)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=kankaj_Senzor&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=kankaj_Senzor)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=kankaj_Senzor&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=kankaj_Senzor)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=kankaj_Senzor&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=kankaj_Senzor)
+
 Simulated MQTT sensors, for testing whatever reads them: a dashboard, a backend that stores
 readings, a home automation setup.
 
