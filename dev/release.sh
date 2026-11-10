@@ -13,8 +13,8 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "release: $*" >&2; exit 1; }
 ask() {
-    local answer
-    read -r -p "$1 [y/N] " answer || true
+    local question=$1 answer
+    read -r -p "$question [y/N] " answer || true
     [[ $answer == y || $answer == Y || $answer == yes ]] || fail "stopped; nothing after this step was done"
 }
 

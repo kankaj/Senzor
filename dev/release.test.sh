@@ -33,8 +33,12 @@ repo() {
 # would count as a failure.)
 answers() { printf 'y\ny\ny\ny\ny\n'; }
 
-run() { (cd "$1" && shift && RELEASE_SKIP_CARGO=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
-    GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t dev/release.sh "$@"); }
+run() {
+    local dir=$1
+    shift
+    (cd "$dir" && RELEASE_SKIP_CARGO=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
+        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t dev/release.sh "$@")
+}
 
 # A release, every question answered yes.
 repo "$work/a"

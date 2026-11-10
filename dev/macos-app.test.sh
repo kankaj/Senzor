@@ -9,7 +9,10 @@ trap 'rm -rf "$work"' EXIT
 failures=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; failures=$((failures + 1)); }
-check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+check() {
+    local name=$1 condition=$2
+    if eval "$condition"; then ok "$name"; else bad "$name"; fi
+}
 
 # A release archive as dist makes it: senzor-<target>/ with the binary and the text files.
 target=aarch64-apple-darwin
@@ -39,7 +42,10 @@ check "the icon" "cmp -s '$app/Resources/senzor.icns' '$here/../assets/icon/senz
 check "LICENSE and NOTICE" "[[ -f '$app/Resources/LICENSE' && -f '$app/Resources/NOTICE' ]]"
 
 plist="$app/Info.plist"
-value() { python3 -I -c "import plistlib,sys; print(plistlib.load(open(sys.argv[1],'rb'))[sys.argv[2]])" "$plist" "$1"; }
+value() {
+    local key=$1
+    python3 -I -c "import plistlib,sys; print(plistlib.load(open(sys.argv[1],'rb'))[sys.argv[2]])" "$plist" "$key"
+}
 version=$(awk '/^\[workspace\.package\]/{i=1;next} /^\[/{i=0} i&&/^version *=/{gsub(/.*= *"|".*/,"");print;exit}' \
     "$here/../Cargo.toml")
 check "the bundle identifier is the app ID" "[[ \$(value CFBundleIdentifier) == cz.kankaj.Senzor ]]"
