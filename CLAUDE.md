@@ -67,6 +67,10 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   release in `website/public/versions.json`, the release workflow attaches its docs as an archive
   (`docs-archive.yml`), and the production build collects all of them (`website/README.md`,
   "Versions"). The app's `DOCS_URL` points at its own minor version.
+- Package channels run as publish jobs once the GitHub Release exists, side by side: Homebrew gets
+  dist's formula for `senzor-cli` and our cask for the window (`homebrew-cask.yml`, written by
+  `dev/homebrew-cask.sh`), both in `kankaj/homebrew-tap` with the `HOMEBREW_TAP_TOKEN` secret.
+  The docs job (`publish-docs.yml`) is a publish job too, so a failing channel never holds it back.
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
 - Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there

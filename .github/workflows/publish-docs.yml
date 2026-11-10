@@ -1,8 +1,8 @@
 # Publishes the docs of a release: moves the `release` branch to the released commit, which makes
 # Cloudflare's Workers Builds build and deploy senzor.kankaj.cz (its production branch is
-# `release`; every other branch, `main` among them, gets a preview). dist runs this after the
-# GitHub Release is announced (post-announce-jobs in dist-workspace.toml); a pre-release leaves
-# the production docs alone. Only a fast-forward: `release` never moves backwards or sideways.
+# `release`; every other branch, `main` among them, gets a preview). dist runs this once the
+# GitHub Release exists, next to the package channels (publish-jobs in dist-workspace.toml), so a
+# failing channel does not hold the docs back; a pre-release leaves the production docs alone. Only a fast-forward: `release` never moves backwards or sideways.
 name: Publish the docs
 
 on:
