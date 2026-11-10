@@ -6,7 +6,7 @@
 // Any failure fails the build: a deployment must not lose a version.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,9 @@ const { versions } = JSON.parse(readFileSync('public/versions.json', 'utf8'));
 const releases = 'https://github.com/kankaj/Senzor/releases/download';
 const local = process.env.DOCS_ARCHIVES;
 const work = mkdtempSync(join(tmpdir(), 'senzor-docs-'));
+// tar from a system folder, not whichever one PATH finds first.
+const tar = ['/usr/bin/tar', '/bin/tar'].find((path) => existsSync(path));
+if (!tar) throw new Error('no tar in /usr/bin or /bin');
 
 async function get(release, file) {
   if (local) return readFileSync(join(local, file));
@@ -26,16 +29,21 @@ async function get(release, file) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-for (const { minor, release } of versions) {
-  const name = `senzor-docs-${minor}.tar.gz`;
-  const archive = await get(release, name);
-  const expected = (await get(release, `${name}.sha256`)).toString('utf8').trim().split(/\s+/)[0];
+// Every version's archive and checksum at once; then each is checked and unpacked in turn.
+const downloads = await Promise.all(
+  versions.map(async ({ minor, release }) => {
+    const name = `senzor-docs-${minor}.tar.gz`;
+    const [archive, sum] = await Promise.all([get(release, name), get(release, `${name}.sha256`)]);
+    return { minor, release, name, archive, expected: sum.toString('utf8').trim().split(/\s+/)[0] };
+  }),
+);
+for (const { minor, release, name, archive, expected } of downloads) {
   const actual = createHash('sha256').update(archive).digest('hex');
   if (actual !== expected) throw new Error(`${name} of ${release}: SHA-256 ${actual}, expected ${expected}`);
   const path = join(work, name);
   writeFileSync(path, archive);
   // The archive holds one folder, <minor>/.
-  execFileSync('tar', ['-xzf', path, '-C', 'out', `${minor}/`], { stdio: 'inherit' });
+  execFileSync(tar, ['-xzf', path, '-C', 'out', `${minor}/`], { stdio: 'inherit' });
   console.log(`versions: ${minor} (${release}) in out/${minor}/`);
 }
 console.log(`versions: ${versions.length} version(s) added`);

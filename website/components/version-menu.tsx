@@ -14,12 +14,12 @@ export function VersionMenu({
   current,
   siteUrl,
   previewUrl,
-}: {
+}: Readonly<{
   /** The minor version these docs are, or `next` for the preview. */
   current: string;
   siteUrl: string;
   previewUrl: string;
-}) {
+}>) {
   // Next.js leaves the base path out of usePathname, so this is already /docs/….
   const docsPath = docsPathOf(usePathname(), '');
   const [released, setReleased] = useState<ReleasedVersion[]>([]);
@@ -41,7 +41,7 @@ export function VersionMenu({
   }
   return (
     <label className="flex items-center gap-2 text-sm text-fd-muted-foreground">
-      Version
+      <span>Version</span>
       <select
         className="flex-1 rounded-md border bg-fd-secondary px-2 py-1 text-fd-foreground"
         value={current}
