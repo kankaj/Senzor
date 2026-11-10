@@ -2,11 +2,12 @@
   "name": "website",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "next build && node scripts/versions.mjs",
     "dev": "next dev",
     "start": "serve out",
     "types:check": "next typegen && tsc --noEmit",
-    "check:links": "node scripts/check-links.mjs"
+    "check:links": "node scripts/check-links.mjs",
+    "test": "node --test lib/*.test.ts"
   },
   "dependencies": {
     "cn": "^0.4.0",

@@ -491,7 +491,7 @@
       "type": "string"
     },
     "Script": {
-      "description": "A Rhai script; see https://senzor.kankaj.cz/docs/concepts/scripts",
+      "description": "A Rhai script; see https://senzor.kankaj.cz/1.0/docs/concepts/scripts",
       "type": "string"
     },
     "SimulationSpec": {

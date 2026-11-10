@@ -9,10 +9,12 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failures=0
 
-# project DIR VERSION CHANGELOG_HEADING CZECH_HEADING [HIGHLIGHTS]
+# project DIR VERSION CHANGELOG_HEADING CZECH_HEADING [HIGHLIGHTS] [DOCS_RELEASE]
 project() {
-    local dir=$1 version=$2 heading=$3 czech=$4 highlights=${5:-yes}
-    mkdir -p "$dir/crates/senzor/locales/cs"
+    local dir=$1 version=$2 heading=$3 czech=$4 highlights=${5:-yes} docs=${6:-$2}
+    mkdir -p "$dir/crates/senzor/locales/cs" "$dir/website/public"
+    printf '{\n  "versions": [{ "minor": "%s", "release": "%s" }]\n}\n' "$(cut -d. -f1,2 <<< "$docs")" "$docs" \
+        > "$dir/website/public/versions.json"
     printf '[workspace]\nmembers = ["crates/*"]\n\n[workspace.package]\nversion = "%s"\nedition = "2024"\n' \
         "$version" > "$dir/Cargo.toml"
     {
@@ -56,6 +58,10 @@ expect "the section needs Highlights" 1 'the 1.0.0 section has no Highlights' --
 
 project "$work/no-czech" 1.0.0 '## [1.0.0] - 2026-11-20' '## [0.9.0]'
 expect "the Czech highlights are needed" 1 'whats-new.md has no section for 1.0.0' -- --root "$work/no-czech" v1.0.0
+
+project "$work/old-docs" 1.0.1 '## [1.0.1] - 2026-11-20' '## [1.0.1]' yes 1.0.0
+expect "a tag needs its docs in the versions list" 1 'website/public/versions.json does not list 1.0.1' -- --root "$work/old-docs" v1.0.1
+expect "without a tag, the list is not checked" 0 "1.0.1 is ready" -- --root "$work/old-docs"
 
 project "$work/rc" 1.1.0-rc.1 '## [1.1.0] - Unreleased' '## [1.1.0]'
 expect "a pre-release may be undated" 0 "1.1.0-rc.1 is ready" -- --root "$work/rc" v1.1.0-rc.1

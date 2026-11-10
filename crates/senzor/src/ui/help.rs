@@ -159,9 +159,18 @@ mod tests {
 
         h.get_by_label("About Keep alive").click();
         h.step();
-        let opened = h.output().platform_output.commands.iter().any(|c| {
-            matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == "https://senzor.kankaj.cz/docs/gui/broker-settings#keep-alive")
-        });
+        // The docs of the version that is running: /<major>.<minor>/docs/.
+        let expected = format!(
+            "https://senzor.kankaj.cz/{}.{}/docs/gui/broker-settings#keep-alive",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR")
+        );
+        let opened = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == expected));
         assert!(opened);
     }
 

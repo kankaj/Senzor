@@ -12,6 +12,12 @@ export const siteUrl = 'https://senzor.kankaj.cz';
  */
 export const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
+/**
+ * The preview of the next version (Cloudflare's preview of `main`), offered in the version menu as
+ * "next". Empty until the first preview build shows its address.
+ */
+export const previewUrl = '';
+
 export const gitConfig = {
   user: 'kankaj',
   repo: 'Senzor',

@@ -14,8 +14,10 @@ bad() { echo "FAIL $1"; failures=$((failures + 1)); }
 # A repository on main with an Unreleased 1.0.0 section and its Czech highlights.
 repo() {
     local dir=$1
-    mkdir -p "$dir/dev" "$dir/crates/senzor/locales/cs"
+    mkdir -p "$dir/dev" "$dir/crates/senzor/locales/cs" "$dir/website/public" "$dir/website/lib"
     cp "$here/release.sh" "$here/release-check.sh" "$dir/dev/"
+    cp "$here/../website/lib/versions.ts" "$dir/website/lib/"
+    printf '{\n  "versions": []\n}\n' > "$dir/website/public/versions.json"
     printf '[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.9.0"\nedition = "2024"\n\n[dependencies]\nversion = "9"\n' \
         > "$dir/Cargo.toml"
     printf '# Changelog\n\n## [1.0.0] - Unreleased\n\n### Highlights\n\n- New.\n\n## [0.9.0] - 2026-01-01\n\n### Highlights\n\n- Old.\n' \
@@ -47,6 +49,8 @@ grep -q '^version = "1.0.0"' "$work/a/Cargo.toml" && ok "the version is set" || 
 grep -q '^version = "9"' "$work/a/Cargo.toml" && ok "other version keys stay" || bad "other version keys stay"
 grep -qE "^## \[1\.0\.0\] - $(date +%F)$" "$work/a/CHANGELOG.md" && ok "the section is dated today" \
     || bad "the section is dated today"
+grep -q '"minor": "1.0"' "$work/a/website/public/versions.json" && grep -q '"release": "1.0.0"' "$work/a/website/public/versions.json" \
+    && ok "the release joins the docs versions" || bad "the release joins the docs versions: $(cat "$work/a/website/public/versions.json")"
 [[ $(git -C "$work/a" log -1 --format=%s) == "release: 1.0.0" ]] && ok "the release commit" || bad "the release commit"
 [[ $(git -C "$work/a" cat-file -t v1.0.0 2>/dev/null) == tag ]] && ok "an annotated tag" || bad "an annotated tag"
 [[ $out == *"git push origin main v1.0.0"* ]] && ok "it tells the push command" || bad "it tells the push command: $out"
@@ -74,6 +78,8 @@ fi
 # A pre-release keeps the section undated.
 repo "$work/e"
 if out=$(answers | run "$work/e" 1.0.0-rc.1 2>&1); then ok "a pre-release runs"; else bad "a pre-release runs: $out"; fi
+grep -q '"versions": \[\]' "$work/e/website/public/versions.json" && ok "a pre-release gets no docs version" \
+    || bad "a pre-release gets no docs version"
 grep -q '^## \[1\.0\.0\] - Unreleased$' "$work/e/CHANGELOG.md" && ok "a pre-release leaves Unreleased" \
     || bad "a pre-release leaves Unreleased"
 [[ $(git -C "$work/e" cat-file -t v1.0.0-rc.1 2>/dev/null) == tag ]] && ok "the pre-release tag" || bad "the pre-release tag"

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks that a release can be made: the version in Cargo.toml has a CHANGELOG.md section with
 # Highlights, and their Czech version in crates/senzor/locales/cs/whats-new.md. With a tag
-# (vX.Y.Z, as the release workflow passes it), the tag must name that version and the section must
-# be dated; a pre-release (vX.Y.Z-rc.1) uses the X.Y.Z section, dated or not.
+# (vX.Y.Z, as the release workflow passes it), the tag must name that version, the section must
+# be dated, and website/public/versions.json must give the version's minor docs folder to this
+# release; a pre-release (vX.Y.Z-rc.1) uses the X.Y.Z section, dated or not, and no docs folder.
 #
 # Usage: dev/release-check.sh [--root DIR] [TAG]
 set -euo pipefail
@@ -52,5 +53,16 @@ grep -q '^### Highlights' <<< "$section" || fail "CHANGELOG.md: the $base sectio
 czech="$root/crates/senzor/locales/cs/whats-new.md"
 grep -qE "^## \[${base//./\\.}\]" "$czech" \
     || fail "crates/senzor/locales/cs/whats-new.md has no section for $base (the Czech Highlights)"
+
+if [[ -n $tag && $prerelease == no ]]; then
+    minor=$(cut -d. -f1,2 <<< "$version")
+    node --input-type=module -e '
+        import { readFileSync } from "node:fs";
+        const [file, minor, release] = process.argv.slice(1);
+        const { versions } = JSON.parse(readFileSync(file, "utf8"));
+        process.exit(versions.some((v) => v.minor === minor && v.release === release) ? 0 : 1);
+    ' "$root/website/public/versions.json" "$minor" "$version" \
+        || fail "website/public/versions.json does not list $version for the $minor docs (dev/release.sh adds it)"
+fi
 
 echo "release check: $version is ready${tag:+ to release as $tag}"

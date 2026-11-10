@@ -1,4 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { channel } from './channel';
 import { appName, gitConfig } from './shared';
 import { version } from './version';
 
@@ -10,6 +11,7 @@ export function baseOptions(): BaseLayoutProps {
           <span className="font-semibold">{appName}</span>
           <span className="rounded-md border bg-fd-secondary px-1.5 py-0.5 text-xs font-medium text-fd-muted-foreground">
             v{version}
+            {channel === 'next' ? ' (unreleased)' : null}
           </span>
         </>
       ),

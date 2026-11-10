@@ -104,7 +104,13 @@ impl schemars::JsonSchema for Script {
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "type": "string",
-            "description": "A Rhai script; see https://senzor.kankaj.cz/docs/concepts/scripts"
+            "description": concat!(
+                "A Rhai script; see https://senzor.kankaj.cz/",
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                ".",
+                env!("CARGO_PKG_VERSION_MINOR"),
+                "/docs/concepts/scripts"
+            )
         })
     }
 }

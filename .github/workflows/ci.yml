@@ -72,6 +72,8 @@ jobs:
         with:
           version: 2026.10.17
       - run: pnpm install --frozen-lockfile
+      - name: Tests
+        run: pnpm test
       - name: Links
         run: pnpm check:links
       - name: Types

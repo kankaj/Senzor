@@ -16,6 +16,7 @@ pnpm dev      # development server on http://localhost:3000
 pnpm build    # static export into out/
 pnpm types:check
 pnpm check:links   # internal links, #anchors, images and screenshots in content/docs
+pnpm test          # the site's own logic (lib/*.test.ts, Node's test runner)
 ```
 
 `pnpm build` writes the finished site to `out/`, which any static host can serve. Every page is exported as a folder with an `index.html` (`trailingSlash: true` in `next.config.mjs`), so hosts that do not rewrite `.html` URLs, such as nginx, Apache and S3, find it. The search index is the plain file `out/api/search`.
@@ -40,7 +41,15 @@ pnpm exec serve /tmp/preview   # then open http://localhost:3000/Senzor/
 
 ## Deploying to Cloudflare
 
-The site is published as a Cloudflare Worker that only serves files: [`wrangler.jsonc`](../wrangler.jsonc) at the repository root names the Worker (`senzor-docs`) and points it at `website/out`; unknown paths get `404.html`. [`public/_headers`](public/_headers) gives `/api/search`, the search index, a JSON content type, which its name without an extension does not. Every docs page has a link-preview image, rendered at build time by `app/og/docs/[...slug]/route.tsx` into `out/og/docs/<page>/image.png`; the pages point to it with an absolute URL on `siteUrl` in `lib/shared.ts`, so change that when the domain changes. Cloudflare's Git integration builds and deploys it: once the repository is connected, every push to `main` deploys, and with preview builds on, other branches get preview URLs.
+The site is published as a Cloudflare Worker that only serves files: [`wrangler.jsonc`](../wrangler.jsonc) at the repository root names the Worker (`senzor-docs`) and points it at `website/out`; unknown paths get `404.html`. [`public/_headers`](public/_headers) gives `/api/search`, the search index, a JSON content type, which its name without an extension does not. Every docs page has a link-preview image, rendered at build time by `app/og/docs/[...slug]/route.tsx` into `out/og/docs/<page>/image.png`; the pages point to it with an absolute URL on `siteUrl` in `lib/shared.ts`, so change that when the domain changes. Cloudflare's Git integration builds and deploys it.
+
+The production site shows the docs of the released version: Cloudflare's production branch is `release`, which only the release workflow moves, to each release's tag (`.github/workflows/publish-docs.yml`; a pre-release leaves it alone). Every other branch, `main` above all, gets a preview with the docs of the next version: a banner says they are not released yet and the version badge reads "(unreleased)". The build tells the two apart by `WORKERS_CI_BRANCH`, which Workers Builds sets to the branch's name (`lib/channel.ts`); a build elsewhere counts as released. To see the preview locally: `DOCS_CHANNEL=next pnpm build`, or `DOCS_CHANNEL=next pnpm dev`.
+
+### Versions
+
+Every released minor version keeps its docs at `/<minor>/docs/` (`/1.0/docs/`); `/docs/` is the latest release, and the app's help links open the folder of the version that is running. `public/versions.json` lists the released minor versions, newest first, each with the release whose docs it holds; `dev/release.sh` adds each release to it. For each release, the release workflow builds the docs with `DOCS_BASE_PATH=/<minor>` (`scripts/docs-archive.sh`, in `.github/workflows/docs-archive.yml`) and attaches them as `senzor-docs-<minor>.tar.gz` with a `.sha256` to the GitHub Release. The production build (the `release` branch) then unpacks every listed version's archive into `out/<minor>/` (`scripts/versions.mjs`, run by `pnpm build`), checking each checksum, and fails if one is missing: a deployment never loses a version. To try it locally, with archives in a folder instead of GitHub: `DOCS_VERSIONS=fetch DOCS_ARCHIVES=<folder> pnpm build`.
+
+The **Version** menu above the sidebar (`components/version-menu.tsx`) and the 404 page read `/versions.json` from the site's root in the browser, so the docs of an older version offer the versions released after it too. Picking a version opens the same page there. The 404 page (`app/not-found.tsx`) sends a page that a version lacks to that version's start page, and a version folder that does not exist (a development build of an unreleased version links to one) to the same page of the latest docs. Set `previewUrl` in `lib/shared.ts` to offer the preview as "next" in the menu. Cloudflare marks workers.dev URLs `noindex`, so search engines keep to the production site.
 
 In the Cloudflare dashboard, **Workers & Pages** → **Create application**, connect the GitHub repository, and on **Set up your application** set:
 
@@ -51,6 +60,7 @@ In the Cloudflare dashboard, **Workers & Pages** → **Create application**, con
 | Deploy command                 | `npx wrangler deploy` (the default)                                              |
 | Preview command                | `npx wrangler preview` (the default)                                             |
 | Enable Preview builds          | on                                                                               |
+| Production branch              | `release` (**Settings** → **Build** → **Branch control**)                        |
 | Protect with Cloudflare Access | off (the docs are public)                                                        |
 
 The build runs from the repository root, where `wrangler.jsonc` is: the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.

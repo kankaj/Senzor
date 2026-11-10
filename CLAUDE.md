@@ -14,7 +14,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   `.git/config`); leave the global git config alone.
 - Ask the user before every commit and before every merge or push to `main`; a yes covers only
   the step asked about. Worktrees, branches and uncommitted work need no asking: do the work and
-  run the gates there, then ask. Pushing `main` deploys the docs site (Cloudflare Workers Builds).
+  run the gates there, then ask. Pushing `main` updates the docs preview; the
+  production site (senzor.kankaj.cz) follows releases, through the `release` branch.
 - `docs/`, `openspec/` and `.superpowers/` are git-ignored on purpose: specs, plans, OpenSpec
   changes and work logs stay local.
 
@@ -28,7 +29,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   - `cargo clippy --workspace --all-targets -- -D warnings` and
     `cargo clippy -p senzor --examples --features screenshots -- -D warnings`;
   - `cargo fmt --all --check`;
-  - in `website/`: `pnpm check:links`, `pnpm types:check`, `pnpm build`, when docs changed.
+  - in `website/`: `pnpm test`, `pnpm check:links`, `pnpm types:check`, `pnpm build`, when docs
+    changed.
 - Tool versions: Rust in `rust-toolchain.toml` (rustup and IDEs read it), Node and pnpm in
   `mise.toml`, which also reads the Rust file; CI installs them with mise. `mise trust` once, then
   `mise install`. Change a version there, never in the workflow.
@@ -61,6 +63,10 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   The Windows ARM runner has no WiX: `.github/build-setup.yml` (steps dist runs before every
   build) fetches WiX 3.14.1 there and checks its pinned SHA-256. The Linux window archive carries
   `assets/linux/` (desktop entry, icons, how to install them).
+- The docs keep every released minor version at `/<minor>/docs/`; `dev/release.sh` lists each
+  release in `website/public/versions.json`, the release workflow attaches its docs as an archive
+  (`docs-archive.yml`), and the production build collects all of them (`website/README.md`,
+  "Versions"). The app's `DOCS_URL` points at its own minor version.
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
 - Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there

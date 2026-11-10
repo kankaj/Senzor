@@ -797,8 +797,16 @@ pub fn drop_hint(ctx: &egui::Context) {
     );
 }
 
-/// Where the documentation lives.
-pub const DOCS_URL: &str = "https://senzor.kankaj.cz/docs";
+/// The documentation of the version that is running: every released minor version keeps its docs
+/// at `/<major>.<minor>/docs/`. (A development build of an unreleased version links to a folder
+/// that does not exist yet; the docs site's 404 page sends that to the latest docs.)
+pub const DOCS_URL: &str = concat!(
+    "https://senzor.kankaj.cz/",
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    ".",
+    env!("CARGO_PKG_VERSION_MINOR"),
+    "/docs"
+);
 /// Where the source code lives.
 pub const SOURCE_URL: &str = "https://github.com/kankaj/Senzor";
 

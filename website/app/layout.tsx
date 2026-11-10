@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
+import { Banner } from 'fumadocs-ui/components/banner';
 import { Provider } from '@/components/provider';
+import { channel } from '@/lib/channel';
 import { appDescription, appName, basePath, siteUrl } from '@/lib/shared';
+import { version } from '@/lib/version';
 import './global.css';
 
 // IBM Plex for text and code alike; app/global.css hands the variables to Tailwind's font-sans
@@ -39,6 +42,17 @@ export default function Layout({ children }: LayoutProps<'/'>) {
     >
       <body className="flex flex-col min-h-screen">
         <style dangerouslySetInnerHTML={{ __html: searchHighlight }} />
+        {channel === 'next' ? (
+          <Banner>
+            <span>
+              These docs describe Senzor {version}, not released yet. For the released version, see{' '}
+              <a href={siteUrl} className="underline">
+                {siteUrl.replace('https://', '')}
+              </a>
+              .
+            </span>
+          </Banner>
+        ) : null}
         <Provider>{children}</Provider>
       </body>
     </html>

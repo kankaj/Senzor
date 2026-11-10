@@ -1,0 +1,44 @@
+# Builds this release's docs for their folder /<minor>/ and adds them to the release as
+# senzor-docs-<minor>.tar.gz (an artifact named artifacts-*, like dist's own files). The
+# production site keeps every released minor version: its build unpacks each one's archive
+# (website/scripts/versions.mjs). dist runs this as a global artifacts job (dist-workspace.toml).
+name: Docs archive
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+env:
+  # mise reads settings only from trusted config files: this checkout is ours.
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  archive:
+    name: Docs of this version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node and pnpm in the versions mise.toml pins.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.10.17
+      - name: Build and pack the docs
+        working-directory: website
+        run: |
+          pnpm install --frozen-lockfile
+          scripts/docs-archive.sh ../target/docs-archive
+      - name: Attest
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: target/docs-archive/senzor-docs-*.tar.gz
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: artifacts-docs-archive
+          path: target/docs-archive/
