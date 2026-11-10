@@ -58,26 +58,27 @@
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
-    <!-- Senzor: the file is UTF-8, and the MSI uses the Central European codepage 1250, which has
-         the "ň" of the manufacturer's name (1252, cargo-wix's default, has not). -->
+    <!-- Senzor: the manufacturer is written without the háček. The English dialogs' localization
+         sets the MSI's code page to 1252, which has no "ň" (WiX refuses it, LGHT0311), and the
+         Czech dialogs would show every user Czech. The Store's MSIX keeps "Kaňka". -->
     <Product
         Id='*'
         Name='Senzor'
         UpgradeCode='0046E879-2FB5-4DCB-98A7-564C93156A90'
-        Manufacturer='Jaroslav Kaňka'
+        Manufacturer='Jaroslav Kanka'
         Language='1033'
-        Codepage='1250'
+        Codepage='1252'
         Version='$(var.Version)'>
 
         <Package Id='*'
             Keywords='Installer'
             Description='MQTT sensor simulator: a window to edit, run and watch simulated sensors'
-            Manufacturer='Jaroslav Kaňka'
+            Manufacturer='Jaroslav Kanka'
             InstallerVersion='450'
             Languages='1033'
             Compressed='yes'
             InstallScope='perMachine'
-            SummaryCodepage='1250'
+            SummaryCodepage='1252'
             />
 
         <MajorUpgrade
