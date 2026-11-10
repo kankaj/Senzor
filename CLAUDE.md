@@ -55,7 +55,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   for each Mac (`macos-app.yml`, built by `dev/macos-app.sh`, signed ad hoc) and as an MSI for
   Windows, whose template `crates/senzor/wix/main.wxs` is edited by hand (Start menu entry,
   LICENSE and NOTICE): dist leaves it alone (`allow-dirty`), so carry `[package.metadata.wix]`
-  changes into it yourself. Each Component with `Guid='*'` may hold only one unversioned file.
+  changes into it yourself. Each Component with `Guid='*'` may hold only one unversioned file. The
+  file is UTF-8 and the MSI uses codepage 1250, so "Kaňka" survives.
   The Windows ARM runner has no WiX: `.github/build-setup.yml` (steps dist runs before every
   build) fetches WiX 3.14.1 there and checks its pinned SHA-256. The Linux window archive carries
   `assets/linux/` (desktop entry, icons, how to install them).
