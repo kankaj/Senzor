@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='windows-1252'?>
+<?xml version='1.0' encoding='utf-8'?>
 <!--
   Copyright (C) 2017 Christopher R. Field.
 
@@ -58,13 +58,15 @@
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
+    <!-- Senzor: the file is UTF-8, and the MSI uses the Central European codepage 1250, which has
+         the "ň" of the manufacturer's name (1252, cargo-wix's default, has not). -->
     <Product
         Id='*'
         Name='Senzor'
         UpgradeCode='0046E879-2FB5-4DCB-98A7-564C93156A90'
         Manufacturer='Jaroslav Kaňka'
         Language='1033'
-        Codepage='1252'
+        Codepage='1250'
         Version='$(var.Version)'>
 
         <Package Id='*'
@@ -75,7 +77,7 @@
             Languages='1033'
             Compressed='yes'
             InstallScope='perMachine'
-            SummaryCodepage='1252'
+            SummaryCodepage='1250'
             />
 
         <MajorUpgrade
