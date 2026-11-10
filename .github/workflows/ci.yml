@@ -47,6 +47,7 @@ jobs:
         run: |
           dev/release-check.test.sh
           dev/release.test.sh
+          dev/macos-app.test.sh
           dev/release-check.sh
 
       # The ignored tests need the Mosquitto brokers in dev/compose.yaml (see dev/README.md).

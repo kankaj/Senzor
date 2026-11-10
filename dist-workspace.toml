@@ -31,6 +31,14 @@ pr-run-mode = "upload"
 github-attestations = true
 # Before anything is built: the tag, Cargo.toml, CHANGELOG.md and the Czech highlights agree.
 plan-jobs = ["./release-check"]
+# crates/senzor/wix/main.wxs, the MSI's template, has hand edits (a Start menu entry, LICENSE and
+# NOTICE), so dist must not regenerate it. After changing [package.metadata.wix] in
+# crates/senzor/Cargo.toml, carry the change into main.wxs by hand.
+allow-dirty = ["msi"]
+# After the platform builds: Senzor.app for both Macs, from the window's macOS archives.
+global-artifacts-jobs = ["./macos-app"]
+# What the custom jobs may do beyond reading: the app job attests its zips as dist does its files.
+github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" } }
 
 [dist.github-custom-runners]
 # Linux on the older Ubuntu, so the binaries need only glibc 2.35; ARM natively on GitHub's ARM

@@ -7,7 +7,7 @@ use senzor_core::engine::{InstanceState, InstanceStatus};
 
 use crate::i18n::t;
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 use crate::icon::APP_ID;
 
 /// Desktop notifications, behind a trait so tests can record them instead.
@@ -22,6 +22,8 @@ pub struct DesktopNotifier;
 
 impl Notifier for DesktopNotifier {
     fn notify(&mut self, title: &str, body: &str) {
+        #[cfg(target_os = "macos")]
+        use_own_bundle();
         let mut notification = notify_rust::Notification::new();
         notification.summary(title).body(body).appname("Senzor");
         // The desktop finds the app's name and icon through its `.desktop` file.
@@ -41,6 +43,20 @@ impl Notifier for DesktopNotifier {
             eprintln!("Could not show a desktop notification: {error}");
         }
     }
+}
+
+/// Inside `Senzor.app`, notifications come from Senzor, with its name and icon; otherwise
+/// notify-rust sends them as another app (Finder). Only when macOS knows an app of that name with
+/// Senzor's bundle identifier, so a bare `senzor` binary keeps notifying as before.
+#[cfg(target_os = "macos")]
+fn use_own_bundle() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if notify_rust::get_bundle_identifier_or_default("Senzor") == APP_ID {
+            // An error only means another app stays the sender.
+            let _ = notify_rust::set_application(APP_ID);
+        }
+    });
 }
 
 /// An instance that failed, and why.

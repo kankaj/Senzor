@@ -51,6 +51,12 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - `dev/release.sh X.Y.Z` sets the version, dates the CHANGELOG section, checks, commits
   `release: X.Y.Z` and tags; it never pushes. The push it prints needs the user's yes, like any
   push to `main`. A tag is never moved or deleted once pushed: fix a bad release with the next one.
+- Besides dist's archives, a release has the window as `Senzor-<target>.zip` with `Senzor.app`
+  for each Mac (`macos-app.yml`, built by `dev/macos-app.sh`, signed ad hoc) and as an MSI for
+  Windows, whose template `crates/senzor/wix/main.wxs` is edited by hand (Start menu entry,
+  LICENSE and NOTICE): dist leaves it alone (`allow-dirty`), so carry `[package.metadata.wix]`
+  changes into it yourself. The Linux window archive carries `assets/linux/` (desktop entry,
+  icons, how to install them).
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
 - Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there

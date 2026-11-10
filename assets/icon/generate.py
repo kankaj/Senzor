@@ -9,6 +9,12 @@ Needs `rsvg-convert` (librsvg) on the PATH. Writes, next to this script:
 - senzor.ico                          Windows: 16, 20, 24, 32, 40, 48, 64 and 256 px;
 - senzor.icns                         macOS: 16 to 1024 px, from senzor-macos.svg.
 
+the Linux icons next to the desktop file, named after the application ID as the desktop file and
+the icon theme expect (the Linux window archive carries assets/linux/):
+
+- assets/linux/cz.kankaj.Senzor.svg   a copy of senzor.svg;
+- assets/linux/cz.kankaj.Senzor.png   a copy of senzor-256.png;
+
 and the docs site's icons in website/app/ (Next.js picks them up by name):
 
 - favicon.ico                         16, 32 and 48 px;
@@ -29,6 +35,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 MASTER = HERE / "senzor.svg"
 MACOS_MASTER = HERE / "senzor-macos.svg"
 WEBSITE_APP = HERE.parent.parent / "website" / "app"
+LINUX = HERE.parent / "linux"
+APP_ID = "cz.kankaj.Senzor"
 
 # Sizes drawn by hand (src/senzor-<n>.svg -> senzor-<n>.png); never rendered from the master.
 HAND_TUNED = (16, 20, 22, 24, 32)
@@ -107,10 +115,13 @@ def main() -> None:
         render(MASTER, size, HERE / f"senzor-{size}.png")
     write_ico(ICO_SIZES, HERE / "senzor.ico")
     write_icns(HERE / "senzor.icns")
+    shutil.copyfile(MASTER, LINUX / f"{APP_ID}.svg")
+    shutil.copyfile(HERE / "senzor-256.png", LINUX / f"{APP_ID}.png")
     write_ico((16, 32, 48), WEBSITE_APP / "favicon.ico")
     shutil.copyfile(MASTER, WEBSITE_APP / "icon.svg")
     render(MASTER, 180, WEBSITE_APP / "apple-icon.png", background=tile_colour())
     print("wrote", ", ".join(f"senzor-{s}.png" for s in RENDERED), "senzor.ico and senzor.icns")
+    print(f"wrote assets/linux/{APP_ID}.svg and {APP_ID}.png")
     print("wrote website/app/favicon.ico, icon.svg and apple-icon.png")
 
 

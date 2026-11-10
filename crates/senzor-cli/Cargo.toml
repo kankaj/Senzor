@@ -1,5 +1,6 @@
 [package]
 name = "senzor-cli"
+description = "MQTT sensor simulator: run Senzor projects headless, in a terminal, Docker or CI"
 version.workspace = true
 license.workspace = true
 authors.workspace = true

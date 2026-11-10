@@ -54,8 +54,9 @@ build, for judging speed: a debug build lays out the window about ten times slow
 
 # Releasing
 
-`release.sh` prepares a release and `release-check.sh` checks one; `release-check.test.sh` and
-`release.test.sh` test them in throwaway folders and repositories (CI runs all three).
+`release.sh` prepares a release and `release-check.sh` checks one; `macos-app.sh` turns the
+window's macOS archive into `Senzor.app` (the release workflow runs it on a Mac). The `*.test.sh`
+scripts test them in throwaway folders and repositories, on any system; CI runs them all.
 
 ```bash
 dev/release-check.sh                 # is the version in Cargo.toml ready? (an undated section is fine)

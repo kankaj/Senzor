@@ -1,5 +1,6 @@
 [package]
 name = "senzor"
+description = "MQTT sensor simulator: a window to edit, run and watch simulated sensors"
 version.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -51,3 +52,19 @@ senzor-testkit.workspace = true
 [[example]]
 name = "screenshots"
 required-features = ["screenshots"]
+
+# Release builds (see dist-workspace.toml). The window's archives also carry assets/linux/: the
+# desktop entry and the icons a Linux package installs; on Windows it gets an MSI as well.
+[package.metadata.dist]
+include = ["../../NOTICE", "../../assets/linux/"]
+installers = ["msi"]
+
+# The MSI (WiX v3, through dist; its template crates/senzor/wix/main.wxs is edited by hand, see
+# dist-workspace.toml). The GUIDs tell Windows that every version is the same app in the same
+# place, so an MSI upgrades the one installed: never change them.
+[package.metadata.wix]
+upgrade-guid = "0046E879-2FB5-4DCB-98A7-564C93156A90"
+path-guid = "8163A184-0AD7-4C23-8619-268DF0BA1DE0"
+product-icon = "../../assets/icon/senzor.ico"
+license = false
+eula = false
