@@ -1,11 +1,20 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import { Provider } from '@/components/provider';
 import { appDescription, appName, basePath, siteUrl } from '@/lib/shared';
 import './global.css';
 
-const inter = Inter({
-  subsets: ['latin'],
+// IBM Plex for text and code alike; app/global.css hands the variables to Tailwind's font-sans
+// and font-mono.
+const plexSans = IBM_Plex_Sans({
+  subsets: ['latin', 'latin-ext'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-plex-sans',
+});
+const plexMono = IBM_Plex_Mono({
+  subsets: ['latin', 'latin-ext'],
+  weight: ['400', '500', '600'],
+  variable: '--font-plex-mono',
 });
 
 /** Search-result highlighting (see app/global.css): kept out of the CSS pipeline, whose parser rejects it. */
@@ -23,7 +32,11 @@ export const metadata: Metadata = {
 
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en" className={inter.className} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${plexSans.variable} ${plexMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="flex flex-col min-h-screen">
         <style dangerouslySetInnerHTML={{ __html: searchHighlight }} />
         <Provider>{children}</Provider>

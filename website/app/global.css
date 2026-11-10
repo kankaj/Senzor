@@ -8,6 +8,11 @@
 @source not inline("[&_::highlight(fd-search)]:text-fd-primary");
 @source not inline("[&_::highlight(fd-search)]:underline");
 
+@theme {
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 html {
   scrollbar-gutter: stable;
 }
