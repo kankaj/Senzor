@@ -136,6 +136,19 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "WiX Toolset for the Windows ARM MSI"
+        if: "runner.os == 'Windows' && runner.arch == 'ARM64'"
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+          Invoke-WebRequest -Uri 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $zip
+          $expected = '6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31'
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "wix314-binaries.zip has SHA-256 $actual, expected $expected" }
+          $wix = Join-Path $env:RUNNER_TEMP 'wix'
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $wix 'bin')
+          "WIX=$wix\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $wix 'bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        shell: "pwsh"
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           key: ${{ join(matrix.targets, '-') }}

@@ -124,12 +124,13 @@
 
                     <!-- Senzor: LICENSE and NOTICE next to bin\, as Apache-2.0 asks every copy to carry. -->
 
+                    <!-- One file per component: WiX gives an automatic GUID only to a component with one
+                         unversioned file (LGHT0367). -->
                     <Component Id='Licence' Guid='*'>
-
                         <File Id='LicenceFile' Name='LICENSE.txt' DiskId='1' Source='../../LICENSE' KeyPath='yes'/>
-
-                        <File Id='NoticeFile' Name='NOTICE.txt' DiskId='1' Source='../../NOTICE'/>
-
+                    </Component>
+                    <Component Id='Notice' Guid='*'>
+                        <File Id='NoticeFile' Name='NOTICE.txt' DiskId='1' Source='../../NOTICE' KeyPath='yes'/>
                     </Component>
 
                     <Directory Id='Bin' Name='bin'>
@@ -175,6 +176,7 @@
             <ComponentRef Id='binary0'/>
             <!-- Senzor: the licence files and the Start menu entry. -->
             <ComponentRef Id='Licence'/>
+            <ComponentRef Id='Notice'/>
             <ComponentRef Id='StartMenuShortcut'/>
 
             <Feature

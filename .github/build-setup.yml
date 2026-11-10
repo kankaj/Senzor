@@ -1,0 +1,19 @@
+# Steps dist runs in every platform build before `dist build` (github-build-setup in
+# dist-workspace.toml). Kept outside .github/workflows/ so GitHub does not take it for a workflow.
+
+# The Windows ARM runner comes without the WiX Toolset the MSI is built with (GitHub lists it as
+# omitted software), so take WiX 3.14.1's binaries from its GitHub release, checked against the
+# SHA-256 noted when the version was chosen. dist's cargo-wix finds them through WIX and PATH.
+- name: WiX Toolset for the Windows ARM MSI
+  if: runner.os == 'Windows' && runner.arch == 'ARM64'
+  shell: pwsh
+  run: |
+    $zip = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+    Invoke-WebRequest -Uri 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $zip
+    $expected = '6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31'
+    $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) { throw "wix314-binaries.zip has SHA-256 $actual, expected $expected" }
+    $wix = Join-Path $env:RUNNER_TEMP 'wix'
+    Expand-Archive -Path $zip -DestinationPath (Join-Path $wix 'bin')
+    "WIX=$wix\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+    (Join-Path $wix 'bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8

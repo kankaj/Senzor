@@ -35,6 +35,8 @@ plan-jobs = ["./release-check"]
 # NOTICE), so dist must not regenerate it. After changing [package.metadata.wix] in
 # crates/senzor/Cargo.toml, carry the change into main.wxs by hand.
 allow-dirty = ["msi"]
+# Steps before each platform build: WiX for the Windows ARM MSI (see .github/build-setup.yml).
+github-build-setup = "../build-setup.yml"
 # After the platform builds: Senzor.app for both Macs, from the window's macOS archives.
 global-artifacts-jobs = ["./macos-app"]
 # What the custom jobs may do beyond reading: the app job attests its zips as dist does its files.
