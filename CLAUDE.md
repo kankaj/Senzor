@@ -42,6 +42,20 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
 - Before using a library API, check the version in `Cargo.lock` and its current docs; add only
   dependency versions that are at least a couple of weeks old.
 
+## Releases
+
+- A release is an annotated tag `vX.Y.Z` on `main`; pushing it runs `.github/workflows/release.yml`,
+  which dist generates from `dist-workspace.toml` (never edit it by hand: change the TOML, then
+  `mise exec -- dist generate`). Its first job, `release-check.yml`, checks the versions with
+  `dev/release-check.sh` and runs every CI gate on the tagged commit before anything is built.
+- `dev/release.sh X.Y.Z` sets the version, dates the CHANGELOG section, checks, commits
+  `release: X.Y.Z` and tags; it never pushes. The push it prints needs the user's yes, like any
+  push to `main`. A tag is never moved or deleted once pushed: fix a bad release with the next one.
+- Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
+  them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
+- Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there
+  will be no Apple Developer ID, so never propose Apple signing or notarization.
+
 ## Architecture rules
 
 - Terms: a **template** defines topics, payloads and fields; a **device** (`[[devices]]`) uses a

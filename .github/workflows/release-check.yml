@@ -1,0 +1,27 @@
+# Runs first in the release workflow (release.yml calls it as a dist plan job; see
+# dist-workspace.toml). On a tag: the tag, Cargo.toml, CHANGELOG.md and the Czech highlights must
+# agree, and every CI gate must pass on the tagged commit, before anything is built or published.
+# On a pull request only the versions are checked; the pull request's own CI runs the gates.
+name: Release check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    name: Versions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tag, Cargo.toml, CHANGELOG.md and the Czech highlights agree
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: dev/release-check.sh ${TAG:+"$TAG"}
+
+  gates:
+    name: CI gates
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/ci.yml

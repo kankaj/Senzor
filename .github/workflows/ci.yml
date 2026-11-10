@@ -1,18 +1,21 @@
 # Checks every push to main and every pull request: the Rust workspace (format, Clippy, tests,
-# and the tests against real Mosquitto brokers) and the documentation site.
+# and the tests against real Mosquitto brokers) and the documentation site. The release workflow
+# runs it on the tagged commit too (release-check.yml).
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
-# A newer push to the same branch or pull request cancels the run still going.
+# A newer push to the same branch or pull request cancels the run still going. The workflow's
+# name (the caller's, when the release workflow runs this one) keeps the two apart.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -40,6 +43,11 @@ jobs:
         run: cargo clippy -p senzor --examples --features screenshots -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      - name: Release scripts
+        run: |
+          dev/release-check.test.sh
+          dev/release.test.sh
+          dev/release-check.sh
 
       # The ignored tests need the Mosquitto brokers in dev/compose.yaml (see dev/README.md).
       - name: Start the Mosquitto brokers

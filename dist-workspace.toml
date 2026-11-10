@@ -1,0 +1,50 @@
+# Release builds with dist (https://github.com/axodotdev/cargo-dist). Pushing a tag vX.Y.Z runs
+# .github/workflows/release.yml, which `dist generate` writes from this file: never edit the
+# workflow by hand, change this file and run `mise exec -- dist generate`. The steps of a release
+# are in CLAUDE.md ("Releases") and dev/release.sh.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+# Keep equal to `cargo-dist` in mise.toml.
+cargo-dist-version = "0.33.1"
+ci = "github"
+# Linux, macOS and Windows, each on x86_64 and ARM.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+# No install scripts: people install through the package channels.
+installers = []
+# Apache-2.0 asks every copy to carry the NOTICE file; README, LICENSE and CHANGELOG come by
+# themselves (auto-includes).
+include = ["NOTICE"]
+# Pull requests build and upload every archive without publishing anything, so a release can be
+# tried before its tag exists.
+pr-run-mode = "upload"
+# A signed record (Sigstore) of which workflow built each file; check with `gh attestation verify`.
+github-attestations = true
+# Before anything is built: the tag, Cargo.toml, CHANGELOG.md and the Czech highlights agree.
+plan-jobs = ["./release-check"]
+
+[dist.github-custom-runners]
+# Linux on the older Ubuntu, so the binaries need only glibc 2.35; ARM natively on GitHub's ARM
+# runners rather than cross-compiled.
+x86_64-unknown-linux-gnu = "ubuntu-22.04"
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
+aarch64-pc-windows-msvc = "windows-11-arm"
+
+# The actions dist's workflow uses, pinned to commits like the rest of our workflows
+# (checkout v6.1.0, upload-artifact v7.0.2, download-artifact v8.0.2, rust-cache v2.9.3,
+# attest v4.2.2).
+[dist.github-action-commits]
+"actions/checkout" = "d23441a48e516b6c34aea4fa41551a30e30af803"
+"actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+"actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333"
+"swatinem/rust-cache" = "d1527c8f67ef9af357290475d4af4b0fab8f12e0"
+"actions/attest" = "1e69f48acb82d1966a394da916b4c1698aa569d6"

@@ -51,3 +51,22 @@ written to the real home folder; its saved settings land in `target/gui-driver/h
 `close` needs Python's Xlib (`python-xlib`), and a running build uses `CARGO_TARGET_DIR` if set. Edits are not saved unless you click **Save**, so an example
 project opened this way stays unchanged. `SENZOR_GUI_RELEASE=1 dev/gui.sh start …` runs an optimised
 build, for judging speed: a debug build lays out the window about ten times slower.
+
+# Releasing
+
+`release.sh` prepares a release and `release-check.sh` checks one; `release-check.test.sh` and
+`release.test.sh` test them in throwaway folders and repositories (CI runs all three).
+
+```bash
+dev/release-check.sh                 # is the version in Cargo.toml ready? (an undated section is fine)
+dev/release.sh 1.0.0                 # set the version, date CHANGELOG, check, commit and tag; asks first
+git push origin main v1.0.0          # starts .github/workflows/release.yml
+```
+
+Before `release.sh`, `CHANGELOG.md` needs a `## [X.Y.Z] - Unreleased` section with Highlights and
+`crates/senzor/locales/cs/whats-new.md` their Czech version. To build the release archives of
+one platform locally (into `target/distrib/`), with the dist version from `mise.toml`:
+
+```bash
+mise exec -- dist build --artifacts=local --target x86_64-unknown-linux-gnu
+```
