@@ -26,9 +26,10 @@ jobs:
           path: target/distrib/
           merge-multiple: true
       - name: Build, sign ad hoc and zip Senzor.app
+        # The window's archives by name: a pattern would also match senzor-cli-<target>.tar.xz.
         run: |
-          for archive in target/distrib/senzor-*-apple-darwin.tar.xz; do
-            dev/macos-app.sh "$archive" target/macos-app
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            dev/macos-app.sh "target/distrib/senzor-$target.tar.xz" target/macos-app
           done
       - name: Attest
         if: github.event_name != 'pull_request'
