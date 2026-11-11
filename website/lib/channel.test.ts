@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { channelOf } from './channel.ts';
+import { channelOf, robotsOf } from './channel.ts';
 
 test('the release branch builds the released docs', () => {
   assert.equal(channelOf({ WORKERS_CI_BRANCH: 'release' }), 'released');
@@ -20,4 +20,9 @@ test('DOCS_CHANNEL overrides the branch, and only its two values count', () => {
   assert.equal(channelOf({ DOCS_CHANNEL: 'next' }), 'next');
   assert.equal(channelOf({ DOCS_CHANNEL: 'released', WORKERS_CI_BRANCH: 'main' }), 'released');
   assert.equal(channelOf({ DOCS_CHANNEL: 'beta', WORKERS_CI_BRANCH: 'main' }), 'next');
+});
+
+test('search engines skip the preview, which repeats the released docs, and index the released', () => {
+  assert.deepEqual(robotsOf('next'), { index: false, follow: false });
+  assert.equal(robotsOf('released'), undefined);
 });

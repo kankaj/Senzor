@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import { Banner } from 'fumadocs-ui/components/banner';
 import { Provider } from '@/components/provider';
-import { channel } from '@/lib/channel';
+import { channel, robotsOf } from '@/lib/channel';
 import { appDescription, appName, basePath, siteUrl } from '@/lib/shared';
 import { version } from '@/lib/version';
 import './global.css';
@@ -31,6 +31,7 @@ export const metadata: Metadata = {
   // Pages without their own preview, such as the home page, show the docs' first page's.
   openGraph: { siteName: appName, images: `${basePath}/og/docs/image.png` },
   twitter: { card: 'summary_large_image', images: `${basePath}/og/docs/image.png` },
+  robots: robotsOf(channel),
 };
 
 export default function Layout({ children }: LayoutProps<'/'>) {

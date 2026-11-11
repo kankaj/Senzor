@@ -19,3 +19,12 @@ export function channelOf(env: Record<string, string | undefined>): Channel {
 }
 
 export const channel: Channel = channelOf(process.env);
+
+/**
+ * What search engines may do with a build's pages. The preview repeats most of the released docs
+ * on another address (main.next.senzor.kankaj.com, a custom domain, which unlike workers.dev
+ * gets no `noindex` from Cloudflare), so it asks them to skip it; the released docs say nothing.
+ */
+export function robotsOf(channel: Channel): { index: false; follow: false } | undefined {
+  return channel === 'next' ? { index: false, follow: false } : undefined;
+}
