@@ -38,8 +38,13 @@ fn main() -> eframe::Result {
         "Senzor",
         options,
         Box::new(move |cc| {
-            let app = SenzorApp::new(cc, args.project, Box::new(NativeDialogs))
-                .with_release_source(Box::new(GitHubReleases));
+            let app = SenzorApp::new(cc, args.project, Box::new(NativeDialogs));
+            // The Microsoft Store updates the copy it installed; any other asks GitHub.
+            let app = if senzor::package::family_name().is_some() {
+                app.with_store_updates()
+            } else {
+                app.with_release_source(Box::new(GitHubReleases))
+            };
             Ok(Box::new(match (args.mcp_port, args.mcp) {
                 (Some(port), _) => app.with_mcp(port),
                 (None, true) => app.with_mcp_on(),

@@ -1,0 +1,73 @@
+# Builds the window's MSIX bundle for the Microsoft Store from its two Windows archives, after
+# dist has built them: one package per architecture (x64, arm64) in Senzor_<X.Y.Z.0>.msixbundle.
+# dev/msix-layout.sh lays each package out; makepri indexes the logos and makeappx packs and
+# bundles, from the Windows SDK on the runner. The bundle is unsigned: the Store signs it, and
+# nobody could install it from the GitHub Release, so it is not one of the release's files. It is
+# the artifact msix-bundle instead, which the Store job (msstore.yml) submits and which can be
+# downloaded from the run, as for the first submission by hand. dist runs this as a global
+# artifacts job (dist-workspace.toml); a pre-release has no Store version and gets none.
+name: MSIX
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  bundle:
+    name: Store package
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the Windows archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: artifacts-*
+          path: target/distrib/
+          merge-multiple: true
+      - name: Lay out the packages
+        shell: bash
+        # The window's archives by name: a pattern would also match senzor-cli-<target>.zip.
+        run: |
+          for arch in x64 arm64; do
+            case $arch in x64) target=x86_64-pc-windows-msvc ;; arm64) target=aarch64-pc-windows-msvc ;; esac
+            7z x -bd -y "-otarget/msix/unzipped-$arch" "target/distrib/senzor-$target.zip" > /dev/null
+            dev/msix-layout.sh "target/msix/unzipped-$arch" "$arch" "target/msix/layout-$arch"
+          done
+      - name: Index, pack and bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The newest Windows SDK's x64 tools, which pack packages of any architecture.
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64" -Directory |
+            Sort-Object { [version]$_.Parent.Name } | Select-Object -Last 1
+          $makepri = Join-Path $sdk.FullName 'makepri.exe'
+          $makeappx = Join-Path $sdk.FullName 'makeappx.exe'
+          Write-Output "Windows SDK tools: $($sdk.FullName)"
+          $root = (Resolve-Path 'target/msix').Path
+          $config = (Resolve-Path 'crates/senzor/msix/priconfig.xml').Path
+          $manifest = [xml](Get-Content "$root\layout-x64\AppxManifest.xml")
+          $version = $manifest.Package.Identity.Version
+          New-Item -ItemType Directory "$root\packages", "$root\bundle" | Out-Null
+          foreach ($arch in 'x64', 'arm64') {
+            $layout = "$root\layout-$arch"
+            & $makepri new /pr $layout /cf $config /mn "$layout\AppxManifest.xml" /of "$layout\resources.pri" /o
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & $makeappx pack /o /h SHA256 /d $layout /p "$root\packages\Senzor_${version}_$arch.msix"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          & $makeappx bundle /o /bv $version /d "$root\packages" /p "$root\bundle\Senzor_$version.msixbundle"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem "$root\bundle"
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          # Not artifacts-*: dist would add it to the GitHub Release.
+          name: msix-bundle
+          path: target/msix/bundle/
+          if-no-files-found: error

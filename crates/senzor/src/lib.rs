@@ -10,6 +10,7 @@ pub mod i18n;
 pub mod icon;
 mod log_view;
 pub mod notify;
+pub mod package;
 mod preview;
 mod rate;
 mod selection;
