@@ -58,7 +58,7 @@ In the Cloudflare dashboard, **Workers & Pages** → **Create application**, con
 | Project name                   | `senzor-docs` (the same as `name` in `wrangler.jsonc`)                           |
 | Build command                  | `cd website && pnpm install --frozen-lockfile && pnpm check:links && pnpm build` |
 | Deploy command                 | `npx wrangler deploy` (the default)                                              |
-| Preview command                | `npx wrangler preview` (the default)                                             |
+| Preview command                | `npx wrangler preview` (the default; it needs the `previews` block in `wrangler.jsonc`) |
 | Enable Preview builds          | on                                                                               |
 | Production branch              | `release` (**Settings** → **Build** → **Branch control**)                        |
 | Protect with Cloudflare Access | off (the docs are public)                                                        |

@@ -9,5 +9,8 @@
     "directory": "./website/out",
     // Unknown paths get website/out/404.html with a 404 status.
     "not_found_handling": "404-page"
-  }
+  },
+  // Builds of other branches than `release` (main, above all) run `npx wrangler preview`, which
+  // needs this block; empty, the preview serves the same assets from the branch's build.
+  "previews": {}
 }
