@@ -1,11 +1,13 @@
 //! Desktop notifications when instances fail while the window is in the background.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use senzor_core::engine::{InstanceState, InstanceStatus};
+use senzor_core::engine::{EngineObserver, InstanceState, InstanceStatus};
 
-use crate::i18n::t;
+use crate::i18n::{Language, t};
 
 #[cfg(unix)]
 use crate::icon::APP_ID;
@@ -123,7 +125,150 @@ pub struct Look {
     pub again_in: Option<Duration>,
 }
 
-/// Follows the instances from frame to frame and tells when to notify about failures.
+/// Notifies about failures from a thread of its own. While the window is in the background it
+/// often draws no frames at all (minimized, or hidden by the compositor, as KDE on Wayland and
+/// Windows do), so the engine's change callback wakes this watch ([`Self::waker`]), not the
+/// window's frames. The window only says, each frame, whether to notify now and in which
+/// language ([`Self::tell`]).
+pub struct FailureNotifications {
+    wake: mpsc::Sender<Wake>,
+    /// What the window last told the watch.
+    told: Telling,
+    notifier: Arc<Mutex<Box<dyn Notifier + Send>>>,
+}
+
+/// What the window last said: whether failures are to be told now (the setting is on and the
+/// window is in the background), and the language of its texts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Telling {
+    now: bool,
+    language: Language,
+}
+
+enum Wake {
+    /// The engine's state changed.
+    Changed,
+    /// The window's [`Telling`] changed. What failed until now happened under the old one.
+    Tell(Telling),
+    /// Another engine runs now (another project opened).
+    Engine {
+        generation: u64,
+        observer: EngineObserver,
+    },
+    /// The window closes.
+    Stop,
+}
+
+impl FailureNotifications {
+    /// Starts the watch, showing notifications with `notifier`.
+    pub fn start(notifier: Box<dyn Notifier + Send>) -> Self {
+        let (wake, wakes) = mpsc::channel();
+        let told = Telling {
+            now: false,
+            language: crate::i18n::language(),
+        };
+        let notifier = Arc::new(Mutex::new(notifier));
+        let thread_notifier = notifier.clone();
+        let started = std::thread::Builder::new()
+            .name("failure-watch".into())
+            .spawn(move || watch(&wakes, told, &thread_notifier));
+        if let Err(error) = started {
+            eprintln!("Could not watch for failures: {error}");
+        }
+        Self {
+            wake,
+            told,
+            notifier,
+        }
+    }
+
+    /// Shows notifications with `notifier` from now on.
+    pub fn set_notifier(&self, notifier: Box<dyn Notifier + Send>) {
+        *self.notifier.lock().unwrap_or_else(PoisonError::into_inner) = notifier;
+    }
+
+    /// A callback for the engine to call after its state changes: it wakes the watch.
+    pub fn waker(&self) -> impl Fn() + Send + Sync + 'static {
+        let wake = self.wake.clone();
+        move || {
+            let _ = wake.send(Wake::Changed);
+        }
+    }
+
+    /// Watches the engine `observer` reads from, the `generation`th of this window.
+    pub fn watch(&self, generation: u64, observer: EngineObserver) {
+        let _ = self.wake.send(Wake::Engine {
+            generation,
+            observer,
+        });
+    }
+
+    /// Whether failures are to be told now, and in which language. Only a change reaches the
+    /// watch, in order with the engine's changes: a failure from before the window went to the
+    /// background was seen and is not told.
+    pub fn tell(&mut self, now: bool, language: Language) {
+        let telling = Telling { now, language };
+        if telling != self.told {
+            self.told = telling;
+            let _ = self.wake.send(Wake::Tell(telling));
+        }
+    }
+}
+
+impl Drop for FailureNotifications {
+    fn drop(&mut self) {
+        let _ = self.wake.send(Wake::Stop);
+    }
+}
+
+/// The watch's thread: looks at the instances whenever the engine changes, and again when
+/// failures being gathered are due.
+fn watch(
+    wakes: &mpsc::Receiver<Wake>,
+    mut telling: Telling,
+    notifier: &Mutex<Box<dyn Notifier + Send>>,
+) {
+    let mut failures = FailureWatch::default();
+    let mut engine: Option<(u64, EngineObserver)> = None;
+    let mut again_in: Option<Duration> = None;
+    // Looks at the engine's instances as `telling` says, notifies when due, and says when to
+    // look again.
+    let mut look = |engine: &Option<(u64, EngineObserver)>, telling: Telling| {
+        let (generation, observer) = engine.as_ref()?;
+        crate::i18n::set_language(telling.language);
+        let look = observer.read(|state| {
+            failures.look(*generation, &state.instances, Instant::now(), telling.now)
+        });
+        if let Some((title, body)) = look.notify {
+            notifier
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .notify(&title, &body);
+        }
+        look.again_in
+    };
+    loop {
+        let wake = match again_in {
+            Some(after) => wakes.recv_timeout(after),
+            None => wakes.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match wake {
+            Ok(Wake::Changed) | Err(RecvTimeoutError::Timeout) => {}
+            Ok(Wake::Tell(told)) => {
+                look(&engine, telling);
+                telling = told;
+            }
+            Ok(Wake::Engine {
+                generation,
+                observer,
+            }) => engine = Some((generation, observer)),
+            Ok(Wake::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+        }
+        again_in = look(&engine, telling);
+    }
+}
+
+/// Follows the instances from look to look and tells when to notify about failures.
 #[derive(Debug, Default)]
 pub struct FailureWatch {
     /// The engine the instances belong to (it changes when another project opens).

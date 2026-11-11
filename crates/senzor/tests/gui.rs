@@ -2007,6 +2007,59 @@ fn an_instance_failing_while_the_window_is_in_the_background_shows_a_notificatio
     );
 }
 
+/// A window in the background often draws nothing: a minimized window or one the compositor
+/// hides (KDE on Wayland, Windows) gets no frames. The failure must still be told.
+#[test]
+fn an_instance_failing_while_the_window_draws_no_frames_shows_a_notification() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-no-frames", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let mut harness = notifying_app(path, Default::default(), &notifier);
+    set_focused(&mut harness, false);
+    // The frame that sees the lost focus, then the click; after it, no frame runs.
+    harness.step();
+    harness.get_by_label("Start all").click();
+    harness.step();
+    let deadline = Instant::now() + senzor::notify::GATHER + Duration::from_secs(5);
+    while notifier.shown().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "a notification without frames; office is {:?}",
+            status(&harness, "office")
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        notifier.shown(),
+        [(
+            "Senzor: an instance failed".to_string(),
+            format!("office: {REFUSED}")
+        )]
+    );
+}
+
+#[test]
+fn a_notification_without_frames_speaks_the_window_language() {
+    let (_runtime, port) = refusing();
+    let path = write_project("notify-czech", &office_project(port, 1, false));
+    let notifier = RecordingNotifier::default();
+    let settings = senzor::settings::AppSettings {
+        language: senzor::i18n::Language::Czech,
+        ..Default::default()
+    };
+    let mut harness = notifying_app(path, settings, &notifier);
+    set_focused(&mut harness, false);
+    harness.step();
+    harness.get_by_label("Spustit vše").click();
+    harness.step();
+    let deadline = Instant::now() + senzor::notify::GATHER + Duration::from_secs(5);
+    while notifier.shown().is_empty() {
+        assert!(Instant::now() < deadline, "a notification without frames");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(notifier.shown()[0].0, "Senzor: instance selhala");
+}
+
 #[test]
 fn an_instance_failing_while_the_window_is_minimized_shows_a_notification() {
     let (_runtime, port) = refusing();

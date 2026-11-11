@@ -15,7 +15,7 @@ use crate::dialogs::{FileDialogs, project_file_path};
 use crate::document::Document;
 use crate::edits;
 use crate::i18n::t;
-use crate::notify::{DesktopNotifier, FailureWatch, Notifier};
+use crate::notify::{DesktopNotifier, FailureNotifications, Notifier};
 use crate::rate::MessageRate;
 use crate::selection::{ProblemTarget, Selection, keep_valid};
 use crate::settings::{AppSettings, PanelTabs};
@@ -70,10 +70,8 @@ pub struct SenzorApp {
     version_seen_before: Option<String>,
     /// How fast the engine publishes, for the status bar.
     rate: MessageRate,
-    /// Shows desktop notifications.
-    notifier: Box<dyn Notifier>,
-    /// Tells when instances fail, for the notifications.
-    failures: FailureWatch,
+    /// Notifies about instances that fail while the window is in the background.
+    failure_notifications: FailureNotifications,
     /// Where the update check asks for the latest release; taken when it starts, so a window
     /// asks once at most. Without one, there is no check.
     release_source: Option<Box<dyn ReleaseSource>>,
@@ -151,8 +149,7 @@ impl SenzorApp {
             disk_checked: Instant::now(),
             rate: MessageRate::default(),
             version_seen_before,
-            notifier: Box::new(DesktopNotifier),
-            failures: FailureWatch::default(),
+            failure_notifications: FailureNotifications::start(Box::new(DesktopNotifier)),
             release_source: None,
             release_check: None,
         };
@@ -180,8 +177,8 @@ impl SenzorApp {
     }
 
     /// Shows desktop notifications with `notifier` instead of the desktop's.
-    pub fn with_notifier(mut self, notifier: Box<dyn Notifier>) -> Self {
-        self.notifier = notifier;
+    pub fn with_notifier(self, notifier: Box<dyn Notifier + Send>) -> Self {
+        self.failure_notifications.set_notifier(notifier);
         self
     }
 
@@ -252,11 +249,17 @@ impl SenzorApp {
         self.engine_generation += 1;
         self.ui.reset();
         let ctx = self.ctx.clone();
+        let wake = self.failure_notifications.waker();
         let engine = Engine::spawn(
             self.doc.validated().project.clone(),
             self.runtime.handle(),
-            Arc::new(move || ctx.request_repaint()),
+            Arc::new(move || {
+                ctx.request_repaint();
+                wake();
+            }),
         );
+        self.failure_notifications
+            .watch(self.engine_generation, engine.observer());
         if let Some(old) = self.engine.replace(engine) {
             self.retired.push(self.runtime.spawn(old.shutdown()));
         }
@@ -843,29 +846,18 @@ impl SenzorApp {
         }
     }
 
-    /// Shows a desktop notification about instances that failed while the window was in the
-    /// background (unfocused or minimized), when the settings ask for it.
+    /// Tells the failure watch whether to notify now: the setting is on and the window is in the
+    /// background (unfocused or minimized). Losing the focus and minimizing both bring a frame,
+    /// so this stays right even when no frame follows.
     fn watch_failures(&mut self, ctx: &egui::Context) {
         let in_background = ctx.input(|i| {
             let viewport = i.viewport();
             viewport.focused == Some(false) || viewport.minimized == Some(true)
         });
-        let notify = self.settings.notify_failures && in_background;
-        let engine = self
-            .engine
-            .as_ref()
-            .expect("engine runs while the app is open");
-        let generation = self.engine_generation;
-        let failures = &mut self.failures;
-        let look = engine
-            .observer()
-            .read(|state| failures.look(generation, &state.instances, Instant::now(), notify));
-        if let Some((title, body)) = look.notify {
-            self.notifier.notify(&title, &body);
-        }
-        if let Some(after) = look.again_in {
-            ctx.request_repaint_after(after);
-        }
+        self.failure_notifications.tell(
+            self.settings.notify_failures && in_background,
+            crate::i18n::language(),
+        );
     }
 
     /// Commits a rename still being typed (closing the window is not a click that would commit
@@ -885,8 +877,8 @@ impl SenzorApp {
 }
 
 impl eframe::App for SenzorApp {
-    /// Runs before every frame, and also while the window is hidden (minimized), when `ui` does
-    /// not run: failures are noticed there too.
+    /// Runs before every frame, also when `ui` does not (a minimized window), but not at all
+    /// while the window gets no frames: failures are watched on a thread of their own.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.watch_failures(ctx);
     }
