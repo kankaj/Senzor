@@ -25,6 +25,12 @@ The first release.
 
 ### Added
 
+#### Installing
+
+- Builds for Linux, macOS and Windows, each on x86_64 and ARM. The window and `senzor-cli` are packages of their own: Homebrew (`brew install --cask kankaj/tap/senzor`, `brew install kankaj/tap/senzor-cli`), winget (`Kankaj.Senzor`, `Kankaj.SenzorCLI`) and, for the window, the Microsoft Store, which also keeps that copy up to date.
+- Downloads of every release: `Senzor.app` for macOS, an MSI for Windows with a Start menu entry, and archives for Linux with a desktop entry and icons. Each file has a SHA-256 checksum and a GitHub attestation of the workflow that built it.
+- The documentation keeps each minor version's docs at `/<minor>/docs/`, with a version menu; the window's links open the docs of the version it is.
+
 #### Projects
 
 - One TOML project file holds the broker settings, templates and devices. A template defines topics, payloads, fields and the interval; a device runs it `count` times.
