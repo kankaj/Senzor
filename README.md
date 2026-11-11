@@ -37,16 +37,26 @@ reference, running headless, recipes, and how to connect an AI agent.
 
 ## Installation
 
-Release builds for Linux, Windows and macOS come with Senzor 1.0.0. Until then, build Senzor from
-source with [Rust](https://www.rust-lang.org/tools/install) installed through rustup; it picks up
-the Rust version in `rust-toolchain.toml` by itself:
+The window and the headless runner are packages of their own; install either or both.
 
 ```bash
-git clone https://github.com/kankaj/Senzor.git
-cd Senzor
-cargo install --path crates/senzor       # the window, `senzor`
-cargo install --path crates/senzor-cli   # the headless runner, `senzor-cli`
+# macOS, with Homebrew
+brew install --cask kankaj/tap/senzor
+brew install kankaj/tap/senzor-cli
+
+# Windows, with winget
+winget install Kankaj.Senzor
+winget install Kankaj.SenzorCLI
 ```
+
+On Windows the window is also in the
+[Microsoft Store](https://apps.microsoft.com/detail/9PC0635WJF44). Arch Linux packages in the AUR
+follow as soon as the AUR accepts new maintainers again. Every platform, Linux, macOS and Windows
+on x86_64 and ARM, has downloads in the
+[latest release](https://github.com/kankaj/Senzor/releases/latest).
+[Installation](https://senzor.kankaj.cz/docs/installation) in the documentation has them all,
+with the first start on macOS and Windows (the builds are not signed yet), updating, checking a
+download and building from source.
 
 ## A first run
 

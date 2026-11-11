@@ -3,15 +3,161 @@ title: Installation
 description: How to get Senzor 1.0.0.
 ---
 
-Installation instructions will be published together with the 1.0.0 release builds.
+Senzor comes as two programs, each a package of its own: **`senzor`**, the window, and
+**`senzor-cli`**, the headless runner for terminals, Docker and CI. Install either or both; they
+read the same project files. Builds exist for Linux, macOS and Windows, each on x86_64 and ARM.
 
-Until then, build Senzor from source. You need [Rust](https://www.rust-lang.org/tools/install)
-installed with rustup: the repository names the Rust version it is built with in
-`rust-toolchain.toml`, and rustup installs that version the first time you build. In a clone of
-the [Senzor repository](https://github.com/kankaj/Senzor), run:
+## With a package manager
+
+A package manager installs the right build for your computer and updates it with everything else.
+
+### macOS: Homebrew
 
 ```bash
-cargo install --path crates/senzor       # the GUI, `senzor`
+brew install --cask kankaj/tap/senzor   # the window, Senzor.app
+brew install kankaj/tap/senzor-cli      # the headless runner
+```
+
+Both come from Senzor's own tap, [kankaj/homebrew-tap](https://github.com/kankaj/homebrew-tap),
+which Homebrew adds by itself the first time. The window needs macOS 10.13 or later on Intel Macs
+and macOS 11 or later on Apple Silicon. Senzor is not signed by Apple, so macOS blocks it the
+first time; see [First start on macOS](#first-start-on-macos).
+
+### Windows: winget or the Microsoft Store
+
+```powershell
+winget install Kankaj.Senzor      # the window, from the MSI
+winget install Kankaj.SenzorCLI   # the headless runner, as the command senzor-cli
+```
+
+The window is also in the Microsoft Store:
+[Senzor in the Microsoft Store](https://apps.microsoft.com/detail/9PC0635WJF44). The Store keeps
+that copy up to date, so it does not ask GitHub for new versions (see
+[Updates](/docs/gui/settings#updates)). Install the window from one place only: the Store's copy
+and the one from winget or the MSI are separate installations.
+
+### Linux
+
+Packages for Arch Linux in the AUR, `senzor-bin` and `senzor-cli-bin`, follow as soon as the AUR
+accepts new maintainers again. Until then, use the downloads below.
+
+## From the downloads
+
+Every release on [GitHub](https://github.com/kankaj/Senzor/releases/latest) has these files; the
+links below always point to the latest release.
+
+| System | The window | The headless runner |
+| ------ | ---------- | ------------------- |
+| Linux, x86_64 | [senzor-x86_64-unknown-linux-gnu.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-x86_64-unknown-linux-gnu.tar.xz) | [senzor-cli-x86_64-unknown-linux-gnu.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-x86_64-unknown-linux-gnu.tar.xz) |
+| Linux, ARM | [senzor-aarch64-unknown-linux-gnu.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-aarch64-unknown-linux-gnu.tar.xz) | [senzor-cli-aarch64-unknown-linux-gnu.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-aarch64-unknown-linux-gnu.tar.xz) |
+| macOS, Apple Silicon | [Senzor-aarch64-apple-darwin.zip](https://github.com/kankaj/Senzor/releases/latest/download/Senzor-aarch64-apple-darwin.zip) | [senzor-cli-aarch64-apple-darwin.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-aarch64-apple-darwin.tar.xz) |
+| macOS, Intel | [Senzor-x86_64-apple-darwin.zip](https://github.com/kankaj/Senzor/releases/latest/download/Senzor-x86_64-apple-darwin.zip) | [senzor-cli-x86_64-apple-darwin.tar.xz](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-x86_64-apple-darwin.tar.xz) |
+| Windows, x64 | [senzor-x86_64-pc-windows-msvc.msi](https://github.com/kankaj/Senzor/releases/latest/download/senzor-x86_64-pc-windows-msvc.msi) | [senzor-cli-x86_64-pc-windows-msvc.zip](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-x86_64-pc-windows-msvc.zip) |
+| Windows, ARM | [senzor-aarch64-pc-windows-msvc.msi](https://github.com/kankaj/Senzor/releases/latest/download/senzor-aarch64-pc-windows-msvc.msi) | [senzor-cli-aarch64-pc-windows-msvc.zip](https://github.com/kankaj/Senzor/releases/latest/download/senzor-cli-aarch64-pc-windows-msvc.zip) |
+
+A release also has the window as a plain program, without `Senzor.app` or an installer:
+`senzor-<target>.tar.xz` for macOS and `senzor-<target>.zip` for Windows.
+
+### Linux
+
+Unpack the archive and put the program on your `PATH`, for example in `~/.local/bin`:
+
+```bash
+tar -xJf senzor-x86_64-unknown-linux-gnu.tar.xz
+install -Dm755 senzor-x86_64-unknown-linux-gnu/senzor ~/.local/bin/senzor
+```
+
+The builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer). The headless
+runner needs nothing else. The window needs a desktop with Wayland or X11, the keyboard library
+xkbcommon and a graphics driver, which a desktop installation has. On a minimal system:
+
+```bash
+# Debian and Ubuntu
+sudo apt install libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcursor1 libxi6 libxrandr2 libvulkan1 mesa-vulkan-drivers
+# Fedora
+sudo dnf install libxkbcommon libxkbcommon-x11 libwayland-client libX11 libXcursor libXi libXrandr vulkan-loader mesa-vulkan-drivers
+```
+
+To have Senzor in your desktop's application menu, with its icon, copy the desktop entry and the
+icons from the archive's `linux` folder; its `README.txt` has the commands.
+
+### macOS
+
+Unzip `Senzor-<target>.zip` and drag **Senzor.app** to **Applications**, then see
+[First start on macOS](#first-start-on-macos). For the headless runner, unpack the archive and
+put `senzor-cli` on your `PATH`, for example in `/usr/local/bin`.
+
+### Windows
+
+Run the MSI. It installs Senzor for all users, adds it to the Start menu and replaces an older
+version; Windows lists it under **Installed apps**. Windows may warn about it the first time; see
+[First start on Windows](#first-start-on-windows). For the headless runner, unzip the archive and
+put `senzor-cli.exe` in a folder on your `PATH`.
+
+## First start on macOS
+
+Senzor is not signed or notarized by Apple, so macOS refuses to open it the first time. Open it
+once from **Applications**, then choose **System Settings** > **Privacy & Security** >
+**Open Anyway**. On macOS 14 and earlier you can right-click **Senzor.app** and choose **Open**
+instead. macOS remembers the choice. A `senzor-cli` from a downloaded archive is blocked the same
+way; remove the download mark once:
+
+```bash
+xattr -d com.apple.quarantine /usr/local/bin/senzor-cli
+```
+
+## First start on Windows
+
+The MSI is not signed yet, so Windows SmartScreen may show **Windows protected your PC** when you
+run it. Choose **More info**, then **Run anyway**. The Microsoft Store's copy opens without it.
+
+## Updates
+
+The window tells you when a newer version is out (see [Updates](/docs/gui/settings#updates)); the
+Microsoft Store updates its copy by itself. To update:
+
+```bash
+brew upgrade --cask senzor && brew upgrade senzor-cli   # Homebrew
+winget upgrade Kankaj.Senzor Kankaj.SenzorCLI          # winget
+```
+
+From the downloads, install the new release over the old one: the MSI replaces the installed
+version, and on Linux and macOS you replace the files.
+
+## Checking a download
+
+Every file has its SHA-256 checksum next to it, as `<file>.sha256`, and the release lists them all
+in `sha256.sum`. Download the checksum with the file and check it:
+
+```bash
+sha256sum -c senzor-x86_64-unknown-linux-gnu.tar.xz.sha256   # Linux
+shasum -a 256 -c Senzor-aarch64-apple-darwin.zip.sha256      # macOS
+```
+
+GitHub also keeps a signed record of which workflow built each file. With the
+[GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify senzor-x86_64-unknown-linux-gnu.tar.xz --repo kankaj/Senzor
+```
+
+## Uninstalling
+
+Remove Senzor the way you installed it: `brew uninstall --cask senzor` (with `--zap` it also
+removes the settings), `winget uninstall Kankaj.Senzor`, the Store's copy and the MSI under
+**Settings** > **Apps** > **Installed apps**, and downloaded files by deleting them. The window's
+settings stay in one file until you delete it; see
+[Where Senzor keeps them](/docs/gui/settings#where-senzor-keeps-them).
+
+## Building from source
+
+You need [Rust](https://www.rust-lang.org/tools/install) installed with rustup: the repository
+names the Rust version it is built with in `rust-toolchain.toml`, and rustup installs that version
+the first time you build. In a clone of the [Senzor repository](https://github.com/kankaj/Senzor),
+run:
+
+```bash
+cargo install --path crates/senzor       # the window, `senzor`
 cargo install --path crates/senzor-cli   # the headless runner, `senzor-cli`
 ```
 
