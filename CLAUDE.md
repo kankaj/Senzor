@@ -70,8 +70,10 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   (`docs-archive.yml`), and the production build collects all of them (`website/README.md`,
   "Versions"). The app's `DOCS_URL` points at its own minor version.
 - Package channels run as publish jobs once the GitHub Release exists, side by side: Homebrew gets
-  dist's formula for `senzor-cli` and our cask for the window (`homebrew-cask.yml`, written by
-  `dev/homebrew-cask.sh`), both in `kankaj/homebrew-tap` with the `HOMEBREW_TAP_TOKEN` secret.
+  the formula dist writes for `senzor-cli` and our cask for the window (`dev/homebrew-cask.sh`),
+  both pushed to `kankaj/homebrew-tap` in one commit by `homebrew-tap.yml` with
+  `dev/homebrew-tap.sh` and the `HOMEBREW_TAP_TOKEN` secret. Only that job writes to the tap:
+  dist's own Homebrew job is off, because two jobs pushing to it at once made one fail (1.0.0).
   winget gets `Kankaj.Senzor` (the MSI) and `Kankaj.SenzorCLI` (the zip, portable): `winget.yml`
   writes the manifests with `dev/winget.sh` and opens a pull request per package in
   `microsoft/winget-pkgs` with `dev/winget-submit.sh`, through the API from the `WINGET_TOKEN`

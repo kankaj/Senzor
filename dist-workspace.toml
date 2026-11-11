@@ -42,16 +42,17 @@ github-build-setup = "../build-setup.yml"
 # Windows archives (msix.yml; an artifact of the run, not a file of the release).
 global-artifacts-jobs = ["./macos-app", "./docs-archive", "./msix"]
 # After the GitHub Release exists, side by side so one failing does not hold back another: the
-# production docs follow the release (the `release` branch), and the Homebrew tap gets dist's
-# formula for senzor-cli and our cask for the window (Senzor.app), which dist does not make; both
-# Homebrew jobs push with the HOMEBREW_TAP_TOKEN secret; and winget gets a pull request per
+# production docs follow the release (the `release` branch); the Homebrew tap gets the formula
+# dist writes for senzor-cli (installers = ["homebrew"] in crates/senzor-cli) and our cask for the
+# window (Senzor.app), in one commit by one job (homebrew-tap.yml, with the HOMEBREW_TAP_TOKEN
+# secret): dist's own Homebrew job, pushing to the same tap at the same time, lost the race at
+# 1.0.0, so it is off, and so is `tap`, which only that job reads; winget gets a pull request per
 # package in microsoft/winget-pkgs (winget.yml, with the WINGET_TOKEN secret); and the Microsoft
 # Store gets the MSIX bundle (msstore.yml, once the MSSTORE_PUBLISH variable is true).
-tap = "kankaj/homebrew-tap"
-publish-jobs = ["./publish-docs", "homebrew", "./homebrew-cask", "./winget", "./msstore"]
+publish-jobs = ["./publish-docs", "./homebrew-tap", "./winget", "./msstore"]
 # What the custom jobs may do beyond reading: the app job attests its zips as dist does its files;
 # the docs job pushes the `release` branch.
-github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-cask" = { contents = "read" }, "winget" = { contents = "read" }, "msix" = { contents = "read" }, "msstore" = { contents = "read" } }
+github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-tap" = { contents = "read" }, "winget" = { contents = "read" }, "msix" = { contents = "read" }, "msstore" = { contents = "read" } }
 
 [dist.github-custom-runners]
 # Linux on the older Ubuntu, so the binaries need only glibc 2.35; ARM natively on GitHub's ARM

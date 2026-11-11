@@ -1,0 +1,44 @@
+# Puts a release into Senzor's Homebrew tap, kankaj/homebrew-tap, in one commit: the window's cask
+# (Casks/senzor.rb, written by dev/homebrew-cask.sh from the SHA-256 of its two Mac apps) and
+# senzor-cli's formula (Formula/senzor-cli.rb, which dist writes as a file of the release).
+# dev/homebrew-tap.sh commits and pushes them; this is the tap's only writer, since dist's own
+# Homebrew job, pushing next to it, lost the race at 1.0.0. dist runs this as a publish job
+# (dist-workspace.toml); a pre-release leaves the tap alone. Pushing needs HOMEBREW_TAP_TOKEN, a
+# token that may write to kankaj/homebrew-tap.
+name: Homebrew tap
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  tap:
+    name: Update the tap
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the cask, fetch the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Senzor-*-apple-darwin.zip.sha256' --dir sums
+          arm=$(cut -d' ' -f1 sums/Senzor-aarch64-apple-darwin.zip.sha256)
+          intel=$(cut -d' ' -f1 sums/Senzor-x86_64-apple-darwin.zip.sha256)
+          dev/homebrew-cask.sh "${TAG#v}" "$arm" "$intel" > senzor.rb
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern senzor-cli.rb
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kankaj/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Push the cask and the formula
+        env:
+          TAG: ${{ github.ref_name }}
+        run: dev/homebrew-tap.sh tap senzor.rb senzor-cli.rb "${TAG#v}"

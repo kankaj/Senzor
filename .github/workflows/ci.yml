@@ -49,6 +49,7 @@ jobs:
           dev/release.test.sh
           dev/macos-app.test.sh
           dev/homebrew-cask.test.sh
+          dev/homebrew-tap.test.sh
           dev/winget.test.sh
           dev/msix-layout.test.sh
           dev/release-check.sh
