@@ -65,7 +65,13 @@ In the Cloudflare dashboard, **Workers & Pages** → **Create application**, con
 
 The build runs from the repository root, where `wrangler.jsonc` is: the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.
 
-Cloudflare builds with the Node.js and pnpm that `mise.toml` pins for development and CI, from two files that repeat them: `.node-version` at the top of the repository (Cloudflare reads it in the folder the build starts in) and `packageManager` in `website/package.json` (Corepack reads it where pnpm runs, ahead of any `PNPM_VERSION` build variable). `pnpm test` fails when either differs from `mise.toml`, so change all three together. Set no `NODE_VERSION` or `PNPM_VERSION` build variable, for production or for previews: the files decide. `pnpm-workspace.yaml` still lists `packages`, so that an older pnpm, such as the build image's own, can install too.
+Cloudflare builds with the Node.js and pnpm that `mise.toml` pins for development and CI. Node.js comes from `.node-version` at the top of the repository, the folder the build starts in. pnpm takes two steps: Cloudflare installs a pnpm only when the build variable `PNPM_VERSION` asks for one (it would also read `packageManager` from a `package.json` in that top folder, but the site's is in `website/`), and that pnpm then switches to the version `packageManager` in `website/package.json` names. Without the variable, a Node.js that Cloudflare installs, such as 26, has no pnpm at all: the 1.0.0 production build failed with "No preset version installed for command pnpm". So set this build variable under **Settings** → **Build** → **Build Variables and Secrets**, for production and for previews:
+
+| Variable       | Value     |
+| -------------- | --------- |
+| `PNPM_VERSION` | `12.15.0` |
+
+`pnpm test` fails when `.node-version` or `packageManager` differs from `mise.toml`; the variable lives in the dashboard, so change it by hand with them. Set no `NODE_VERSION`: `.node-version` decides. `pnpm-workspace.yaml` still lists `packages`, so that an older pnpm, such as the build image's own, can install too.
 
 Cloudflare cannot install a Node.js release that came out only days ago (a build with Node.js 24.22.0, released the day before, failed at "Installing nodejs"), so move to a new Node.js only once it is a couple of weeks old.
 

@@ -1,7 +1,7 @@
 // mise.toml pins Node and pnpm for development and CI. Cloudflare's builds, which run from the
 // repository root, read their own files: .node-version there for Node, and `packageManager` in
-// website/package.json, where pnpm runs, for pnpm (ahead of any PNPM_VERSION build variable).
-// These tests keep both equal to mise.toml, so the docs build the same everywhere.
+// website/package.json, where pnpm runs, for the pnpm that the PNPM_VERSION build variable
+// installs to switch to (website/README.md). These tests keep both files equal to mise.toml.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
