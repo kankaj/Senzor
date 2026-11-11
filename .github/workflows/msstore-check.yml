@@ -35,9 +35,9 @@ jobs:
           CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
-          msstore settings --enableTelemetry false
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          msstore settings --enableTelemetry false
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read Senzor's Store record
         shell: pwsh
