@@ -1,0 +1,46 @@
+# TEMPORARY, only on the test branch store-test (never merged): checks that the MSSTORE_* secrets
+# sign in to Partner Center and can read Senzor's Store record. Submits nothing.
+name: Store credentials check
+
+on: pull_request
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_ID: 9PC0635WJF44
+  MSSTORE_CLI_VERSION: v0.4.3
+  MSSTORE_CLI_SHA256: c5fb008b616f96b1b55f1d52e4e0a5dd8f6c156129b5f52f9b97ec0eed11bd57
+
+jobs:
+  check:
+    name: Sign in and read the app
+    runs-on: windows-2025
+    steps:
+      - name: Install the Store CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = "$env:RUNNER_TEMP\msstore.zip"
+          Invoke-WebRequest "https://github.com/microsoft/msstore-cli/releases/download/$env:MSSTORE_CLI_VERSION/MSStoreCLI-win-x64.zip" -OutFile $zip
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($sha -ne $env:MSSTORE_CLI_SHA256) { throw "msstore CLI checksum mismatch: $sha" }
+          Expand-Archive $zip "$env:RUNNER_TEMP\msstore"
+          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\msstore"
+      - name: Sign in to Partner Center
+        shell: pwsh
+        env:
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          msstore settings --enableTelemetry false
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Read Senzor's Store record
+        shell: pwsh
+        run: |
+          msstore apps get $env:PRODUCT_ID
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
