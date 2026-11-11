@@ -1172,6 +1172,39 @@ fn with_update_checks_off_nothing_is_asked_or_shown() {
 }
 
 #[test]
+fn from_the_microsoft_store_updates_are_left_to_the_store() {
+    let releases = FakeReleases::latest("v99.0.0");
+    let asked = releases.clone();
+    let settings = senzor::settings::AppSettings {
+        latest_release: Some(release_99()),
+        ..Default::default()
+    };
+    let mut harness = window_builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_eframe(move |cc| {
+            SenzorApp::with_settings(cc, None, Box::new(FakeDialogs::default()), settings)
+                .with_release_source(Box::new(releases))
+                .with_store_updates()
+        });
+    harness.run();
+    std::thread::sleep(Duration::from_millis(200));
+    harness.run();
+    assert_eq!(asked.asked(), 0, "GitHub is never asked");
+    assert!(
+        harness.query_by_label_contains(NEWER).is_none(),
+        "no release from GitHub is offered, not even one found before"
+    );
+    click(&mut harness, "Settings");
+    harness.run();
+    assert!(harness.query_by_label("Check for updates").is_none());
+    assert!(
+        harness
+            .query_by_label_contains("the Microsoft Store keeps Senzor up to date")
+            .is_some()
+    );
+}
+
+#[test]
 fn a_check_within_the_last_day_is_not_repeated_and_its_release_still_shows() {
     let releases = FakeReleases::none();
     let mut harness = app_with_releases(

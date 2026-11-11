@@ -15,6 +15,18 @@ the icon theme expect (the Linux window archive carries assets/linux/):
 - assets/linux/cz.kankaj.Senzor.svg   a copy of senzor.svg;
 - assets/linux/cz.kankaj.Senzor.png   a copy of senzor-256.png;
 
+the logos of the Microsoft Store's MSIX package, named as Windows looks them up (the package's
+resources.pri indexes them; makepri builds it in the release workflow):
+
+- assets/msix/Square44x44Logo.scale-{100,200,400}.png      the app list and taskbar;
+- assets/msix/Square44x44Logo.targetsize-{16,24,32,48,256}[_altform-unplated].png
+                                      the taskbar and Explorer at those sizes (the hand-tuned
+                                      PNGs where they exist; plated and unplated alike, since
+                                      the icon brings its own tile);
+- assets/msix/Square150x150Logo.scale-{100,200,400}.png    the Start tile, the icon at two
+                                                           thirds of it;
+- assets/msix/StoreLogo.scale-{100,200,400}.png            the Store and the installer;
+
 and the docs site's icons in website/app/ (Next.js picks them up by name):
 
 - favicon.ico                         16, 32 and 48 px;
@@ -36,6 +48,7 @@ MASTER = HERE / "senzor.svg"
 MACOS_MASTER = HERE / "senzor-macos.svg"
 WEBSITE_APP = HERE.parent.parent / "website" / "app"
 LINUX = HERE.parent / "linux"
+MSIX = HERE.parent / "msix"
 APP_ID = "cz.kankaj.Senzor"
 
 # Sizes drawn by hand (src/senzor-<n>.svg -> senzor-<n>.png); never rendered from the master.
@@ -70,6 +83,28 @@ def tile_colour() -> str:
     match = re.search(r'<rect[^>]*fill="(#[0-9a-fA-F]{6})"', MASTER.read_text())
     assert match, "senzor.svg starts with a filled <rect>"
     return match.group(1)
+
+
+def render_padded(svg: pathlib.Path, size: int, page: int, out: pathlib.Path) -> None:
+    """The icon at `size` px in the middle of a transparent `page` px square."""
+    offset = str((page - size) // 2)
+    subprocess.run(
+        ["rsvg-convert", "--width", str(size), "--height", str(size),
+         "--page-width", str(page), "--page-height", str(page),
+         "--left", offset, "--top", offset, "--output", str(out), str(svg)],
+        check=True,
+    )
+
+
+def write_msix() -> None:
+    for scale in (100, 200, 400):
+        render(MASTER, 44 * scale // 100, MSIX / f"Square44x44Logo.scale-{scale}.png")
+        render(MASTER, 50 * scale // 100, MSIX / f"StoreLogo.scale-{scale}.png")
+        tile = 150 * scale // 100
+        render_padded(MASTER, tile * 2 // 3, tile, MSIX / f"Square150x150Logo.scale-{scale}.png")
+    for size in (16, 24, 32, 48, 256):
+        for form in ("", "_altform-unplated"):
+            shutil.copyfile(HERE / f"senzor-{size}.png", MSIX / f"Square44x44Logo.targetsize-{size}{form}.png")
 
 
 def png(size: int) -> bytes:
@@ -117,11 +152,14 @@ def main() -> None:
     write_icns(HERE / "senzor.icns")
     shutil.copyfile(MASTER, LINUX / f"{APP_ID}.svg")
     shutil.copyfile(HERE / "senzor-256.png", LINUX / f"{APP_ID}.png")
+    MSIX.mkdir(exist_ok=True)
+    write_msix()
     write_ico((16, 32, 48), WEBSITE_APP / "favicon.ico")
     shutil.copyfile(MASTER, WEBSITE_APP / "icon.svg")
     render(MASTER, 180, WEBSITE_APP / "apple-icon.png", background=tile_colour())
     print("wrote", ", ".join(f"senzor-{s}.png" for s in RENDERED), "senzor.ico and senzor.icns")
     print(f"wrote assets/linux/{APP_ID}.svg and {APP_ID}.png")
+    print("wrote assets/msix/: Square44x44Logo, Square150x150Logo and StoreLogo")
     print("wrote website/app/favicon.ico, icon.svg and apple-icon.png")
 
 

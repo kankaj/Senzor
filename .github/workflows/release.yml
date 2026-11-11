@@ -267,6 +267,17 @@ jobs:
       "attestations": "write"
       "contents": "read"
       "id-token": "write"
+
+  custom-msix:
+    needs:
+      - plan
+      - build-local-artifacts
+    uses: ./.github/workflows/msix.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+    permissions:
+      "contents": "read"
   # Determines if we should publish/announce
   host:
     needs:
@@ -275,8 +286,9 @@ jobs:
       - build-global-artifacts
       - custom-macos-app
       - custom-docs-archive
+      - custom-msix
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-macos-app.result == 'skipped' || needs.custom-macos-app.result == 'success') && (needs.custom-docs-archive.result == 'skipped' || needs.custom-docs-archive.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-macos-app.result == 'skipped' || needs.custom-macos-app.result == 'success') && (needs.custom-docs-archive.result == 'skipped' || needs.custom-docs-archive.result == 'success') && (needs.custom-msix.result == 'skipped' || needs.custom-msix.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
@@ -421,6 +433,19 @@ jobs:
     permissions:
       "contents": "read"
 
+  custom-msstore:
+    needs:
+      - plan
+      - host
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    uses: ./.github/workflows/msstore.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+    # publish jobs get escalated permissions
+    permissions:
+      "contents": "read"
+
   announce:
     needs:
       - plan
@@ -429,10 +454,11 @@ jobs:
       - custom-publish-docs
       - custom-homebrew-cask
       - custom-winget
+      - custom-msstore
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.custom-publish-docs.result == 'skipped' || needs.custom-publish-docs.result == 'success') && (needs.custom-homebrew-cask.result == 'skipped' || needs.custom-homebrew-cask.result == 'success') && (needs.custom-winget.result == 'skipped' || needs.custom-winget.result == 'success') }}
+    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.custom-publish-docs.result == 'skipped' || needs.custom-publish-docs.result == 'success') && (needs.custom-homebrew-cask.result == 'skipped' || needs.custom-homebrew-cask.result == 'success') && (needs.custom-winget.result == 'skipped' || needs.custom-winget.result == 'success') && (needs.custom-msstore.result == 'skipped' || needs.custom-msstore.result == 'success') }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

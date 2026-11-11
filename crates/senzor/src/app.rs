@@ -77,6 +77,8 @@ pub struct SenzorApp {
     release_source: Option<Box<dyn ReleaseSource>>,
     /// Where the answer of the running update check comes in.
     release_check: Option<std::sync::mpsc::Receiver<Result<Option<Release>, String>>>,
+    /// Installed from the Microsoft Store, which delivers the updates: GitHub is never asked.
+    store_updates: bool,
 }
 
 /// From this width of the detail panel on, a template's preview sits beside its editor.
@@ -152,6 +154,7 @@ impl SenzorApp {
             failure_notifications: FailureNotifications::start(Box::new(DesktopNotifier)),
             release_source: None,
             release_check: None,
+            store_updates: false,
         };
         match path {
             Some(path) => app.open_path(&path),
@@ -190,6 +193,13 @@ impl SenzorApp {
         self
     }
 
+    /// Leaves updates to the Microsoft Store, which installed this copy: no check on GitHub, no
+    /// notice of a release found there, and the settings say where updates come from.
+    pub fn with_store_updates(mut self) -> Self {
+        self.store_updates = true;
+        self
+    }
+
     /// The app's own settings, saved between launches.
     pub fn settings(&self) -> &AppSettings {
         &self.settings
@@ -200,7 +210,7 @@ impl SenzorApp {
         self.settings
             .latest_release
             .as_ref()
-            .filter(|_| self.settings.check_updates)
+            .filter(|_| self.settings.check_updates && !self.store_updates)
             .filter(|r| crate::update::is_newer(&r.version, env!("CARGO_PKG_VERSION")))
     }
 
@@ -513,7 +523,8 @@ impl SenzorApp {
                 Err(error) => eprintln!("Could not check for a newer Senzor: {error}"),
             }
         }
-        if !self.settings.check_updates
+        if self.store_updates
+            || !self.settings.check_updates
             || !crate::update::due(self.settings.update_checked, crate::update::now_secs())
         {
             return;
@@ -1054,6 +1065,7 @@ impl eframe::App for SenzorApp {
                 &self.settings,
                 &mcp,
                 newer.as_ref(),
+                self.store_updates,
                 &mut actions,
             );
         }

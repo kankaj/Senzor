@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The manifest of the window's MSIX package for the Microsoft Store. dev/msix-layout.sh fills in
+  @VERSION@ (X.Y.Z.0: the Store keeps the fourth part for itself) and @ARCH@ (x64 or arm64); the
+  rest stays as Partner Center's product identity page gives it, letter for letter. The Store signs
+  the package, so it needs no certificate of ours. Languages: the app speaks English and Czech, and
+  Partner Center offers a Store listing for each language declared here.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+  <Identity
+    Name="43614JaroslavKaka.Senzor"
+    Publisher="CN=AC5B9DA6-CE4E-453D-8D2C-1683417569BB"
+    Version="@VERSION@"
+    ProcessorArchitecture="@ARCH@" />
+  <Properties>
+    <DisplayName>Senzor</DisplayName>
+    <PublisherDisplayName>Jaroslav Kaňka</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="cs-cz" />
+  </Resources>
+  <Applications>
+    <Application Id="Senzor" Executable="senzor.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Senzor"
+        Description="MQTT sensor simulator"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

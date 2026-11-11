@@ -73,8 +73,16 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   winget gets `Kankaj.Senzor` (the MSI) and `Kankaj.SenzorCLI` (the zip, portable): `winget.yml`
   writes the manifests with `dev/winget.sh` and opens a pull request per package in
   `microsoft/winget-pkgs` with `dev/winget-submit.sh`, through the API from the `WINGET_TOKEN`
-  owner's fork. The docs job (`publish-docs.yml`) is a publish job too, so a failing channel never
-  holds it back.
+  owner's fork. The Microsoft Store gets the window as an MSIX bundle (x64 and arm64):
+  `msix.yml`, a global artifacts job, lays each package out with `dev/msix-layout.sh` (manifest
+  `crates/senzor/msix/AppxManifest.xml` with Partner Center's identity, logos `assets/msix/` from
+  `assets/icon/generate.py`) and packs it with the Windows SDK into the artifact `msix-bundle`,
+  not a release file (the Store signs it). `msstore.yml` submits it with Microsoft's Store CLI
+  (`MSSTORE_*` secrets, `--priceId Free`) once the variable `MSSTORE_PUBLISH` is `true`: the
+  first submission was made by hand, and the API sees no app before it is live; the manual
+  workflow `msstore-check.yml` signs in and reads the app without submitting. From the Store the window leaves updates to the Store
+  (`SenzorApp::with_store_updates`, `src/package.rs`). The docs job (`publish-docs.yml`) is a
+  publish job too, so a failing channel never holds it back.
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
 - Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there

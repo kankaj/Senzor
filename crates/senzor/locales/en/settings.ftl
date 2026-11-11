@@ -19,6 +19,7 @@ settings-updates = Updates
 settings-updates-switch = Check for updates
 settings-updates-hint = Asks GitHub once a day whether a newer release exists; nothing about you or your projects is sent
 settings-updates-text = say when a newer version is out
+settings-updates-store = the Microsoft Store keeps Senzor up to date
 settings-mcp-text = let AI agents control this window
 settings-mcp-hint-on = AI agents can control this window at http://{ $address }/mcp. Click to stop.
 settings-mcp-hint-off = Let AI agents control this window over MCP at http://127.0.0.1:{ $port }/mcp

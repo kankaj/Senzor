@@ -19,6 +19,7 @@ settings-updates = Aktualizace
 settings-updates-switch = Hledat aktualizace
 settings-updates-hint = Jednou denně se zeptá GitHubu, zda existuje novější verze; nic o vás ani o vašich projektech se neodesílá
 settings-updates-text = upozornit na novou verzi
+settings-updates-store = Senzor aktualizuje Microsoft Store
 settings-mcp-text = nechat AI agenty ovládat toto okno
 settings-mcp-hint-on = AI agenti mohou ovládat toto okno na http://{ $address }/mcp. Kliknutím MCP vypnete.
 settings-mcp-hint-off = Nechat AI agenty ovládat toto okno přes MCP na http://127.0.0.1:{ $port }/mcp

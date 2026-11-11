@@ -62,6 +62,7 @@ toml = "1.1.8"
 toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+windows-sys = "0.61.2"
 winresource = "0.1.34"
 
 # The builds that ship: the release workflow builds with `--profile dist`. Link-time optimisation

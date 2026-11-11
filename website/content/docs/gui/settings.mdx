@@ -52,6 +52,8 @@ Senzor asks when it starts, at most once a day, in the background, so the window
 
 The switch is on unless you turn it off, and Senzor remembers your choice. While it is off, Senzor asks nothing and hides a newer version it found before. `senzor-cli` never checks for updates.
 
+Senzor from the Microsoft Store is updated by the Store. There the row reads **the Microsoft Store keeps Senzor up to date**, without the switch, and Senzor never asks GitHub.
+
 ## Version and credits
 
 **Version** shows the version of Senzor you are running, followed by **1.1.0 is out** when a newer version is out (see [Updates](#updates)), **Licence** its licence, the [Apache License 2.0](/docs#licence), and **Author** who wrote it. Under them, **What's new** lists what this version brings, **Documentation** opens this site at the docs of the version you are running, as the `?` next to each setting does, and **Source code** the [Senzor repository on GitHub](https://github.com/kankaj/Senzor). **Open-source credits** unfolds a list of the projects built into Senzor, each with its licence and a link to its page: among them egui and eframe for the window, Phosphor Icons for the icons, the Ubuntu and Hack fonts, and rumqttc for MQTT.
@@ -70,4 +72,4 @@ Senzor saves its settings in one file, `app.ron`, when you close the window and 
 | macOS   | `~/Library/Application Support/cz.kankaj.Senzor/app.ron` |
 | Windows | `%APPDATA%\cz.kankaj.Senzor\data\app.ron`               |
 
-On Linux, if `XDG_DATA_HOME` is set to an absolute path, the folder is `$XDG_DATA_HOME/cz.kankaj.senzor` instead. To go back to the defaults, close Senzor and delete the file.
+On Linux, if `XDG_DATA_HOME` is set to an absolute path, the folder is `$XDG_DATA_HOME/cz.kankaj.senzor` instead. Senzor from the Microsoft Store runs in a package, and Windows keeps the files it creates in `%APPDATA%` in the package's own folder: its settings are in `%LOCALAPPDATA%\Packages\43614JaroslavKaka.Senzor_qrj5pzk60eqe4\LocalCache\Roaming\cz.kankaj.Senzor\data\app.ron`, unless another Senzor on the same computer made `app.ron` first, which they then share. To go back to the defaults, close Senzor and delete the file.

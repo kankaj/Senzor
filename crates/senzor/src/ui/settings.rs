@@ -16,6 +16,7 @@ pub fn show(
     settings: &AppSettings,
     mcp: &McpStatus,
     newer: Option<&Release>,
+    store_updates: bool,
     actions: &mut Vec<Action>,
 ) {
     let mut open = ui_state.settings_open;
@@ -35,7 +36,7 @@ pub fn show(
                     notify_row(ui, settings.notify_failures, actions);
                     mcp_row(ui, mcp, settings, actions);
 
-                    updates_row(ui, settings.check_updates, actions);
+                    updates_row(ui, settings.check_updates, store_updates, actions);
 
                     ui.label(t!("settings-version"));
                     ui.horizontal(|ui| {
@@ -184,13 +185,19 @@ fn notify_row(ui: &mut egui::Ui, notify: bool, actions: &mut Vec<Action>) {
     ui.end_row();
 }
 
-/// The switch for the daily look for a newer release.
-fn updates_row(ui: &mut egui::Ui, check: bool, actions: &mut Vec<Action>) {
+/// Whether to look for a newer release on GitHub; a copy from the Microsoft Store only says that
+/// the Store updates it.
+fn updates_row(ui: &mut egui::Ui, check: bool, store: bool, actions: &mut Vec<Action>) {
     ui.label(format!(
         "{} {}",
         icons::ARROW_CIRCLE_UP,
         t!("settings-updates")
     ));
+    if store {
+        ui.label(t!("settings-updates-store"));
+        ui.end_row();
+        return;
+    }
     let mut on = check;
     ui.horizontal(|ui| {
         let hint = t!("settings-updates-hint");

@@ -33,6 +33,12 @@ impl Notifier for DesktopNotifier {
         notification
             .icon(APP_ID)
             .hint(notify_rust::Hint::DesktopEntry(APP_ID.to_string()));
+        // From the Store's package, toasts name the package's app; otherwise notify-rust sends
+        // them as PowerShell, which an unpackaged program may borrow.
+        #[cfg(windows)]
+        if let Some(id) = packaged_app_id() {
+            notification.app_id(id);
+        }
         // Sending waits for D-Bus or the notification centre to answer, so not on the UI thread.
         let sent = std::thread::Builder::new()
             .name("notification".into())
@@ -59,6 +65,14 @@ fn use_own_bundle() {
             let _ = notify_rust::set_application(APP_ID);
         }
     });
+}
+
+/// The AppUserModelID of the Store's package when this copy runs from it; asked once.
+#[cfg(windows)]
+fn packaged_app_id() -> Option<&'static str> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| crate::package::family_name().map(|f| crate::package::app_user_model_id(&f)))
+        .as_deref()
 }
 
 /// An instance that failed, and why.
