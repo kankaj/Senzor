@@ -54,11 +54,12 @@ jobs:
           SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
           CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
-        # The CLI reports usage to Microsoft unless told not to.
+        # The CLI reports usage to Microsoft unless told not to, which it accepts only once it
+        # has credentials.
         run: |
-          msstore settings --enableTelemetry false
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          msstore settings --enableTelemetry false
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Submit
         shell: pwsh
