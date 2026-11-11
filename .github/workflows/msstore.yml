@@ -6,7 +6,7 @@
 #
 # The Store CLI only updates an app that is live, so the first submission was made by hand in
 # Partner Center; the job waits for the repository variable MSSTORE_PUBLISH = true, set once
-# Senzor is in the Store. It signs in as the Entra application "Senzor release" (Manager in
+# Senzor is in the Store and the manual "Store credentials check" (msstore-check.yml) passes. It signs in as the Entra application "Senzor release" (Manager in
 # Partner Center) with the secrets MSSTORE_TENANT_ID, MSSTORE_CLIENT_ID, MSSTORE_CLIENT_SECRET
 # and MSSTORE_SELLER_ID. Senzor is free: the account prices per market, which the API cannot read
 # back, so the job states the price itself (--priceId Free) rather than have the CLI stop.
