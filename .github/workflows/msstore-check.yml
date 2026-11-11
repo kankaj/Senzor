@@ -39,6 +39,11 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           msstore settings --enableTelemetry false
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: List the apps these credentials see
+        shell: pwsh
+        run: |
+          msstore apps list
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read Senzor's Store record
         shell: pwsh
         run: |
