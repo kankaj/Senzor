@@ -65,15 +65,9 @@ In the Cloudflare dashboard, **Workers & Pages** → **Create application**, con
 
 The build runs from the repository root, where `wrangler.jsonc` is: the pages include files from outside `website/` (`examples/`, the built-in templates in `crates/senzor-core/`) and the version badge reads `Cargo.toml`.
 
-Cloudflare's build image comes with an older pnpm than the pnpm 11 the site is built with (the first build ran pnpm 9, although Cloudflare's docs list 10). `pnpm-workspace.yaml` lists `packages` so that older pnpm versions can still install, but pin the version so Cloudflare builds exactly like a local build. Add a build variable under **Settings** → **Build** → **Build Variables and Secrets** (Node.js is already 24 there):
+Cloudflare builds with the Node.js and pnpm that `mise.toml` pins for development and CI, from two files that repeat them: `.node-version` at the top of the repository (Cloudflare reads it in the folder the build starts in) and `packageManager` in `website/package.json` (Corepack reads it where pnpm runs, ahead of any `PNPM_VERSION` build variable). `pnpm test` fails when either differs from `mise.toml`, so change all three together. Set no `NODE_VERSION` or `PNPM_VERSION` build variable, for production or for previews: the files decide. `pnpm-workspace.yaml` still lists `packages`, so that an older pnpm, such as the build image's own, can install too.
 
-| Variable       | Value     |
-| -------------- | --------- |
-| `PNPM_VERSION` | `11.28.4` |
-
-If the first build ran before you added it and failed, run it again from the deployments list.
-
-Do not set `NODE_VERSION` unless you need to: the default Node.js 24 works, and Cloudflare cannot install a Node.js release that came out only days ago (a build with `NODE_VERSION` = `24.22.0`, released the day before, failed at "Installing nodejs"). A version must also exist: check `npm view pnpm@<version> version` before you set `PNPM_VERSION`.
+Cloudflare cannot install a Node.js release that came out only days ago (a build with Node.js 24.22.0, released the day before, failed at "Installing nodejs"), so move to a new Node.js only once it is a couple of weeks old.
 
 Leave `DOCS_BASE_PATH` unset: the Worker serves the site from the root of its domain.
 

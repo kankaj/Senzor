@@ -33,7 +33,9 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
     changed.
 - Tool versions: Rust in `rust-toolchain.toml` (rustup and IDEs read it), Node and pnpm in
   `mise.toml`, which also reads the Rust file; CI installs them with mise. `mise trust` once, then
-  `mise install`. Change a version there, never in the workflow.
+  `mise install`. Change a version there, never in the workflow. Cloudflare's docs builds read
+  Node from `.node-version` and pnpm from `packageManager` in `website/package.json`: change them
+  with `mise.toml` (`pnpm test` checks they match).
 - CI (`.github/workflows/ci.yml`) runs the same gates once, plus the Mosquitto tests, on every
   push to `main` and every pull request; when a gate changes, change the workflow with it.
 - Real-broker tests are `#[ignore]`d: `docker compose -f dev/compose.yaml up -d`, then
