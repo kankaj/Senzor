@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Writes the Homebrew cask of the window, Casks/senzor.rb in kankaj/homebrew-tap, for a release:
 # its version and the SHA-256 of its two Mac apps (Senzor-<arch>-apple-darwin.zip). The release
-# workflow runs it and pushes the cask (homebrew-cask.yml); dist makes the formula of senzor-cli.
+# workflow runs it and pushes the cask (homebrew-tap.yml); dist makes the formula of senzor-cli.
 #
 # Usage: dev/homebrew-cask.sh VERSION ARM_SHA256 INTEL_SHA256 > senzor.rb
 set -euo pipefail
@@ -24,8 +24,7 @@ cask "senzor" do
   sha256 arm:   "$arm",
          intel: "$intel"
 
-  url "https://github.com/kankaj/Senzor/releases/download/v#{version}/Senzor-#{arch}-apple-darwin.zip",
-      verified: "github.com/kankaj/Senzor/"
+  url "https://github.com/kankaj/Senzor/releases/download/v#{version}/Senzor-#{arch}-apple-darwin.zip"
   name "Senzor"
   desc "MQTT sensor simulator"
   homepage "https://senzor.kankaj.cz/"
@@ -34,8 +33,6 @@ cask "senzor" do
     url :url
     strategy :github_latest
   end
-
-  depends_on macos: ">= :high_sierra"
 
   app "Senzor.app"
 
