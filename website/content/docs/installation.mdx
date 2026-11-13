@@ -23,23 +23,24 @@ which Homebrew adds by itself the first time. The window needs macOS 10.13 or la
 and macOS 11 or later on Apple Silicon. Senzor is not signed by Apple, so macOS blocks it the
 first time; see [First start on macOS](#first-start-on-macos).
 
-### Windows: winget or the Microsoft Store
+### Windows: Microsoft Store
 
-```powershell
-winget install Kankaj.Senzor      # the window, from the MSI
-winget install Kankaj.SenzorCLI   # the headless runner, as the command senzor-cli
-```
+The window is available in the Microsoft Store:
 
-The window is also in the Microsoft Store:
-[Senzor in the Microsoft Store](https://apps.microsoft.com/detail/9PC0635WJF44). The Store keeps
-that copy up to date, so it does not ask GitHub for new versions (see
+<a href="https://get.microsoft.com/installer/download/9pc0635wjf44?referrer=appbadge" target="_self" >
+    <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
+</a>
+
+The Store keeps that copy up to date, so it does not ask GitHub for new versions (see
 [Updates](/docs/gui/settings#updates)). Install the window from one place only: the Store's copy
-and the one from winget or the MSI are separate installations.
+and the one from the MSI are separate installations. For the headless runner, or to install
+the window without the Store, see [From the downloads](#from-the-downloads).
 
 ### Linux
 
-Packages for Arch Linux in the AUR, `senzor-bin` and `senzor-cli-bin`, follow as soon as the AUR
-accepts new maintainers again. Until then, use the downloads below.
+We are working on publishing Flatpak packages, publishing to crates.io, and adding Arch Linux
+packages in the AUR (`senzor-bin` and `senzor-cli-bin`) as soon as the AUR accepts new maintainers
+again. Until then, use the [downloads below](#from-the-downloads).
 
 ## From the downloads
 
@@ -118,7 +119,6 @@ Microsoft Store updates its copy by itself. To update:
 
 ```bash
 brew upgrade --cask senzor && brew upgrade senzor-cli   # Homebrew
-winget upgrade Kankaj.Senzor Kankaj.SenzorCLI          # winget
 ```
 
 From the downloads, install the new release over the old one: the MSI replaces the installed
@@ -144,7 +144,7 @@ gh attestation verify senzor-x86_64-unknown-linux-gnu.tar.xz --repo kankaj/Senzo
 ## Uninstalling
 
 Remove Senzor the way you installed it: `brew uninstall --cask senzor` (with `--zap` it also
-removes the settings), `winget uninstall Kankaj.Senzor`, the Store's copy and the MSI under
+removes the settings), the Store's copy and the MSI under
 **Settings** > **Apps** > **Installed apps**, and downloaded files by deleting them. The window's
 settings stay in one file until you delete it; see
 [Where Senzor keeps them](/docs/gui/settings#where-senzor-keeps-them).
