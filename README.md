@@ -43,20 +43,34 @@ The window and the headless runner are packages of their own; install either or 
 # macOS, with Homebrew
 brew install --cask kankaj/tap/senzor
 brew install kankaj/tap/senzor-cli
-
-# Windows, with winget
-winget install Kankaj.Senzor
-winget install Kankaj.SenzorCLI
 ```
 
-On Windows the window is also in the
-[Microsoft Store](https://apps.microsoft.com/detail/9PC0635WJF44). Arch Linux packages in the AUR
-follow as soon as the AUR accepts new maintainers again. Every platform, Linux, macOS and Windows
-on x86_64 and ARM, has downloads in the
-[latest release](https://github.com/kankaj/Senzor/releases/latest).
+On Windows the window is in the Microsoft Store:
+
+<a href="https://get.microsoft.com/installer/download/9pc0635wjf44?referrer=appbadge" target="_self" >
+    <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
+</a>
+
+On Linux, download the archive for your architecture from the
+[latest release](https://github.com/kankaj/Senzor/releases/latest), unpack it and put the program on
+your `PATH`:
+
+```bash
+# the window
+tar -xJf senzor-x86_64-unknown-linux-gnu.tar.xz
+install -Dm755 senzor-x86_64-unknown-linux-gnu/senzor ~/.local/bin/senzor
+
+# the headless runner
+tar -xJf senzor-cli-x86_64-unknown-linux-gnu.tar.xz
+install -Dm755 senzor-cli-x86_64-unknown-linux-gnu/senzor-cli ~/.local/bin/senzor-cli
+```
+
+We are working on publishing Flatpak packages, publishing to crates.io, and adding packages to the
+AUR as soon as it accepts new maintainers again. Every platform, Linux, macOS and Windows on x86_64
+and ARM, has downloads in the [latest release](https://github.com/kankaj/Senzor/releases/latest).
 [Installation](https://senzor.kankaj.cz/docs/installation) in the documentation has them all,
-with the first start on macOS and Windows (the builds are not signed yet), updating, checking a
-download and building from source.
+with the first start on macOS and Windows (the builds are not signed yet), required libraries for
+Linux, updating, checking a download and building from source.
 
 ## A first run
 
