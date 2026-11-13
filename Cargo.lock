@@ -4931,7 +4931,7 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "senzor"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "clap",
  "eframe",
@@ -4963,7 +4963,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -4980,7 +4980,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "ciborium",
@@ -5009,7 +5009,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-mcp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "axum 0.8.9",
  "base64 0.23.1",
@@ -5029,7 +5029,7 @@ dependencies = [
 
 [[package]]
 name = "senzor-testkit"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "rumqttc",
  "rumqttd",

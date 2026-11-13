@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/kankaj/Senzor"
@@ -17,8 +17,8 @@ rust-version = "1.99"
 [workspace.dependencies]
 # On crates.io the crates depend on each other at exactly the workspace's version;
 # dev/release.sh moves these pins with the version.
-senzor-core = { path = "crates/senzor-core", version = "=1.0.0" }
-senzor-mcp = { path = "crates/senzor-mcp", version = "=1.0.0" }
+senzor-core = { path = "crates/senzor-core", version = "=1.0.1" }
+senzor-mcp = { path = "crates/senzor-mcp", version = "=1.0.1" }
 senzor-testkit = { path = "crates/senzor-testkit" }
 assert_cmd = "2.2.2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
