@@ -234,7 +234,12 @@ Intro text.
         crate::i18n::set_language(crate::i18n::Language::Czech);
         let czech = this_version();
         assert_eq!(czech[0].version, english[0].version);
-        assert!(czech[0].highlights[0].starts_with("Simulace senzorů MQTT"));
+        // Whatever version this is: its section of the Czech file, not a text of one release.
+        let from_file = releases(CHANGELOG_CS)
+            .into_iter()
+            .find(|r| r.version == english[0].version)
+            .expect("locales/cs/whats-new.md has this version");
+        assert_eq!(czech[0].highlights, from_file.highlights);
         assert_ne!(czech[0].highlights, english[0].highlights);
     }
 
