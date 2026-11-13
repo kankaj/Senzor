@@ -1,0 +1,52 @@
+# Pushes the senzor-cli container image to ghcr.io/kankaj/senzor-cli, for linux/amd64 and
+# linux/arm64, tagged X.Y.Z, X.Y, X and latest. dev/docker-image.sh builds it from the release's
+# two Linux archives (checked against their .sha256 files) with crates/senzor-cli/Dockerfile, so
+# the image carries the very binaries of the release. dist runs this as a publish job once the
+# GitHub Release exists (dist-workspace.toml); a pre-release gets no image. It needs no secret:
+# the workflow's own token may write the repository's packages.
+#
+# The first push created the package as private: it was made public once, by hand, in the
+# package's settings on GitHub (Danger Zone, Change visibility).
+name: GHCR
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+env:
+  IMAGE: ghcr.io/kankaj/senzor-cli
+
+jobs:
+  image:
+    name: Push the senzor-cli image
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the Linux archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'senzor-cli-*-unknown-linux-gnu.tar.xz*' --dir archives
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+        run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push
+        env:
+          TAG: ${{ github.ref_name }}
+        run: dev/docker-image.sh archives "${TAG#v}" "$IMAGE"
+      - name: Run the pushed image
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          out=$(docker run --rm "$IMAGE:${TAG#v}" --version)
+          echo "$out"
+          [[ $out == "senzor-cli ${TAG#v}" ]]

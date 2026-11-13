@@ -86,7 +86,11 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   (`MSSTORE_*` secrets, `--priceId Free`) once the variable `MSSTORE_PUBLISH` is `true`: the
   first submission was made by hand, and the API sees no app before it is live; the manual
   workflow `msstore-check.yml` signs in and reads the app without submitting. From the Store the window leaves updates to the Store
-  (`SenzorApp::with_store_updates`, `src/package.rs`). The docs job (`publish-docs.yml`) is a
+  (`SenzorApp::with_store_updates`, `src/package.rs`). The container image
+  `ghcr.io/kankaj/senzor-cli` (tags X.Y.Z, X.Y, X, latest; amd64 and arm64) is a publish job too:
+  `ghcr.yml` runs `dev/docker-image.sh`, which packs the two Linux archives with
+  `crates/senzor-cli/Dockerfile` (Debian slim pinned by digest, non-root, no emulation needed)
+  and pushes with the workflow's own token. The docs job (`publish-docs.yml`) is a
   publish job too, so a failing channel never holds it back.
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).

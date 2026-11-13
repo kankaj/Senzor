@@ -52,6 +52,7 @@ jobs:
           dev/homebrew-tap.test.sh
           dev/winget.test.sh
           dev/msix-layout.test.sh
+          dev/docker-image.test.sh
           dev/release-check.sh
 
       # The ignored tests need the Mosquitto brokers in dev/compose.yaml (see dev/README.md).

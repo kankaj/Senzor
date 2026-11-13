@@ -50,7 +50,7 @@ An empty variable counts as set. The password is then empty, and because the MQT
 
 ## A GitHub Actions job
 
-This job runs its steps in a container, so the broker service is reachable under its name, `mqtt` (see [About service containers](https://docs.github.com/en/actions/use-cases-and-examples/using-containerized-services/about-service-containers)). It assumes the project is in your repository as `ci/headless-ci.toml`, and that `./run-integration-tests.sh` stands for your own tests.
+This job runs its steps in Senzor's container image, `ghcr.io/kankaj/senzor-cli` (see [Installation](/docs/installation#docker-senzor-cli)), so `senzor-cli` is already there and the broker service is reachable under its name, `mqtt` (see [About service containers](https://docs.github.com/en/actions/use-cases-and-examples/using-containerized-services/about-service-containers)). It assumes the project is in your repository as `ci/headless-ci.toml`, and that `./run-integration-tests.sh` stands for your own tests.
 
 ```yaml
 name: Integration tests
@@ -60,8 +60,12 @@ on: [push]
 jobs:
   integration:
     runs-on: ubuntu-latest
-    # Steps run in a container, so the service below is reachable as "mqtt".
-    container: ubuntu:24.04
+    # Steps run in Senzor's image, so the service below is reachable as "mqtt".
+    container:
+      image: ghcr.io/kankaj/senzor-cli:1
+      # The image runs as a user other than root; the job's steps write to the
+      # runner's workspace (actions/checkout), which needs root.
+      options: --user root
     services:
       mqtt:
         image: eclipse-mosquitto:2
@@ -71,8 +75,6 @@ jobs:
       MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-
-      # Install senzor-cli here; see the Installation page of the Senzor docs.
 
       - name: Check the project
         run: senzor-cli validate ci/headless-ci.toml
@@ -86,7 +88,7 @@ jobs:
           wait "$SENZOR"
 ```
 
-- The installation step is up to you; see [Installation](/docs/installation).
+- The image has `bash`, so the steps run with it as on GitHub's own runners. Your tests run in the same container: if they need more tools, install them in a step (the image is Debian, so `apt-get install`), or build your own image `FROM ghcr.io/kankaj/senzor-cli:1`.
 - `senzor-cli run` runs in the background while your tests run. Each instance publishes its first reading up to one interval after it connects, 10 seconds for the `co2` template, so let your tests wait at least that long for the first message.
 - When the tests are done, `kill` sends SIGTERM, so the instances publish `offline` and disconnect cleanly. GitHub runs the step with `bash -e`, which stops at the first failing command. If `senzor-cli` has already stopped, `kill` finds no process and fails; `2>/dev/null || true` keeps that from failing the step.
 - `wait` returns the exit code of `senzor-cli`: 0 after SIGTERM or after `--duration`, or 3 if an instance failed, so the step fails if `senzor-cli` could not run the project or an instance failed. If the tests fail, the step fails at once with their exit code.
@@ -117,7 +119,29 @@ The Quick start broker does not check passwords either, so any value works.
 
 ## Senzor in a container
 
-If you build your own image that runs `senzor-cli`, make it the container's main process (see [Running headless](/docs/headless)). Then:
+The image `ghcr.io/kankaj/senzor-cli` runs `senzor-cli` as its main process, with the project
+folder mounted at `/work` (see [Installation](/docs/installation#docker-senzor-cli)). With Docker
+Compose, the same project runs next to a Mosquitto broker; `host = "mqtt"` is the broker service's
+name here too. With the project in `ci/`:
 
-- `docker stop` sends SIGTERM: the instances publish `offline` and disconnect cleanly, and `senzor-cli` exits with 0, or with 3 if an instance had failed.
+```yaml title="compose.yaml"
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    command: mosquitto -c /mosquitto-no-auth.conf
+  sensors:
+    image: ghcr.io/kankaj/senzor-cli:1
+    command: run headless-ci.toml
+    volumes:
+      - ./ci:/work:ro
+    environment:
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    depends_on:
+      - mqtt
+```
+
+`docker compose up` starts both; `senzor-cli` runs until the container stops, and retries until the
+broker is ready. Then:
+
+- `docker stop` (and `docker compose stop` or `down`) sends SIGTERM: the instances publish `offline` and disconnect cleanly, and `senzor-cli` exits with 0, or with 3 if an instance had failed.
 - `docker kill` sends SIGKILL: the connections drop, and the broker publishes each instance's Last Will. [Simulating a device dropping off](/docs/recipes/device-dropping-off) shows what that looks like.
