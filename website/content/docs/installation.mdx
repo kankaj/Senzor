@@ -36,11 +36,30 @@ The Store keeps that copy up to date, so it does not ask GitHub for new versions
 and the one from the MSI are separate installations. For the headless runner, or to install
 the window without the Store, see [From the downloads](#from-the-downloads).
 
+### Docker: senzor-cli
+
+`senzor-cli` is also a container image, `ghcr.io/kankaj/senzor-cli`, for Linux on x86_64 and ARM.
+Mount the folder with your project at `/work` and give the command after the image name:
+
+```bash
+docker run --rm -v "$PWD:/work" ghcr.io/kankaj/senzor-cli:1 run project.toml
+```
+
+Each release is tagged with its version (`1.2.3`), its minor version (`1.2`), its major version
+(`1`) and `latest`; `:1` follows every 1.x release. The image runs `senzor-cli` as a user other
+than root and carries the binary of the release's Linux download. [CI and Docker](/docs/recipes/ci-and-docker)
+shows it next to a broker, with Docker Compose and in GitHub Actions.
+
+Inside the container, `localhost` is the container itself, so a broker on your machine is not at
+`localhost`. On Linux, add `--network host`; with Docker Desktop, use `host = "host.docker.internal"`
+in the project.
+
 ### Linux
 
 We are working on publishing Flatpak packages, publishing to crates.io, and adding Arch Linux
 packages in the AUR (`senzor-bin` and `senzor-cli-bin`) as soon as the AUR accepts new maintainers
-again. Until then, use the [downloads below](#from-the-downloads).
+again. Until then, use the [downloads below](#from-the-downloads), or for `senzor-cli` the
+[Docker image](#docker-senzor-cli).
 
 ## From the downloads
 
@@ -119,6 +138,7 @@ Microsoft Store updates its copy by itself. To update:
 
 ```bash
 brew upgrade --cask senzor && brew upgrade senzor-cli   # Homebrew
+docker pull ghcr.io/kankaj/senzor-cli:1                 # Docker
 ```
 
 From the downloads, install the new release over the old one: the MSI replaces the installed
