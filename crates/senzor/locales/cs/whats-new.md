@@ -5,7 +5,7 @@ stejný nadpis jako v `CHANGELOG.md` a pod `### Highlights` stejný počet bodů
 test `czech_has_the_highlights_of_every_version` to kontroluje. Verze, která tu chybí, se ukáže
 anglicky.
 
-## [1.1.0]
+## [1.0.1]
 
 ### Highlights
 
