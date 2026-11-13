@@ -1,5 +1,6 @@
 //! Reference pages offered as MCP resources. They are the documentation site's pages, built into
-//! the binary, so improving the docs improves what agents read.
+//! the binary, so improving the docs improves what agents read. The crate reads its copies in
+//! `docs/`, because crates.io takes only the crate's folder: dev/crate-files.sh writes them.
 
 pub(crate) struct Reference {
     pub uri: &'static str,
@@ -22,35 +23,35 @@ pub(crate) const REFERENCES: [Reference; 5] = [
         name: "project-file",
         description: "Every key of the project file: broker, simulation, templates, devices",
         mime_type: "text/markdown",
-        text: include_str!("../../../website/content/docs/reference/project-file.mdx"),
+        text: include_str!("../docs/project-file.mdx"),
     },
     Reference {
         uri: "senzor://reference/generators",
         name: "generators",
         description: "The field generators (constant, random_walk, sine, uniform, sequence, script) and noise",
         mime_type: "text/markdown",
-        text: include_str!("../../../website/content/docs/reference/generators.mdx"),
+        text: include_str!("../docs/generators.mdx"),
     },
     Reference {
         uri: "senzor://reference/template-variables",
         name: "template-variables",
         description: "Variables and filters available in topics and payloads",
         mime_type: "text/markdown",
-        text: include_str!("../../../website/content/docs/reference/template-variables.mdx"),
+        text: include_str!("../docs/template-variables.mdx"),
     },
     Reference {
         uri: "senzor://reference/scripts",
         name: "scripts",
         description: "Rhai scripts: field scripts, subscriptions to command topics, state, functions and limits",
         mime_type: "text/markdown",
-        text: include_str!("../../../website/content/docs/concepts/scripts.mdx"),
+        text: include_str!("../docs/scripts.mdx"),
     },
     Reference {
         uri: "senzor://reference/builtin-templates",
         name: "builtin-templates",
         description: "The built-in templates co2, temperature and humidity, as TOML",
         mime_type: "application/toml",
-        text: include_str!("../../senzor-core/src/project/builtin.toml"),
+        text: senzor_core::project::builtin::BUILTIN_TOML,
     },
 ];
 

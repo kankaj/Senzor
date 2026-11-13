@@ -1,10 +1,14 @@
 [package]
 name = "senzor-core"
+description = "The engine of Senzor, an MQTT sensor simulator: project files, validation, generators and the MQTT instances. Shared by the senzor window, senzor-cli and senzor-mcp; no stable API of its own."
 version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 edition.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+categories = ["simulation", "network-programming"]
 
 [features]
 # JSON Schemas for the project-file types (used by the MCP server for tool inputs).

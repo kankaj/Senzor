@@ -1,0 +1,359 @@
+---
+title: Project file reference
+description: Every table and key of a Senzor project file, with its type, default and rules.
+---
+
+A project is one TOML file. It has four top-level entries, all optional:
+
+| Key | Type | Contents |
+| --- | --- | --- |
+| `broker` | table | [Broker](#broker) connection settings. |
+| `simulation` | table | [Simulation](#simulation) settings: the seed. |
+| `templates` | array of tables | [Templates](#templates): what a kind of sensor publishes. |
+| `devices` | array of tables | [Devices](#devices): which sensors run, built from templates. |
+
+An empty file is a valid project with no devices. For how the pieces fit together, see
+[Project file](/docs/concepts/project-file) and
+[Templates, devices and instances](/docs/concepts/templates-devices-instances).
+
+## General rules
+
+- **Unknown keys are errors** in every table, generator tables included, except `params` and
+  `user_properties`, whose keys you choose. A misspelt key is reported with its line and column, for
+  example `` unknown field `prot`, expected one of `host`, `port`, … ``. In a device's field override
+  it is reported as a problem of the device instead, for example
+  `` field `co2` override: unknown field `stepp`, expected one of … ``.
+- **Durations** are strings with a unit: `"500ms"`, `"10s"`, `"1.5s"`, `"5m"`, `"1h 30m"`, `"24h"`.
+  A bare number such as `30` is rejected (`expected a duration`); only `"0"` is accepted without a
+  unit, as zero. Durations cannot be negative.
+- **Values** (params, `constant` values, `sequence` values) are a string, a number or a boolean.
+  Arrays, tables and dates are rejected. A number whose value is a whole number renders without a
+  decimal point, so `3` and `3.0` both render as `3` (for numbers below 9,000,000,000,000,000).
+- **Template strings** (`topic`, `payload`, the availability `topic` and `instance_id`) use Jinja
+  syntax. See [Template variables](/docs/reference/template-variables).
+
+## Broker
+
+The `[broker]` table sets the MQTT broker every instance connects to, and the MQTT version they use.
+Each instance opens its own connection.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `host` | string | `"localhost"` | Must not be empty or only spaces. |
+| `port` | integer | `1883` | 1 to 65535. |
+| `client_id_prefix` | string | `"senzor-"` | The MQTT client ID of an instance is this prefix followed by the instance ID, e.g. `senzor-office-0`. |
+| `keep_alive` | duration | `"30s"` | MQTT keep-alive. Whole seconds, from `"1s"` to `"65535s"` (18h 12m 15s). |
+| `mqtt_version` | string | `"5"` | `"5"` or `"3.1.1"`. Every instance connects with this MQTT version. See [MQTT version](#mqtt-version). |
+| `transport` | string | `"tcp"` | `"tcp"` or `"websocket"`. With `"websocket"`, instances connect to `ws://<host>:<port><path>`, or `wss://` with `tls`. |
+| `path` | string | `"/mqtt"` | The WebSocket path. Must start with `/` when `transport = "websocket"`; not used with `"tcp"`. |
+| `session_expiry` | duration | `"0s"` | MQTT 5 only. Whole seconds, at most 4294967295 (about 136 years). How long the broker keeps an instance's session after the connection ends. `"0s"` starts a clean session on every connect; above zero, a reconnect continues the session, which lets a reconnect within [`will_delay`](#availability) cancel the Last Will. |
+| `username` | string | none | Can be used without a password; Senzor then sends only the username. |
+| `password` | string | none | Requires `username`. Cannot be combined with `password_env`. |
+| `password_env` | string | none | The name of an environment variable that holds the password. Requires `username`. The variable must be set when the project is loaded. |
+| `tls` | table | none | Turns on TLS. See [TLS](#tls). |
+
+```toml
+[broker]
+host = "mqtt.example.com"
+port = 8883
+client_id_prefix = "lab-"
+username = "senzor"
+password_env = "MQTT_PASSWORD"
+tls = { ca_file = "certs/ca.pem" }
+```
+
+Prefer `password_env` to `password`: the password then stays out of the project file. In the GUI,
+see [Broker settings](/docs/gui/broker-settings).
+
+### MQTT version
+
+Every instance of a project connects with the same MQTT version. MQTT 5 is the default, so a
+project without `mqtt_version` uses it. Switch to MQTT 3.1.1 for a broker that does not support
+MQTT 5:
+
+```toml
+[broker]
+host = "old-broker.example.com"
+mqtt_version = "3.1.1"
+```
+
+In the GUI, choose **MQTT version** in the [broker settings](/docs/gui/broker-settings#mqtt-version).
+Saving always writes `mqtt_version`, so the file shows which version it uses. Changing it marks
+running instances **restart to apply**.
+
+Only MQTT 5 projects can use the MQTT 5 settings: `session_expiry` above, `message_expiry`,
+`content_type` and `user_properties` on [messages](#messages), and `will_delay` on
+[availability](#availability). With `"3.1.1"`, each of them is a problem until you remove it; only
+`session_expiry = "0s"` is allowed.
+
+A broker that does not support MQTT 5 refuses the connection, and the instance ends **Failed** with
+`the broker does not support MQTT 5; …`. A broker that speaks only MQTT 3.1.1, such as Mosquitto
+before 1.6, closes the connection instead. Senzor then checks whether it answers MQTT 3.1.1: if it
+does, the instance ends **Failed** with the same message; if it does not answer, the instance keeps
+reconnecting. Senzor checks only until the broker has accepted a connection of this run. Over TLS it
+cannot check, so the instance keeps reconnecting and its error ends with
+`the broker closed the connection before accepting it; if it supports only MQTT 3.1.1, …`. Set
+`mqtt_version = "3.1.1"` for such brokers.
+
+### TLS
+
+The `[broker.tls]` table, usually written inline as `tls = { … }`. Its presence turns on TLS; even
+`tls = {}` connects with TLS, trusting the system's root certificates. Files are PEM. They are read
+when the project is loaded, but their contents are checked only when an instance connects: a file
+that is not valid PEM shows up as a connection error, and the instance keeps reconnecting. Relative
+paths are relative to the folder of the project file.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `ca_file` | path | none | CA certificate to trust instead of the system's root certificates. |
+| `client_cert` | path | none | Client certificate, for mutual TLS. Requires `client_key` and `ca_file`. |
+| `client_key` | path | none | Private key of the client certificate. Requires `client_cert`. |
+
+## Simulation
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `seed` | integer | none | Zero or greater. With a seed, the random draws of every instance repeat from run to run. Without one, each run draws new random numbers. |
+
+```toml
+[simulation]
+seed = 42
+```
+
+See [Reproducible runs](/docs/concepts/reproducible-runs).
+
+## Templates
+
+Each `[[templates]]` entry describes one kind of sensor: what it publishes, how often, and how its
+values change. Three [built-in templates](/docs/reference/builtin-templates) exist without being
+declared.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `id` | string | required | Unique among the templates. Must not be `co2`, `temperature` or `humidity`, the built-in IDs. |
+| `interval` | duration | `"10s"` | Time between two publishes. Greater than 0. A device can override it. |
+| `qos` | integer | `0` | QoS of the messages: `0`, `1` or `2`. |
+| `retain` | boolean | `false` | Retain flag of the messages. |
+| `home_assistant` | boolean | `false` | Announce each instance to Home Assistant over MQTT Discovery when it connects: a device with one entity per field. See [Home Assistant discovery](/docs/recipes/home-assistant-discovery). |
+| `availability` | table | none | Status topic and Last Will. See [Availability](#availability). |
+| `messages` | array of tables | required | What to publish on every tick. At least one. See [Messages](#messages). |
+| `fields` | table | required | The values to generate. At least one. See [Fields](#fields). |
+| `subscriptions` | array of tables | none | Topics each instance subscribes to, each with a script to run for every message. See [Subscriptions](#subscriptions). |
+
+```toml
+[[templates]]
+id = "office-air"
+interval = "30s"
+qos = 1
+availability = { topic = "office/{{ device_id }}/status", online = "online", offline = "offline" }
+messages = [
+    { topic = "office/{{ device_id }}/state", payload = '{"co2": {{ co2 | round | int }}, "temperature": {{ temperature | round(1) }}}' },
+]
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15 }
+fields.temperature = { generator = "sine", center = 22, amplitude = 1.5, period = "24h" }
+```
+
+### Messages
+
+Each entry of `messages` is one MQTT message published on every tick, with the template's `qos` and
+`retain`.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | Must render to a non-empty topic without the wildcards `+` and `#`. |
+| `payload` | template string | required | Any text. With a binary `encoding`, text that encoding reads. |
+| `encoding` | string | `"text"` | How the rendered payload is published: `"text"` as it is, or as bytes from `"hex"` digits, `"base64"`, JSON as `"cbor"`, or JSON as a `"protobuf"` message. See [Binary payloads](/docs/recipes/binary-payloads). |
+| `proto` | path | none | Only with `encoding = "protobuf"`, and then required. The `.proto` file that defines `message`, relative to the folder of the project file. Its imports are looked up in its own folder, then among protobuf's well-known types. |
+| `message` | string | none | Only with `encoding = "protobuf"`, and then required. The fully qualified message type, such as `"sensors.v1.Reading"`. |
+| `message_expiry` | duration | none | MQTT 5 only. Whole seconds, from `"1s"` to 4294967295 seconds. How long the broker may keep the message for subscribers that have not received it yet, including a retained message. |
+| `content_type` | string | none | MQTT 5 only. Sent as written, for example `"application/json"`. Must not be empty. |
+| `user_properties` | table of strings | none | MQTT 5 only. Each value is a template string with the same variables as the payload; keys are sent as written, sorted by key. |
+
+`topic`, `payload` and the `user_properties` values are rendered on every tick and can use the field
+values. A message whose topic, payload and MQTT 5 properties together are larger than 1 MiB
+(1,048,576 bytes) is not published and counts as an error; a binary payload counts with the size of
+its bytes. An MQTT 5 broker that announces a smaller
+maximum packet size lowers this limit to that size minus 16 bytes.
+
+```toml
+messages = [
+    { topic = "office/{{ device_id }}/state", payload = '{"co2": {{ co2 | round | int }}}', message_expiry = "5m", content_type = "application/json", user_properties = { room = "{{ room }}" } },
+]
+```
+
+With `mqtt_version = "3.1.1"`, a template that sets `message_expiry`, `content_type` or
+`user_properties` has a problem, and its devices cannot start.
+
+### Availability
+
+With `availability`, an instance publishes `online` to the topic when it connects, and registers
+`offline` as its Last Will. Both messages are QoS 1 and retained, whatever the template's `qos` and
+`retain`. A graceful stop publishes `offline` itself. Without `availability`, an instance publishes no
+status messages and sets no Last Will. See [Availability and Last Will](/docs/concepts/availability).
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | Can use params, `device_id`, `index` and `template_id`, but not field values or time. Must render to a non-empty topic without `+` or `#`. |
+| `online` | string | required | Published when the instance connects. Plain text, not a template. |
+| `offline` | string | required | The Last Will, and what a graceful stop publishes. Plain text, not a template. |
+| `will_delay` | duration | none | MQTT 5 only. Whole seconds. The broker waits this long before it publishes the Last Will, and does not publish it if the instance reconnects in time. Must not be longer than the broker's `session_expiry`, which is `"0s"` by default, so also set `session_expiry` to at least `will_delay`. |
+
+### Fields
+
+`fields` maps a field name to a field table: a generator with its parameters, and optionally a unit
+and a readable name. The field name becomes a template variable that holds the field's current
+value.
+
+```toml
+[[templates]]
+id = "door"
+messages = [{ topic = "door/{{ device_id }}", payload = '{"state": "{{ state }}"}' }]
+fields.state = { generator = "sequence", values = ["open", "closed"] }
+```
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `generator` | string | required | The kind of generator. Its parameters go in the same table. See [Generators](/docs/reference/generators). |
+| `unit` | string | none | The unit of the value, as free text, such as `"ppm"`, `"°C"` or `"%"`. Must not be empty. |
+| `name` | string | none | A readable name for the field, such as `"CO2"` or `"Temperature"`. Must not be empty. |
+
+`unit` and `name` describe the value. They are not template variables, so topics and payloads
+cannot use them. The [built-in templates](/docs/reference/builtin-templates) set both:
+
+```toml
+fields.co2 = { generator = "random_walk", start = 600, min = 400, max = 2000, step = 15, unit = "ppm", name = "CO2" }
+```
+
+- A field name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
+- Any other key in a field table is an error, as a misspelt generator parameter is.
+
+A field with `generator = "script"` computes its value with a Rhai script, written in the `script`
+key, from a `start` value; see [`script`](/docs/reference/generators#script). A script of several
+lines reads best as a field section:
+
+```toml
+[templates.fields.temperature]
+generator = "script"
+start = 20.0
+script = '''
+if state.heating == true { value + 0.2 } else { value - 0.1 }
+'''
+```
+
+### Subscriptions
+
+Each `[[templates.subscriptions]]` entry subscribes every instance of the template to a topic filter
+and runs a script for every message that arrives on it. See
+[Scripts and commands](/docs/concepts/scripts#subscriptions) for what the script sees and can do.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `topic` | template string | required | The topic filter. Can use params, `device_id`, `index` and `template_id`, like the availability topic. Must render to a valid MQTT topic filter: not empty, `#` only as the whole last level (`a/#`), `+` only as a whole level (`a/+/b`). |
+| `qos` | integer | `0` | QoS of the subscription: `0`, `1` or `2`. |
+| `script` | string | required | A Rhai script. Must compile, and must not be empty. |
+
+```toml
+[[templates.subscriptions]]
+topic = "cmd/{{ device_id }}/heating"
+qos = 1
+script = '''
+state.heating = payload == "ON";
+publish("state/" + device_id + "/heating", payload);
+'''
+```
+
+An instance subscribes every time it connects, before it publishes its availability `online`.
+Replies a script publishes use the template's `qos` and `retain`. Validation counts subscriptions
+from 1, as in `subscriptions[1].topic`.
+
+## Devices
+
+Each `[[devices]]` entry runs `count` instances of a template. Every instance is one simulated sensor
+with its own MQTT connection.
+
+| Key | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `id` | string | required | Unique among the devices. This is the ID `senzor-cli run --only` takes. |
+| `template` | string | required | The ID of a template in this file or of a built-in template. |
+| `count` | integer | `1` | Number of instances. At least 1. |
+| `instance_id` | template string | `"{{ id }}"` when `count` is 1, otherwise `"{{ id }}-{{ index }}"` | The ID of each instance. See [Instance IDs](#instance-ids). |
+| `params` | table of values | empty | Extra template variables for this device's instances, such as a room name. |
+| `autostart` | boolean | `true` | Whether the device starts when the GUI opens the project, when `senzor-cli run` runs without `--only`, and when `senzor-cli mcp` or the MCP tool `open_project` opens the project (unless `--no-autostart`). |
+| `interval` | duration | the template's `interval` | Overrides the template's interval for this device. Greater than 0. |
+| `fields` | table of tables | empty | Per-device changes to the template's fields, a field's `script` and `start` included. See [Field overrides](#field-overrides). |
+
+```toml
+[[devices]]
+id = "office"
+template = "office-air"
+count = 5
+params = { room = "office", floor = 3 }
+autostart = false
+interval = "5s"
+fields.co2 = { start = 1200 }
+```
+
+Rules for `params`:
+
+- A param name must not be one of the [reserved names](/docs/reference/template-variables#reserved-names).
+- A param must not have the same name as one of the template's fields.
+- Every variable the template uses must exist. A template that uses `{{ room }}` needs a `room`
+  param on every device that uses it.
+
+### Instance IDs
+
+`instance_id` is rendered once per instance. It can use the device's `id`, the instance's `index`
+(0, 1, 2, …) and the device's params.
+
+| Device | Instance IDs |
+| --- | --- |
+| `id = "kitchen"` | `kitchen` |
+| `id = "office"`, `count = 3` | `office-0`, `office-1`, `office-2` |
+| `id = "office"`, `count = 2`, `instance_id = "{{ room }}-{{ index }}"`, `params = { room = "lab" }` | `lab-0`, `lab-1` |
+
+The rendered IDs must not be empty, must differ from each other, and must not be used by an instance
+of another device. The instance ID is what templates see as `device_id`, and it is part of the MQTT
+client ID.
+
+### Field overrides
+
+`fields` in a device changes the template's fields for this device only. Each key must be a field of
+the template.
+
+- **Without `generator`**, the keys are merged into the template's field. The generator stays the
+  same and only the listed keys change, `unit` and `name` included:
+
+  ```toml
+  fields.co2 = { start = 1200 }
+  ```
+
+- **With `generator`**, the override replaces the generator and all its parameters. Give every
+  parameter the new generator needs. The field keeps the template's `unit` and `name` unless the
+  override sets them too:
+
+  ```toml
+  fields.co2 = { generator = "constant", value = 2500 }
+  ```
+
+The result must be a valid field, with the same rules as in a template. An override cannot remove
+the template's `unit` or `name`.
+
+## Editor support
+
+Senzor publishes a [JSON Schema](https://json-schema.org/) of the project file at
+`https://senzor.kankaj.cz/schema/project.json`. Editors that check TOML against a schema use it to
+complete keys, show what each one means and mark unknown keys and wrong types as you type, before
+Senzor validates the file.
+
+To use it, put this line at the very top of the project file:
+
+```toml
+#:schema https://senzor.kankaj.cz/schema/project.json
+```
+
+[Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml)
+in Visual Studio Code, and other editors built on [Taplo](https://taplo.tamasfe.dev/), read that
+line. Senzor keeps it as the first line when it saves the project, like your other comments. The schema checks the shape of the file only: references between templates and
+devices, and the other problems in the [validation errors reference](/docs/reference/validation-errors),
+are found by Senzor. Without network access, write the schema to a file with
+[`senzor-cli schema`](/docs/reference/cli#schema) and point the line at that file's path.

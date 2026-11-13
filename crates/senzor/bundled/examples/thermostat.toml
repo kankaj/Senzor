@@ -1,0 +1,75 @@
+# A thermostat that takes commands. The room warms while it heats and cools while it does not.
+# Send a setpoint to senzor/<instance>/set/setpoint, as a number (22.5) or as JSON
+# ({"setpoint": 22.5}), and OFF or ON to senzor/<instance>/set/mode. Each command is answered on
+# senzor/<instance>/ack. Scripts are written in Rhai: https://senzor.kankaj.cz/docs/concepts/scripts
+[broker]
+host = "localhost"
+port = 1883
+
+[[templates]]
+id = "thermostat"
+interval = "5s"
+availability = { topic = "senzor/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/state"
+payload = '{"temperature": {{ temperature | round(2) }}, "setpoint": {{ setpoint }}, "mode": "{{ mode }}", "heating": {{ heating }}}'
+
+# The setpoint of the last command, or else the device's `target` param.
+[templates.fields.setpoint]
+generator = "script"
+start = 21
+script = "state.setpoint ?? params.target"
+unit = "°C"
+name = "Setpoint"
+
+[templates.fields.mode]
+generator = "script"
+start = "heat"
+script = 'state.mode ?? "heat"'
+name = "Mode"
+
+# Heats while the mode is "heat" and the room is colder than the setpoint.
+[templates.fields.heating]
+generator = "script"
+start = false
+script = '''
+fields.mode == "heat" && fields.temperature < fields.setpoint
+'''
+name = "Heating"
+
+[templates.fields.temperature]
+generator = "script"
+start = 19
+noise = 0.02
+script = '''
+if fields.heating == true { value + 0.15 } else { value - 0.05 }
+'''
+unit = "°C"
+name = "Temperature"
+
+[[templates.subscriptions]]
+topic = "senzor/{{ device_id }}/set/setpoint"
+qos = 1
+script = '''
+let setpoint = if type_of(json) == "map" { json.setpoint } else { json };
+if type_of(setpoint) == "f64" {
+    state.setpoint = clamp(setpoint, 5.0, 30.0);
+    publish("senzor/" + device_id + "/ack", `setpoint ${state.setpoint}`);
+} else {
+    publish("senzor/" + device_id + "/ack", "setpoint must be a number");
+}
+'''
+
+[[templates.subscriptions]]
+topic = "senzor/{{ device_id }}/set/mode"
+qos = 1
+script = '''
+state.mode = if payload == "OFF" { "off" } else { "heat" };
+publish("senzor/" + device_id + "/ack", "mode " + state.mode);
+'''
+
+[[devices]]
+id = "living-room"
+template = "thermostat"
+params = { target = 21.5 }

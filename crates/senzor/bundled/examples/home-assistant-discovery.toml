@@ -1,0 +1,65 @@
+# Two devices that appear in Home Assistant by themselves: an air sensor and a door contact.
+# Both templates turn on MQTT Discovery, so each instance becomes a Home Assistant device with one
+# entity per field.
+[broker]
+host = "localhost"
+port = 1883
+
+[[templates]]
+id = "air-sensor"
+interval = "30s"
+home_assistant = true
+availability = { topic = "senzor/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/state"
+payload = '{"co2": {{ co2 | round | int }}, "temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}}'
+
+[templates.fields.co2]
+generator = "random_walk"
+start = 650
+min = 400
+max = 2500
+step = 20
+unit = "ppm"
+name = "CO2"
+
+[templates.fields.temperature]
+generator = "sine"
+center = 22
+amplitude = 1.5
+period = "8h"
+unit = "°C"
+name = "Temperature"
+
+[templates.fields.humidity]
+generator = "random_walk"
+start = 45
+min = 25
+max = 70
+step = 1
+unit = "%"
+name = "Humidity"
+
+[[templates]]
+id = "door-contact"
+interval = "10s"
+home_assistant = true
+availability = { topic = "senzor/{{ device_id }}/status", online = "online", offline = "offline" }
+
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/contact"
+payload = '{"open": {{ open }}}'
+
+[templates.fields.open]
+generator = "sequence"
+values = [false, false, false, true, true, false]
+name = "Door"
+
+[[devices]]
+id = "living_room"
+template = "air-sensor"
+
+[[devices]]
+id = "front_door"
+template = "door-contact"

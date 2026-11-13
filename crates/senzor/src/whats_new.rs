@@ -4,8 +4,9 @@
 
 use crate::i18n::{self, Language};
 
-/// The changelog the window was built with.
-const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+/// The changelog the window was built with: the crate's copy of the repository's `CHANGELOG.md`
+/// (dev/crate-files.sh writes it).
+const CHANGELOG: &str = include_str!("../CHANGELOG.md");
 
 /// The Highlights of `CHANGELOG.md` in Czech, laid out like it.
 const CHANGELOG_CS: &str = include_str!("../locales/cs/whats-new.md");

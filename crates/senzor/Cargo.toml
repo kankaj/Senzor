@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+categories = ["simulation", "gui", "development-tools::testing"]
 
 [features]
 # The `testing` module: helpers that drive the whole window headlessly, for `tests/gui.rs`.

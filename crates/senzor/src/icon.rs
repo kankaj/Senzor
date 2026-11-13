@@ -7,11 +7,13 @@ use eframe::egui::IconData;
 /// window to its menu entry and icon.
 pub const APP_ID: &str = "cz.kankaj.Senzor";
 
+/// The icons are the crate's copies of `assets/icon/` (dev/crate-files.sh writes them).
+///
 /// macOS shows the icon in the Dock as it is, so it gets the variant drawn on Apple's grid.
 #[cfg(target_os = "macos")]
-const PNG: &[u8] = include_bytes!("../../../assets/icon/senzor-macos-1024.png");
+const PNG: &[u8] = include_bytes!("../bundled/icon/senzor-macos-1024.png");
 #[cfg(not(target_os = "macos"))]
-const PNG: &[u8] = include_bytes!("../../../assets/icon/senzor-256.png");
+const PNG: &[u8] = include_bytes!("../bundled/icon/senzor-256.png");
 
 /// The icon of the window: the taskbar, Alt+Tab, and the Dock on macOS. Installed packages
 /// show the icon files from `assets/icon/` instead.
