@@ -43,6 +43,9 @@ jobs:
         run: cargo clippy -p senzor --examples --features screenshots -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      # What crates.io would get (crates.yml publishes it): each crate builds from its own folder.
+      - name: Package for crates.io
+        run: cargo package --workspace --exclude senzor-testkit --locked
       - name: Release scripts
         run: |
           dev/release-check.test.sh
@@ -53,6 +56,8 @@ jobs:
           dev/winget.test.sh
           dev/msix-layout.test.sh
           dev/docker-image.test.sh
+          dev/crate-files.test.sh
+          dev/crate-files.sh --check
           dev/release-check.sh
 
       # The ignored tests need the Mosquitto brokers in dev/compose.yaml (see dev/README.md).

@@ -72,7 +72,13 @@ Mount the folder with your project at `/work`:
 docker run --rm -v "$PWD:/work" ghcr.io/kankaj/senzor-cli:1 run project.toml
 ```
 
-We are working on publishing Flatpak packages, publishing to crates.io, and adding packages to the
+With Rust installed, Cargo builds both from crates.io:
+
+```bash
+cargo install senzor-cli senzor
+```
+
+We are working on publishing Flatpak packages and adding packages to the
 AUR as soon as it accepts new maintainers again. Every platform, Linux, macOS and Windows on x86_64
 and ARM, has downloads in the [latest release](https://github.com/kankaj/Senzor/releases/latest).
 [Installation](https://senzor.kankaj.cz/docs/installation) in the documentation has them all,

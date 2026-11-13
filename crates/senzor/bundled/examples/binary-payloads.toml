@@ -1,0 +1,53 @@
+# One climate sensor that publishes the same reading three ways, as bytes instead of text:
+# a packed frame built from hex digits, CBOR and protobuf. Each payload is rendered as text first,
+# then encoded; the message log shows the bytes in hex. Protobuf reads proto/sensor.proto, next
+# to this file. More: https://senzor.kankaj.cz/docs/recipes/binary-payloads
+[broker]
+host = "localhost"
+port = 1883
+
+[[templates]]
+id = "climate"
+interval = "5s"
+
+# A 5-byte frame: version 1, temperature in tenths of a degree (signed, big-endian) and humidity
+# in percent (unsigned, big-endian).
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/frame"
+encoding = "hex"
+payload = "01 {{ (temperature * 10) | i16be }} {{ humidity | u16be }}"
+
+# The same reading as CBOR: integers stay integers, numbers with a fraction stay floats.
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/cbor"
+encoding = "cbor"
+payload = '{"temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}}'
+
+# And as a protobuf message of proto/sensor.proto, written in protobuf's JSON mapping.
+[[templates.messages]]
+topic = "senzor/{{ device_id }}/proto"
+encoding = "protobuf"
+proto = "proto/sensor.proto"
+message = "sensors.v1.Reading"
+payload = '{"device": "{{ device_id }}", "temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}, "timestampMs": "{{ now_ms }}"}'
+
+[templates.fields.temperature]
+generator = "sine"
+center = 21.5
+amplitude = 2
+period = "10m"
+unit = "°C"
+name = "Temperature"
+
+[templates.fields.humidity]
+generator = "random_walk"
+start = 45
+min = 30
+max = 70
+step = 1
+unit = "%"
+name = "Humidity"
+
+[[devices]]
+id = "climate"
+template = "climate"

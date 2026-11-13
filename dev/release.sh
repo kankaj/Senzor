@@ -41,9 +41,14 @@ awk -v v="$version" '
     inside && !done && /^version *=/ { print "version = \"" v "\""; done = 1; next }
     { print }
 ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
+# The workspace's own crates depend on each other at exactly this version on crates.io.
+sed -i.bak -E "s/^(senzor-(core|mcp) = \{ path = \"[^\"]+\", version = \"=)[^\"]+(\" \})$/\1$version\3/" Cargo.toml \
+    && rm Cargo.toml.bak
 if [[ $version == "$base" ]]; then
     today=$(date +%F)
     sed -i.bak "s/^## \[${base//./\\.}\] - Unreleased$/## [$base] - $today/" CHANGELOG.md && rm CHANGELOG.md.bak
+    # The window's crate reads its own copy (dev/crate-files.sh), which CI checks.
+    cp CHANGELOG.md crates/senzor/CHANGELOG.md
     # The docs site keeps this minor version's docs in its own folder (website/lib/versions.ts).
     node --input-type=module -e '
         import { readFileSync, writeFileSync } from "node:fs";

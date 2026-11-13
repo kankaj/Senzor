@@ -29,6 +29,8 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   - `cargo clippy --workspace --all-targets -- -D warnings` and
     `cargo clippy -p senzor --examples --features screenshots -- -D warnings`;
   - `cargo fmt --all --check`;
+  - `cargo package --workspace --exclude senzor-testkit` when a manifest, a file a crate
+    embeds or `dev/crate-files.sh` changed (each crate must build from its own folder);
   - in `website/`: `pnpm test`, `pnpm check:links`, `pnpm types:check`, `pnpm build`, when docs
     changed.
 - Tool versions: Rust in `rust-toolchain.toml` (rustup and IDEs read it), Node and pnpm in
@@ -91,7 +93,15 @@ MQTT sensor simulator: a Cargo workspace (`crates/`) with the egui GUI `senzor`,
   `ghcr.yml` runs `dev/docker-image.sh`, which packs the two Linux archives with
   `crates/senzor-cli/Dockerfile` (Debian slim pinned by digest, non-root, no emulation needed)
   and pushes with the workflow's own token. The docs job (`publish-docs.yml`) is a
-  publish job too, so a failing channel never holds it back.
+  publish job too, so a failing channel never holds it back. crates.io gets `senzor-core`,
+  `senzor-mcp`, `senzor` and `senzor-cli` (`crates.yml`, `cargo publish --workspace`, secret
+  `CARGO_REGISTRY_TOKEN`, once the variable `CRATES_PUBLISH` is `true`); the crates pin each other
+  at `=X.Y.Z` in the root `Cargo.toml`, which `dev/release.sh` moves.
+- crates.io takes only a crate's own folder, so a crate never embeds a file from outside it: it
+  reads a committed copy (LICENSE and NOTICE in each crate, the MCP reference pages in
+  `crates/senzor-mcp/docs/`, the examples, icons and CHANGELOG in `crates/senzor/`). Edit the
+  original (`examples/`, `website/content/docs/…`, `assets/icon/`, `CHANGELOG.md`), then run
+  `dev/crate-files.sh`; CI fails while a copy differs (`--check`).
 - Pull requests build every archive without publishing (`pr-run-mode = "upload"`); download
   them from the run's artifacts to try a build. The full plan: `docs/release-plan.md` (local).
 - Builds are unsigned for now. Windows signing will come through the SignPath Foundation; there

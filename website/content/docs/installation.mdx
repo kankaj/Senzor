@@ -54,9 +54,25 @@ Inside the container, `localhost` is the container itself, so a broker on your m
 `localhost`. On Linux, add `--network host`; with Docker Desktop, use `host = "host.docker.internal"`
 in the project.
 
+### Rust: crates.io
+
+Both programs are on [crates.io](https://crates.io/crates/senzor), and Cargo builds them on your
+computer:
+
+```bash
+cargo install senzor-cli   # the headless runner
+cargo install senzor       # the window
+```
+
+You need [Rust](https://www.rust-lang.org/tools/install) 1.99 or later and a C compiler (`gcc` or
+`clang`; on Windows, the Visual Studio Build Tools that the Rust installer offers). Cargo puts the
+programs into `~/.cargo/bin`, which the Rust installer adds to your `PATH`. On Linux the window
+needs the same libraries as the [downloads](#from-the-downloads) to run; building needs no other
+packages.
+
 ### Linux
 
-We are working on publishing Flatpak packages, publishing to crates.io, and adding Arch Linux
+We are working on publishing Flatpak packages, and adding Arch Linux
 packages in the AUR (`senzor-bin` and `senzor-cli-bin`) as soon as the AUR accepts new maintainers
 again. Until then, use the [downloads below](#from-the-downloads), or for `senzor-cli` the
 [Docker image](#docker-senzor-cli).
@@ -139,6 +155,7 @@ Microsoft Store updates its copy by itself. To update:
 ```bash
 brew upgrade --cask senzor && brew upgrade senzor-cli   # Homebrew
 docker pull ghcr.io/kankaj/senzor-cli:1                 # Docker
+cargo install senzor senzor-cli                         # crates.io: builds the newer version
 ```
 
 From the downloads, install the new release over the old one: the MSI replaces the installed
@@ -171,7 +188,8 @@ settings stay in one file until you delete it; see
 
 ## Building from source
 
-You need [Rust](https://www.rust-lang.org/tools/install) installed with rustup: the repository
+To build a released version, use [crates.io](#rust-cratesio). To build the code in the
+repository, you need [Rust](https://www.rust-lang.org/tools/install) installed with rustup: the repository
 names the Rust version it is built with in `rust-toolchain.toml`, and rustup installs that version
 the first time you build. In a clone of the [Senzor repository](https://github.com/kankaj/Senzor),
 run:

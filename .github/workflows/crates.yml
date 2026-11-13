@@ -1,0 +1,48 @@
+# Publishes a release to crates.io: senzor-core and senzor-mcp (the libraries), then senzor (the
+# window) and senzor-cli, so `cargo install senzor senzor-cli` builds them. `cargo publish
+# --workspace` takes them in dependency order and leaves senzor-testkit (publish = false) out;
+# each crate carries copies of the files it needs from outside its folder (dev/crate-files.sh),
+# and CI packages them all on every push (`cargo package`). dist runs this as a publish job once
+# the GitHub Release exists (dist-workspace.toml); a pre-release leaves crates.io alone.
+#
+# It signs in with the secret CARGO_REGISTRY_TOKEN: a crates.io API token of the crates' owner
+# with the scopes publish-new and publish-update, limited to the crates senzor*. The job waits for
+# the repository variable CRATES_PUBLISH = true, so a release does not fail before the token
+# exists. crates.io keeps a version for good (it can only be yanked), so a run that fails halfway
+# is finished by hand: `cargo publish -p <crate>` from the tag for each crate still missing.
+#
+# Run it by hand (Actions, crates.io, Run workflow) with a branch or tag to publish that commit:
+# 1.0.0 came out before its crates could be packaged, so it was published from the branch
+# crates-1.0.0, the tag plus the packaging changes.
+name: crates.io
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch or tag to publish, such as crates-1.0.0
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    # A manual run has no plan.
+    if: ${{ !fromJson(inputs.plan || '{}').announcement_is_prerelease && vars.CRATES_PUBLISH == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release's tag, or the ref given to a manual run.
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      # rustup on the runner installs the Rust of rust-toolchain.toml on first use.
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --workspace --locked

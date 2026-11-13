@@ -5,6 +5,9 @@ use serde::Deserialize;
 use super::file::TemplateSpec;
 use super::model::SharedTemplates;
 
+/// The built-in templates as TOML, as they ship: what `senzor-mcp` offers agents to read.
+pub const BUILTIN_TOML: &str = include_str!("builtin.toml");
+
 #[derive(Deserialize)]
 struct BuiltinFile {
     templates: Vec<TemplateSpec>,
@@ -17,8 +20,7 @@ struct BuiltinFile {
 pub fn builtin_templates() -> &'static [TemplateSpec] {
     static TEMPLATES: OnceLock<Vec<TemplateSpec>> = OnceLock::new();
     TEMPLATES.get_or_init(|| {
-        let file: BuiltinFile =
-            toml::from_str(include_str!("builtin.toml")).expect("builtin.toml is valid");
+        let file: BuiltinFile = toml::from_str(BUILTIN_TOML).expect("builtin.toml is valid");
         file.templates
     })
 }

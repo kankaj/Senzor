@@ -49,11 +49,12 @@ global-artifacts-jobs = ["./macos-app", "./docs-archive", "./msix"]
 # 1.0.0, so it is off, and so is `tap`, which only that job reads; winget gets a pull request per
 # package in microsoft/winget-pkgs (winget.yml, with the WINGET_TOKEN secret); and the Microsoft
 # Store gets the MSIX bundle (msstore.yml, once the MSSTORE_PUBLISH variable is true); and
-# ghcr.io gets the senzor-cli container image, built from the Linux archives (ghcr.yml).
-publish-jobs = ["./publish-docs", "./homebrew-tap", "./winget", "./msstore", "./ghcr"]
+# ghcr.io gets the senzor-cli container image, built from the Linux archives (ghcr.yml); and
+# crates.io gets every published crate (crates.yml, once the CRATES_PUBLISH variable is true).
+publish-jobs = ["./publish-docs", "./homebrew-tap", "./winget", "./msstore", "./ghcr", "./crates"]
 # What the custom jobs may do beyond reading: the app job attests its zips as dist does its files;
 # the docs job pushes the `release` branch; the image job pushes to the repository's packages.
-github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-tap" = { contents = "read" }, "winget" = { contents = "read" }, "msix" = { contents = "read" }, "msstore" = { contents = "read" }, "ghcr" = { contents = "read", packages = "write" } }
+github-custom-job-permissions = { "macos-app" = { contents = "read", id-token = "write", attestations = "write" }, "docs-archive" = { contents = "read", id-token = "write", attestations = "write" }, "publish-docs" = { contents = "write" }, "homebrew-tap" = { contents = "read" }, "winget" = { contents = "read" }, "msix" = { contents = "read" }, "msstore" = { contents = "read" }, "ghcr" = { contents = "read", packages = "write" }, "crates" = { contents = "read" } }
 
 [dist.github-custom-runners]
 # Linux on the older Ubuntu, so the binaries need only glibc 2.35; ARM natively on GitHub's ARM

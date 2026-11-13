@@ -10,6 +10,7 @@ anglicky.
 ### Highlights
 
 - `senzor-cli` je k dispozici i jako image kontejneru, `ghcr.io/kankaj/senzor-cli`, pro Linux na x86_64 i ARM.
+- Okno i `senzor-cli` jsou na crates.io: `cargo install senzor senzor-cli`.
 
 ## [1.0.0]
 

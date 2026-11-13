@@ -1,10 +1,14 @@
 [package]
 name = "senzor-mcp"
+description = "The MCP server of Senzor, an MQTT sensor simulator: lets AI agents edit and run a project. Shared by the senzor window and senzor-cli; no stable API of its own."
 version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 edition.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+categories = ["simulation", "development-tools"]
 
 [dependencies]
 axum.workspace = true

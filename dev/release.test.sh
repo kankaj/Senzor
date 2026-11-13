@@ -18,7 +18,7 @@ repo() {
     cp "$here/release.sh" "$here/release-check.sh" "$dir/dev/"
     cp "$here/../website/lib/versions.ts" "$dir/website/lib/"
     printf '{\n  "versions": []\n}\n' > "$dir/website/public/versions.json"
-    printf '[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.9.0"\nedition = "2024"\n\n[dependencies]\nversion = "9"\n' \
+    printf '[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.9.0"\nedition = "2024"\n\n[workspace.dependencies]\nsenzor-core = { path = "crates/senzor-core", version = "=0.9.0" }\nsenzor-mcp = { path = "crates/senzor-mcp", version = "=0.9.0" }\n\n[dependencies]\nversion = "9"\n' \
         > "$dir/Cargo.toml"
     printf '# Changelog\n\n## [1.0.0] - Unreleased\n\n### Highlights\n\n- New.\n\n## [0.9.0] - 2026-01-01\n\n### Highlights\n\n- Old.\n' \
         > "$dir/CHANGELOG.md"
@@ -47,8 +47,13 @@ repo "$work/a"
 if out=$(answers | run "$work/a" 1.0.0 2>&1); then ok "a release runs"; else bad "a release runs: $out"; fi
 grep -q '^version = "1.0.0"' "$work/a/Cargo.toml" && ok "the version is set" || bad "the version is set"
 grep -q '^version = "9"' "$work/a/Cargo.toml" && ok "other version keys stay" || bad "other version keys stay"
+grep -q '^senzor-core = { path = "crates/senzor-core", version = "=1.0.0" }$' "$work/a/Cargo.toml" \
+    && grep -q '^senzor-mcp = { path = "crates/senzor-mcp", version = "=1.0.0" }$' "$work/a/Cargo.toml" \
+    && ok "the crates.io pins of the workspace's own crates follow" || bad "the crates.io pins of the workspace's own crates follow: $(cat "$work/a/Cargo.toml")"
 grep -qE "^## \[1\.0\.0\] - $(date +%F)$" "$work/a/CHANGELOG.md" && ok "the section is dated today" \
     || bad "the section is dated today"
+cmp -s "$work/a/CHANGELOG.md" "$work/a/crates/senzor/CHANGELOG.md" && ok "the window's copy of the changelog follows" \
+    || bad "the window's copy of the changelog follows"
 grep -q '"minor": "1.0"' "$work/a/website/public/versions.json" && grep -q '"release": "1.0.0"' "$work/a/website/public/versions.json" \
     && ok "the release joins the docs versions" || bad "the release joins the docs versions: $(cat "$work/a/website/public/versions.json")"
 [[ $(git -C "$work/a" log -1 --format=%s) == "release: 1.0.0" ]] && ok "the release commit" || bad "the release commit"

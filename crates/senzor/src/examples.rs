@@ -57,65 +57,66 @@ impl Example {
     }
 }
 
-/// Every example, the simplest first.
+/// Every example, the simplest first. The texts are the crate's copies of the repository's
+/// `examples/` (dev/crate-files.sh writes them), as crates.io takes only this folder.
 pub const EXAMPLES: [Example; 8] = [
     Example {
         name: "Quick start",
         title: || t!("examples-quick-start"),
         description: || t!("examples-quick-start-summary"),
-        text: include_str!("../../../examples/quick-start.toml"),
+        text: include_str!("../bundled/examples/quick-start.toml"),
         files: &[],
     },
     Example {
         name: "IKEA Zigbee2MQTT",
         title: || t!("examples-ikea"),
         description: || t!("examples-ikea-summary"),
-        text: include_str!("../../../examples/ikea-zigbee2mqtt.toml"),
+        text: include_str!("../bundled/examples/ikea-zigbee2mqtt.toml"),
         files: &[],
     },
     Example {
         name: "Home Assistant Statestream",
         title: || t!("examples-statestream"),
         description: || t!("examples-statestream-summary"),
-        text: include_str!("../../../examples/home-assistant-statestream.toml"),
+        text: include_str!("../bundled/examples/home-assistant-statestream.toml"),
         files: &[],
     },
     Example {
         name: "Home Assistant Discovery",
         title: || t!("examples-discovery"),
         description: || t!("examples-discovery-summary"),
-        text: include_str!("../../../examples/home-assistant-discovery.toml"),
+        text: include_str!("../bundled/examples/home-assistant-discovery.toml"),
         files: &[],
     },
     Example {
         name: "Thermostat",
         title: || t!("examples-thermostat"),
         description: || t!("examples-thermostat-summary"),
-        text: include_str!("../../../examples/thermostat.toml"),
+        text: include_str!("../bundled/examples/thermostat.toml"),
         files: &[],
     },
     Example {
         name: "Binary payloads",
         title: || t!("examples-binary"),
         description: || t!("examples-binary-summary"),
-        text: include_str!("../../../examples/binary-payloads.toml"),
+        text: include_str!("../bundled/examples/binary-payloads.toml"),
         files: &[(
             "proto/sensor.proto",
-            include_str!("../../../examples/proto/sensor.proto"),
+            include_str!("../bundled/examples/proto/sensor.proto"),
         )],
     },
     Example {
         name: "Fleet",
         title: || t!("examples-fleet"),
         description: || t!("examples-fleet-summary"),
-        text: include_str!("../../../examples/fleet.toml"),
+        text: include_str!("../bundled/examples/fleet.toml"),
         files: &[],
     },
     Example {
         name: "Showcase",
         title: || t!("examples-showcase"),
         description: || t!("examples-showcase-summary"),
-        text: include_str!("../../../examples/showcase.toml"),
+        text: include_str!("../bundled/examples/showcase.toml"),
         files: &[],
     },
 ];

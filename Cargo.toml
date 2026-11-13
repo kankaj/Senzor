@@ -9,10 +9,16 @@ license = "Apache-2.0"
 repository = "https://github.com/kankaj/Senzor"
 homepage = "https://senzor.kankaj.cz"
 authors = ["Jaroslav Kaňka"]
+keywords = ["mqtt", "simulator", "iot", "sensor", "testing"]
+# What `cargo install` from crates.io asks for: the Rust that rust-toolchain.toml pins, the only
+# one Senzor is built and tested with. Change both together.
+rust-version = "1.99"
 
 [workspace.dependencies]
-senzor-core = { path = "crates/senzor-core" }
-senzor-mcp = { path = "crates/senzor-mcp" }
+# On crates.io the crates depend on each other at exactly the workspace's version;
+# dev/release.sh moves these pins with the version.
+senzor-core = { path = "crates/senzor-core", version = "=1.0.0" }
+senzor-mcp = { path = "crates/senzor-mcp", version = "=1.0.0" }
 senzor-testkit = { path = "crates/senzor-testkit" }
 assert_cmd = "2.2.2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }

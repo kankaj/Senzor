@@ -12,12 +12,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Highlights
 
 - `senzor-cli` comes as a container image, `ghcr.io/kankaj/senzor-cli`, for Linux on x86_64 and ARM.
+- The window and `senzor-cli` are on crates.io: `cargo install senzor senzor-cli`.
 
 ### Added
 
 #### Installing
 
 - The container image `ghcr.io/kankaj/senzor-cli`, for `linux/amd64` and `linux/arm64`, which every release now pushes, tagged with its version, its minor and major versions and `latest`. It runs `senzor-cli` as a user other than root, with the project folder mounted at `/work`: `docker run --rm -v "$PWD:/work" ghcr.io/kankaj/senzor-cli:1 run project.toml`. 1.0.0 has an image too. The CI and Docker recipe runs its GitHub Actions job in the image and adds a Docker Compose example.
+- crates.io: `cargo install senzor` and `cargo install senzor-cli` build the window and the headless runner from the published crates (Rust 1.99 or later and a C compiler). `senzor-core` and `senzor-mcp` are published with them, as their libraries, without a stable API of their own.
 
 ## [1.0.0] - 2026-11-11
 

@@ -1,0 +1,86 @@
+# IKEA Zigbee sensors as Zigbee2MQTT publishes them (see zigbee2mqtt.io device pages
+# E2112 VINDSTYRKA and E2013 PARASOLL): state on zigbee2mqtt/<name>, availability as JSON.
+[broker]
+host = "localhost"
+port = 1883
+
+[[templates]]
+id = "ikea-vindstyrka"
+interval = "10s"
+availability = { topic = "zigbee2mqtt/{{ device_id }}/availability", online = '{"state":"online"}', offline = '{"state":"offline"}' }
+
+[[templates.messages]]
+topic = "zigbee2mqtt/{{ device_id }}"
+payload = '{"temperature": {{ temperature | round(1) }}, "humidity": {{ humidity | round | int }}, "pm25": {{ pm25 | round | int }}, "voc_index": {{ voc_index | round | int }}, "linkquality": {{ linkquality | round | int }}}'
+
+[templates.fields.temperature]
+generator = "sine"
+center = 22
+amplitude = 1
+period = "6h"
+noise = 0.1
+
+[templates.fields.humidity]
+generator = "random_walk"
+start = 45
+min = 30
+max = 70
+step = 1
+
+[templates.fields.pm25]
+generator = "random_walk"
+start = 5
+min = 0
+max = 60
+step = 2
+
+[templates.fields.voc_index]
+generator = "random_walk"
+start = 100
+min = 50
+max = 300
+step = 5
+
+[templates.fields.linkquality]
+generator = "uniform"
+min = 90
+max = 160
+
+[[templates]]
+id = "ikea-parasoll"
+interval = "30s"
+availability = { topic = "zigbee2mqtt/{{ device_id }}/availability", online = '{"state":"online"}', offline = '{"state":"offline"}' }
+
+[[templates.messages]]
+topic = "zigbee2mqtt/{{ device_id }}"
+payload = '{"contact": {{ contact | tojson }}, "battery": {{ battery | round | int }}, "voltage": {{ voltage | round | int }}, "linkquality": {{ linkquality | round | int }}}'
+
+[templates.fields.contact]
+generator = "sequence"
+values = [true, true, false, true]
+
+[templates.fields.battery]
+generator = "constant"
+value = 87
+
+[templates.fields.voltage]
+generator = "uniform"
+min = 2900
+max = 3000
+
+[templates.fields.linkquality]
+generator = "uniform"
+min = 60
+max = 140
+
+[[devices]]
+id = "living_room_air"
+template = "ikea-vindstyrka"
+instance_id = "{{ id }}"
+autostart = true
+
+[[devices]]
+id = "front_door"
+template = "ikea-parasoll"
+instance_id = "{{ id }}"
+autostart = true

@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+categories = ["simulation", "command-line-utilities", "development-tools::testing"]
 
 [dependencies]
 clap.workspace = true

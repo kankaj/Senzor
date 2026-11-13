@@ -61,7 +61,9 @@ to the tap together with senzor-cli's formula, and `winget.sh` and
 `winget-submit.sh` write its winget manifests and submit them to winget-pkgs; `msix-layout.sh` lays
 out the window's MSIX package for the Microsoft Store (the release workflow packs it on Windows,
 `.github/workflows/msix.yml`); `docker-image.sh` builds the senzor-cli container image from the
-two Linux archives and pushes it to ghcr.io (`.github/workflows/ghcr.yml`). The `*.test.sh`
+two Linux archives and pushes it to ghcr.io (`.github/workflows/ghcr.yml`); `crate-files.sh`
+copies into each crate the files it embeds from outside its folder, for crates.io (`--check`
+fails while a copy differs). The `*.test.sh`
 scripts test them in throwaway folders and repositories, on any system (`docker-image.test.sh`
 needs Docker with buildx, and builds without pushing); CI runs them all.
 
