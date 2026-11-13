@@ -5,6 +5,12 @@
 # people). dist runs this as a publish job once the GitHub Release exists (dist-workspace.toml); a
 # pre-release leaves winget alone. Needs WINGET_TOKEN: a classic token of the fork's owner with
 # the public_repo scope.
+#
+# A release submits only while the repository variable WINGET_PUBLISH is true: a package's first
+# pull request ("New package") waits for people to review it, and until winget-pkgs has the
+# package every later release would open another "New package" pull request beside it. So the
+# variable stays unset until the first ones are merged. Then set it, or submit the newest release
+# by hand (Actions, winget, Run workflow, with its tag): a manual run ignores the variable.
 name: winget
 
 on:
@@ -13,11 +19,21 @@ on:
       plan:
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to submit, such as v1.0.1
+        required: true
+        type: string
+
+env:
+  # The tag that started the release, or the one given to a manual run.
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   winget:
     name: Submit to winget
-    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    if: ${{ inputs.tag != '' || (vars.WINGET_PUBLISH == 'true' && !fromJson(inputs.plan || '{}').announcement_is_prerelease) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,7 +42,6 @@ jobs:
       - name: Write the manifests
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'senzor*-pc-windows-msvc.*.sha256' --dir sums
           sha() { cut -d' ' -f1 "sums/$1.sha256"; }
@@ -37,5 +52,4 @@ jobs:
       - name: Submit to winget-pkgs
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: dev/winget-submit.sh out "${TAG#v}" Kankaj.Senzor Kankaj.SenzorCLI
