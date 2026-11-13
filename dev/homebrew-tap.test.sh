@@ -15,6 +15,13 @@ check() {
     if eval "$condition"; then ok "$name"; else bad "$name"; fi
 }
 quiet_git() { git -c init.defaultBranch=main -c commit.gpgsign=false "$@" > /dev/null 2>&1; }
+# The script runs as on a GitHub runner: no git identity in any config, so it must bring its own,
+# for the commit and for the rebase when the first push is rejected.
+mkdir "$work/home"
+run_tap() {
+    env -u EMAIL HOME="$work/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+        "$here/homebrew-tap.sh" "$@"
+}
 
 # The tap on GitHub, and the job's checkout of it.
 quiet_git init --bare "$work/tap.git"
@@ -34,7 +41,7 @@ quiet_git -C "$work/seed" push origin HEAD:main
 echo 'cask "senzor" do end' > "$work/senzor.rb"
 echo 'class SenzorCli < Formula; end' > "$work/senzor-cli.rb"
 
-if "$here/homebrew-tap.sh" "$work/job" "$work/senzor.rb" "$work/senzor-cli.rb" 1.0.1 > "$work/log" 2>&1; then
+if run_tap "$work/job" "$work/senzor.rb" "$work/senzor-cli.rb" 1.0.1 > "$work/log" 2>&1; then
     ok "it pushes"
 else
     bad "it pushes: $(cat "$work/log")"
@@ -49,7 +56,7 @@ check "the other commit stays" "git -C '$work/after' log --format=%s | grep -qx 
 
 before=$(git -C "$work/after" rev-parse HEAD)
 quiet_git -C "$work/job" pull --rebase
-"$here/homebrew-tap.sh" "$work/job" "$work/senzor.rb" "$work/senzor-cli.rb" 1.0.1 > "$work/log" 2>&1
+run_tap "$work/job" "$work/senzor.rb" "$work/senzor-cli.rb" 1.0.1 > "$work/log" 2>&1
 quiet_git -C "$work/after" pull
 check "an unchanged release adds nothing" "[[ \$(git -C '$work/after' rev-parse HEAD) == '$before' ]]"
 
