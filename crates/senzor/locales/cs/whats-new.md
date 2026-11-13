@@ -5,6 +5,12 @@ stejný nadpis jako v `CHANGELOG.md` a pod `### Highlights` stejný počet bodů
 test `czech_has_the_highlights_of_every_version` to kontroluje. Verze, která tu chybí, se ukáže
 anglicky.
 
+## [1.1.0]
+
+### Highlights
+
+- `senzor-cli` je k dispozici i jako image kontejneru, `ghcr.io/kankaj/senzor-cli`, pro Linux na x86_64 i ARM.
+
 ## [1.0.0]
 
 ### Highlights

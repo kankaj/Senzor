@@ -7,6 +7,18 @@ list the changes in full.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Senzor uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - Unreleased
+
+### Highlights
+
+- `senzor-cli` comes as a container image, `ghcr.io/kankaj/senzor-cli`, for Linux on x86_64 and ARM.
+
+### Added
+
+#### Installing
+
+- The container image `ghcr.io/kankaj/senzor-cli`, for `linux/amd64` and `linux/arm64`, which every release now pushes, tagged with its version, its minor and major versions and `latest`. It runs `senzor-cli` as a user other than root, with the project folder mounted at `/work`: `docker run --rm -v "$PWD:/work" ghcr.io/kankaj/senzor-cli:1 run project.toml`. 1.0.0 has an image too. The CI and Docker recipe runs its GitHub Actions job in the image and adds a Docker Compose example.
+
 ## [1.0.0] - 2026-11-11
 
 The first release.
