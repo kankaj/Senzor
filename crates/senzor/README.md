@@ -8,7 +8,7 @@ for, each with its own connection to your broker. The same project file runs hea
 [`senzor-cli`](https://crates.io/crates/senzor-cli).
 
 ```bash
-cargo install senzor
+cargo install --locked senzor
 senzor
 ```
 

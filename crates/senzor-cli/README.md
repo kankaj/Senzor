@@ -4,7 +4,7 @@ The headless runner of [Senzor](https://senzor.kankaj.cz), an MQTT sensor simula
 of simulated sensors in a terminal, in Docker or in CI, without a window.
 
 ```bash
-cargo install senzor-cli
+cargo install --locked senzor-cli
 senzor-cli validate project.toml
 senzor-cli run project.toml --duration 10m
 ```

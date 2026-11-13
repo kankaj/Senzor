@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use minijinja::value::{Rest, StringInput, ValueKind, ValueOrKwargs};
+use minijinja::value::{Kwargs, Rest, StringInput, ValueKind, ValueOrKwargs};
 use minijinja::{AutoEscape, Environment, ErrorKind, UndefinedBehavior};
 
 use crate::encoding::{Encoder, Encoding, message_encoder_located, to_hex};
@@ -227,10 +227,14 @@ fn string_filter(
     minijinja::filters::string(state, &lowercase_bool(value.clone()))
 }
 
+/// minijinja's `join`, with booleans of the sequence as `true`/`false`; its other arguments
+/// (`attribute`, the separator as `d`) pass through.
 fn join_filter(
     state: &mut minijinja::State,
     value: &minijinja::Value,
     joiner: Option<StringInput<'_>>,
+    attribute: Option<&str>,
+    kwargs: Kwargs,
 ) -> Result<minijinja::Value, minijinja::Error> {
     let value = match (value.kind(), value.try_iter()) {
         (ValueKind::Seq, Ok(items)) => {
@@ -238,7 +242,7 @@ fn join_filter(
         }
         _ => value.clone(),
     };
-    minijinja::filters::join(state, &value, joiner)
+    minijinja::filters::join(state, &value, joiner, attribute, kwargs)
 }
 
 fn format_filter(
@@ -780,6 +784,8 @@ mod tests {
             ("{{ '%s' | format(open) }}", "true"),
             ("{{ open | tojson }}", "true"),
             ("{{ [open, false] | join(',') }}", "true,false"),
+            // minijinja's own arguments of join pass through.
+            ("{{ [open, false] | join(d=';') }}", "true;false"),
         ] {
             let templates = InstanceTemplates::compile(&[message("t", source)], None).unwrap();
             assert_eq!(

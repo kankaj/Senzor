@@ -75,7 +75,7 @@ docker run --rm -v "$PWD:/work" ghcr.io/kankaj/senzor-cli:1 run project.toml
 With Rust installed, Cargo builds both from crates.io:
 
 ```bash
-cargo install senzor-cli senzor
+cargo install --locked senzor-cli senzor
 ```
 
 We are working on publishing Flatpak packages and adding packages to the

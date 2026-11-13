@@ -60,11 +60,16 @@ Both programs are on [crates.io](https://crates.io/crates/senzor), and Cargo bui
 computer:
 
 ```bash
-cargo install senzor-cli   # the headless runner
-cargo install senzor       # the window
+cargo install --locked senzor-cli   # the headless runner
+cargo install --locked senzor       # the window
 ```
 
-You need [Rust](https://www.rust-lang.org/tools/install) 1.99 or later and a C compiler (`gcc` or
+`--locked` builds with the dependency versions Senzor was released and tested with. Without it,
+Cargo takes the newest versions it considers compatible, and a dependency that changed in a minor
+or patch release can break the build: 1.0.0 then fails in `senzor-core`, on `minijinja`.
+
+You need [Rust](https://www.rust-lang.org/tools/install) 1.99 or later (`rustup update` gets the
+latest) and a C compiler (`gcc` or
 `clang`; on Windows, the Visual Studio Build Tools that the Rust installer offers). Cargo puts the
 programs into `~/.cargo/bin`, which the Rust installer adds to your `PATH`. On Linux the window
 needs the same libraries as the [downloads](#from-the-downloads) to run; building needs no other
@@ -155,7 +160,7 @@ Microsoft Store updates its copy by itself. To update:
 ```bash
 brew upgrade --cask senzor && brew upgrade senzor-cli   # Homebrew
 docker pull ghcr.io/kankaj/senzor-cli:1                 # Docker
-cargo install senzor senzor-cli                         # crates.io: builds the newer version
+cargo install --locked senzor senzor-cli                # crates.io: builds the newer version
 ```
 
 From the downloads, install the new release over the old one: the MSI replaces the installed
